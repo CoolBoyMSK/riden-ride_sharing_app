@@ -1,0 +1,54 @@
+import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
+import env from '../config/envConfig.js';
+
+const SALT_ROUNDS = env.SALT_ROUNDS;
+const JWT_ACCESS_SECRET = env.JWT_ACCESS_SECRET;
+const JWT_REFRESH_SECRET = env.JWT_REFRESH_SECRET;
+const JWT_ACCESS_EXPIRES_IN = env.JWT_ACCESS_EXPIRES_IN;
+const JWT_REFRESH_EXPIRES_IN = env.JWT_REFRESH_EXPIRES_IN;
+
+const hashPassword = async (plainPassword) => {
+  return await bcrypt.hash(plainPassword, SALT_ROUNDS);
+};
+
+const comparePasswords = async (plainPassword, hashedPassword) => {
+  return await bcrypt.compare(plainPassword, hashedPassword);
+};
+
+const generateAccessToken = (payload) => {
+  return jwt.sign(payload, JWT_ACCESS_SECRET, {
+    expiresIn: JWT_ACCESS_EXPIRES_IN,
+  });
+};
+
+const verifyAccessToken = (token) => {
+  try {
+    return jwt.verify(token, JWT_ACCESS_SECRET);
+  } catch (err) {
+    return null;
+  }
+};
+
+const generateRefreshToken = (payload) => {
+  return jwt.sign(payload, JWT_REFRESH_SECRET, {
+    expiresIn: JWT_REFRESH_EXPIRES_IN,
+  });
+};
+
+const verifyRefreshToken = (token) => {
+  try {
+    return jwt.verify(token, JWT_REFRESH_SECRET);
+  } catch (err) {
+    return null;
+  }
+};
+
+export {
+  hashPassword,
+  comparePasswords,
+  generateAccessToken,
+  verifyAccessToken,
+  generateRefreshToken,
+  verifyRefreshToken,
+};
