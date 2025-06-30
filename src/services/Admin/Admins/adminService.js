@@ -3,6 +3,7 @@ import {
   findAdminByEmail,
   createAdmin as dalCreateAdmin,
 } from '../../../dal/admin/index.js';
+import { createAdminAccess } from '../../../dal/adminAccess/index.js';
 import { hashPassword } from '../../../utils/auth.js';
 
 export const getAllAdmins = async (resp) => {
@@ -12,7 +13,7 @@ export const getAllAdmins = async (resp) => {
 };
 
 export const createAdmin = async (
-  { name, email, password, profileImg },
+  { name, email, password, profileImg, modules },
   currentAdmin,
   resp,
 ) => {
@@ -22,8 +23,7 @@ export const createAdmin = async (
     return resp;
   }
 
-  const exists = await findAdminByEmail(email);
-  if (exists) {
+  if (await findAdminByEmail(email)) {
     resp.error = true;
     resp.error_message = 'Email already in use';
     return resp;
@@ -38,7 +38,12 @@ export const createAdmin = async (
     type: 'admin',
   });
 
-  const { password: _, ...safe } = newAdmin.toObject();
-  resp.data = safe;
+  await createAdminAccess({ adminId: newAdmin._id, modules });
+
+  const adminObj = newAdmin.toObject();
+  delete adminObj.password;
+  adminObj.modules = modules;
+
+  resp.data = adminObj;
   return resp;
 };
