@@ -1,8 +1,8 @@
 import express from 'express';
+import adminRouter from './admin/index.js';
 
 const router = express.Router();
 
-//router.use('/auth', authRoutes);
-//router.use('/admin', adminRoutes);
+router.use('/admin', adminRouter);
 
 export default router;

@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { ADMIN_ROLES } from '../enums/adminModules.js';
 
 const adminSchema = new mongoose.Schema(
   {
@@ -20,7 +21,7 @@ const adminSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ['super_admin', 'admin'],
+      enum: ADMIN_ROLES,
       default: 'admin',
     },
   },

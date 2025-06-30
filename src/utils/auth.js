@@ -44,6 +44,11 @@ const verifyRefreshToken = (token) => {
   }
 };
 
+const extractToken = (req) => {
+  const h = req.headers.authorization;
+  return h && h.startsWith('Bearer ') ? h.slice(7) : null;
+};
+
 export {
   hashPassword,
   comparePasswords,
@@ -51,4 +56,5 @@ export {
   verifyAccessToken,
   generateRefreshToken,
   verifyRefreshToken,
+  extractToken,
 };

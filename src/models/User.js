@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { USER_TYPES } from '../enums/userRoles.js';
 
 const userSchema = new mongoose.Schema(
   {
@@ -28,6 +29,11 @@ const userSchema = new mongoose.Schema(
       unique: true,
       sparse: true,
     },
+    type: {
+      type: String,
+      enum: USER_TYPES,
+      default: 'user',
+    },
     isEmailVerified: {
       type: Boolean,
       default: false,
@@ -42,6 +48,4 @@ const userSchema = new mongoose.Schema(
   },
 );
 
-const UserModel = mongoose.model('User', userSchema);
-
-export default UserModel;
+export default mongoose.model('User', userSchema);

@@ -42,6 +42,16 @@ const env = {
     process.env.FIREBASE_PRIVATE_KEY,
     'FIREBASE_PRIVATE_KEY',
   ),
+  AWS_REGION: process.env.AWS_REGION,
+  AWS_ACCESS_KEY_ID: required(
+    process.env.AWS_ACCESS_KEY_ID,
+    'AWS_ACCESS_KEY_ID',
+  ),
+  AWS_SECRET_ACCESS_KEY: required(
+    process.env.AWS_SECRET_ACCESS_KEY,
+    'AWS_SECRET_ACCESS_KEY',
+  ),
+  AWS_S3_BUCKET: required(process.env.AWS_S3_BUCKET, 'AWS_S3_BUCKET'),
 };
 
 export default env;
