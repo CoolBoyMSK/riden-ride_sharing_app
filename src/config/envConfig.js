@@ -38,10 +38,10 @@ const env = {
     process.env.FIREBASE_CLIENT_EMAIL,
     'FIREBASE_CLIENT_EMAIL',
   ),
-  FIREBASE_PRIVATE_KEY: required(
-    process.env.FIREBASE_PRIVATE_KEY,
-    'FIREBASE_PRIVATE_KEY',
-  ),
+  // FIREBASE_PRIVATE_KEY: required(
+  //   process.env.FIREBASE_PRIVATE_KEY,
+  //   'FIREBASE_PRIVATE_KEY',
+  // ),
   AWS_REGION: process.env.AWS_REGION,
   AWS_ACCESS_KEY_ID: required(
     process.env.AWS_ACCESS_KEY_ID,
