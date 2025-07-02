@@ -1,9 +1,11 @@
 import express from 'express';
 import { registerRoute } from '../../../utils/registerRoute.js';
 import {
+  confirmAdminPasswordReset,
   getCurrentAdmin,
   loginAdmin,
   refreshAdmin,
+  requestAdminPasswordReset,
 } from '../../../controllers/Admin/Auth/index.controller.js';
 
 const router = express.Router();
@@ -27,4 +29,15 @@ registerRoute({
   get_method: getCurrentAdmin,
 });
 
+registerRoute({
+  router,
+  route: '/password-reset',
+  post_method: requestAdminPasswordReset,
+});
+
+registerRoute({
+  router,
+  route: '/password-reset/confirm',
+  post_method: confirmAdminPasswordReset,
+});
 export default router;

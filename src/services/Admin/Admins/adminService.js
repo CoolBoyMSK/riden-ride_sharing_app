@@ -9,7 +9,7 @@ import {
   createAdminAccess,
   findAdminAccesses,
   upsertAdminAccess,
-} from '../../../dal/adminAccess/index.js';
+} from '../../../dal/admin/adminAccess/index.js';
 import { hashPassword } from '../../../utils/auth.js';
 
 export const getAllAdmins = async (currentAdmin, resp) => {
