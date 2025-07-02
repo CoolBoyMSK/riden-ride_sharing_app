@@ -18,6 +18,7 @@ const seedSuperAdmin = async () => {
         name: 'Super Admin',
         email: 'admin@riden.com',
         password: await hashPassword('supersecure123'),
+        phoneNumber: '+234123456789',
         type: 'super_admin',
       });
 

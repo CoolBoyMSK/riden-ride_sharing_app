@@ -1,8 +1,15 @@
-import { loginService } from '../../../services/Admin/Auth/index.js';
+import {
+  getAdminProfile,
+  loginService,
+  refreshTokens,
+} from '../../../services/Admin/Auth/index.js';
 import { handleResponse } from '../../../utils/handleRespone.js';
-import { validateAdminLogin } from '../../../validations/admin/authValidations.js';
+import {
+  validateAdminLogin,
+  validateRefresh,
+} from '../../../validations/admin/authValidations.js';
 
-const loginAdmin = (req, res) => {
+export const loginAdmin = (req, res) => {
   return handleResponse(
     {
       handler: loginService,
@@ -15,4 +22,26 @@ const loginAdmin = (req, res) => {
   );
 };
 
-export { loginAdmin };
+export const refreshAdmin = (req, res) => {
+  return handleResponse(
+    {
+      handler: refreshTokens,
+      validationFn: validateRefresh,
+      handlerParams: [req.body],
+      successMessage: 'Tokens refreshed successfully',
+    },
+    req,
+    res,
+  );
+};
+
+export const getCurrentAdmin = (req, res) =>
+  handleResponse(
+    {
+      handler: getAdminProfile,
+      handlerParams: [req.user],
+      successMessage: 'Fetched current admin profile',
+    },
+    req,
+    res,
+  );

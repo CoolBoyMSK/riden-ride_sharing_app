@@ -49,6 +49,14 @@ const extractToken = (req) => {
   return h && h.startsWith('Bearer ') ? h.slice(7) : null;
 };
 
+const censorString = (value, visibleCount = 3) => {
+  if (typeof value !== 'string') return '';
+  const len = value.length;
+  if (len <= visibleCount) return value;
+  const stars = '*'.repeat(len - visibleCount);
+  return stars + value.slice(-visibleCount);
+};
+
 export {
   hashPassword,
   comparePasswords,
@@ -57,4 +65,5 @@ export {
   generateRefreshToken,
   verifyRefreshToken,
   extractToken,
+  censorString,
 };

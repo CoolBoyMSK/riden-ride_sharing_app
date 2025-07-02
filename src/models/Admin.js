@@ -12,6 +12,12 @@ const adminSchema = new mongoose.Schema(
       unique: true,
       lowercase: true,
     },
+    phoneNumber: {
+      type: String,
+      unique: true,
+      sparse: true,
+      trim: true,
+    },
     password: {
       type: String,
       required: true,

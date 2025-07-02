@@ -22,10 +22,25 @@ export const adminAuthenticate = async (req, res, next) => {
 };
 
 export const permitModule = (moduleName) => (req, res, next) => {
+  if (req.user?.type === 'super_admin') {
+    return next();
+  }
+
   if (!req.user?.modules?.includes(moduleName)) {
     return res.status(403).json({
       code: 403,
       message: `Access denied: missing permission for ${moduleName}`,
+    });
+  }
+
+  next();
+};
+
+export const onlySuperAdmin = (req, res, next) => {
+  if (req.user?.type !== 'super_admin') {
+    return res.status(403).json({
+      code: 403,
+      message: 'Forbidden: only super_admin can perform this action',
     });
   }
   next();

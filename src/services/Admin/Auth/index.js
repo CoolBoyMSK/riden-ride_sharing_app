@@ -1,8 +1,10 @@
 import { findAdminByEmail } from '../../../dal/admin/index.js';
 import {
+  censorString,
   comparePasswords,
   generateAccessToken,
   generateRefreshToken,
+  verifyRefreshToken,
 } from '../../../utils/auth.js';
 
 export const loginService = async ({ email, password }, resp) => {
@@ -26,5 +28,36 @@ export const loginService = async ({ email, password }, resp) => {
     refreshToken: generateRefreshToken(payload),
   };
 
+  return resp;
+};
+
+export const refreshTokens = async ({ refreshToken }, resp) => {
+  const payload = verifyRefreshToken(refreshToken);
+  if (!payload?.id) {
+    resp.error = true;
+    resp.error_message = 'Invalid or expired refresh token';
+    return resp;
+  }
+
+  const newAccessToken = generateAccessToken({
+    id: payload.id,
+    type: payload.type,
+  });
+
+  resp.data = {
+    accessToken: newAccessToken,
+  };
+  return resp;
+};
+
+export const getAdminProfile = async (currentAdmin, resp) => {
+  const adminObj = currentAdmin.toObject();
+  adminObj.password = censorString(adminObj.password);
+
+  if (adminObj.type !== 'super_admin') {
+    adminObj.modules = currentAdmin.modules || [];
+  }
+
+  resp.data = adminObj;
   return resp;
 };

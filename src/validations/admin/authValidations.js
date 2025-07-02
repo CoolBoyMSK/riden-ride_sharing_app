@@ -1,6 +1,6 @@
 import Joi from 'joi';
 
-const loginSchema = Joi.object({
+export const loginSchema = Joi.object({
   email: Joi.string()
     .email({ tlds: { allow: false } })
     .required()
@@ -16,3 +16,10 @@ const loginSchema = Joi.object({
 
 export const validateAdminLogin = (payload) =>
   loginSchema.validateAsync(payload, { abortEarly: false });
+
+export const validateRefresh = (payload) =>
+  Joi.object({
+    refreshToken: Joi.string().required().messages({
+      'string.empty': 'refreshToken is required',
+    }),
+  }).validateAsync(payload, { abortEarly: false });

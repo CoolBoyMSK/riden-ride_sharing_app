@@ -3,12 +3,15 @@ import helmet from 'helmet';
 import globalRateLimiter from './config/rateLimiter.js';
 import routes from './routes/index.js';
 import env from './config/envConfig.js';
+import { requestLogger } from './middlewares/requestLogger.js';
 
 const app = express();
 
 app.use(helmet());
 app.use(globalRateLimiter);
 app.use(express.json());
+app.use(requestLogger);
+
 app.use('/api', routes);
 
 app.get('/', (req, res) => {

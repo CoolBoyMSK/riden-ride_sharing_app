@@ -34,9 +34,12 @@ export const handleResponse = async (options, req, res) => {
     return res.status(200).json({
       code: 200,
       message: successMessage,
-      data: resp.data,
-      token: resp.token,
-      header: resp.header,
+      ...(() => {
+        const out = { data: resp.data };
+        if (resp.token) out.token = resp.token;
+        if (resp.header) out.header = resp.header;
+        return out;
+      })(),
     });
   } catch (e) {
     return RENDER_BAD_REQUEST(res, e);
