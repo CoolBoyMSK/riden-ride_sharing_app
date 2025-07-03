@@ -53,6 +53,7 @@ const env = {
   ),
   AWS_S3_BUCKET: required(process.env.AWS_S3_BUCKET, 'AWS_S3_BUCKET'),
   FRONTEND_URL: required(process.env.FRONTEND_URL, 'FRONTEND_URL'),
+  REDIS_URL: required(process.env.REDIS_URL, 'REDIS_URL'),
 };
 
 export default env;
