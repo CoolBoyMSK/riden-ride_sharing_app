@@ -41,7 +41,7 @@ export const createAdmin = async (
 ) => {
   if (currentAdmin.type !== 'super_admin') {
     resp.auth = false;
-    resp.error_message = 'Forbidden';
+    resp.error_message = 'Forbidden: only super_admin can add admins';
     return resp;
   }
 
@@ -52,28 +52,39 @@ export const createAdmin = async (
   }
 
   const hashed = await hashPassword(password);
-  const newAdmin = await dalCreateAdmin({
-    name,
-    email,
-    password: hashed,
-    profileImg,
-    phoneNumber,
-    type: 'admin',
-  });
 
-  await createAdminAccess({ adminId: newAdmin._id, modules });
+  try {
+    const newAdmin = await dalCreateAdmin({
+      name,
+      email,
+      password: hashed,
+      profileImg,
+      phoneNumber,
+      type: 'admin',
+    });
 
-  const adminObj = newAdmin.toObject();
-  delete adminObj.password;
-  adminObj.modules = modules;
+    await createAdminAccess({ adminId: newAdmin._id, modules });
 
-  await emailQueue.add('adminInvitation', {
-    email,
-    password,
-  });
+    await emailQueue.add('adminInvitation', {
+      email,
+      password,
+      adminName: newAdmin.name,
+    });
 
-  resp.data = adminObj;
-  return resp;
+    const adminObj = newAdmin.toObject();
+    delete adminObj.password;
+    adminObj.modules = modules;
+    resp.data = adminObj;
+    return resp;
+  } catch (err) {
+    if (err.code === 11000 && err.keyValue) {
+      const field = Object.keys(err.keyValue)[0];
+      resp.error = true;
+      resp.error_message = `${field.charAt(0).toUpperCase() + field.slice(1)} already in use`;
+      return resp;
+    }
+    throw err;
+  }
 };
 
 export const updateAdmin = async (

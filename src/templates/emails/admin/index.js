@@ -17,9 +17,13 @@ const tplPath = path.join(
 const tplSource = fs.readFileSync(tplPath, 'utf8');
 const passwordResetTpl = Handlebars.compile(tplSource);
 
-export const sendAdminPasswordResetEmail = async (toEmail, token) => {
+export const sendAdminPasswordResetEmail = async (
+  toEmail,
+  token,
+  adminName,
+) => {
   const resetLink = `${env.FRONTEND_URL}/reset-password?token=${token}`;
-  const html = passwordResetTpl({ resetLink });
+  const html = passwordResetTpl({ resetLink, adminName });
   await sendEmail({
     to: toEmail,
     subject: 'Riden App — Admin Password Reset',
@@ -39,9 +43,9 @@ const inviteTplPath = path.join(
 const inviteSource = fs.readFileSync(inviteTplPath, 'utf8');
 const invitationTpl = Handlebars.compile(inviteSource);
 
-export const sendAdminInvitationEmail = async (toEmail, password) => {
+export const sendAdminInvitationEmail = async (toEmail, password, adminName) => {
   const loginLink = `${env.FRONTEND_URL}/admin/login`;
-  const html = invitationTpl({ email: toEmail, password, loginLink });
+  const html = invitationTpl({ email: toEmail, password, loginLink, adminName });
   await sendEmail({
     to: toEmail,
     subject: 'You’re Invited as a Riden App Admin',

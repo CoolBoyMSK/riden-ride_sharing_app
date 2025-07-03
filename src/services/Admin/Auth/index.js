@@ -5,7 +5,6 @@ import {
   upsertResetOtp,
 } from '../../../dal/admin/adminOTP/index.js';
 import { findAdminByEmail, findAdminById } from '../../../dal/admin/index.js';
-import { sendAdminPasswordResetEmail } from '../../../templates/emails/admin/index.js';
 import {
   censorString,
   comparePasswords,
@@ -82,7 +81,11 @@ export const initiateAdminPasswordReset = async (email, resp) => {
   const token = nanoid(32);
   await upsertResetOtp(admin._id.toString(), token);
 
-  await emailQueue.add('adminPasswordReset', { email, token });
+  await emailQueue.add('adminPasswordReset', {
+    email,
+    token,
+    adminName: admin.name,
+  });
 
   return resp;
 };
