@@ -1,4 +1,4 @@
-import AdminOtpModel from '../../../models/AdminOtp.js';
+import AdminOtpModel from '../../../models/admin_otp.js';
 
 export const upsertResetOtp = (adminId, otp) =>
   AdminOtpModel.findOneAndUpdate(
