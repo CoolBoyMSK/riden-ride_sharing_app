@@ -1,4 +1,4 @@
-import AdminOtpModel from '../../../models/adminOTP.js';
+import AdminOtpModel from '../../../models/AdminOtp.js';
 
 export const upsertResetOtp = (adminId, otp) =>
   AdminOtpModel.findOneAndUpdate(
@@ -11,4 +11,3 @@ export const findResetOtp = (otp) =>
   AdminOtpModel.findOne({ otp, type: 'reset_password' }).lean();
 
 export const deleteResetOtpById = (id) => AdminOtpModel.deleteOne({ _id: id });
- 
