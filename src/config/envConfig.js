@@ -52,6 +52,7 @@ const env = {
     'AWS_SECRET_ACCESS_KEY',
   ),
   AWS_S3_BUCKET: required(process.env.AWS_S3_BUCKET, 'AWS_S3_BUCKET'),
+  FRONTEND_URL: required(process.env.FRONTEND_URL, 'FRONTEND_URL'),
 };
 
 export default env;

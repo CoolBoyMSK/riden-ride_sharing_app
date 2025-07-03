@@ -1,11 +1,19 @@
-import { findAdminByEmail } from '../../../dal/admin/index.js';
+import { nanoid } from 'nanoid';
+import {
+  deleteResetOtpById,
+  findResetOtp,
+  upsertResetOtp,
+} from '../../../dal/admin/adminOTP/index.js';
+import { findAdminByEmail, findAdminById } from '../../../dal/admin/index.js';
 import {
   censorString,
   comparePasswords,
   generateAccessToken,
   generateRefreshToken,
+  hashPassword,
   verifyRefreshToken,
 } from '../../../utils/auth.js';
+import { emailQueue } from '../../../queues/emailQueue.js';
 
 export const loginService = async ({ email, password }, resp) => {
   const admin = await findAdminByEmail(email);
@@ -59,5 +67,48 @@ export const getAdminProfile = async (currentAdmin, resp) => {
   }
 
   resp.data = adminObj;
+  return resp;
+};
+
+export const initiateAdminPasswordReset = async (email, resp) => {
+  const admin = await findAdminByEmail(email);
+  if (!admin) {
+    resp.error = true;
+    resp.error_message = 'No admin found with that email';
+    return resp;
+  }
+
+  const token = nanoid(32);
+  await upsertResetOtp(admin._id.toString(), token);
+
+  await emailQueue.add('adminPasswordReset', {
+    email,
+    token,
+    adminName: admin.name,
+  });
+
+  return resp;
+};
+
+export const completeAdminPasswordReset = async (token, newPassword, resp) => {
+  const record = await findResetOtp(token);
+  if (!record) {
+    resp.error = true;
+    resp.error_message = 'Invalid or expired reset token';
+    return resp;
+  }
+
+  const admin = await findAdminById(record.target);
+  if (!admin) {
+    resp.error = true;
+    resp.error_message = 'Admin not found';
+    return resp;
+  }
+
+  admin.password = await hashPassword(newPassword);
+  await admin.save();
+
+  await deleteResetOtpById(record._id);
+
   return resp;
 };

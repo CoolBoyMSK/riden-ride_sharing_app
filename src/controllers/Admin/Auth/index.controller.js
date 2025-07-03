@@ -1,12 +1,16 @@
 import {
+  completeAdminPasswordReset,
   getAdminProfile,
+  initiateAdminPasswordReset,
   loginService,
   refreshTokens,
 } from '../../../services/Admin/Auth/index.js';
 import { handleResponse } from '../../../utils/handleRespone.js';
 import {
   validateAdminLogin,
+  validateConfirmReset,
   validateRefresh,
+  validateRequestReset,
 } from '../../../validations/admin/authValidations.js';
 
 export const loginAdmin = (req, res) => {
@@ -41,6 +45,30 @@ export const getCurrentAdmin = (req, res) =>
       handler: getAdminProfile,
       handlerParams: [req.user],
       successMessage: 'Fetched current admin profile',
+    },
+    req,
+    res,
+  );
+
+export const requestAdminPasswordReset = (req, res) =>
+  handleResponse(
+    {
+      handler: initiateAdminPasswordReset,
+      validationFn: validateRequestReset,
+      handlerParams: [req.body.email],
+      successMessage: 'Password reset email sent',
+    },
+    req,
+    res,
+  );
+
+export const confirmAdminPasswordReset = (req, res) =>
+  handleResponse(
+    {
+      handler: completeAdminPasswordReset,
+      validationFn: validateConfirmReset,
+      handlerParams: [req.body.token, req.body.newPassword],
+      successMessage: 'Password updated successfully',
     },
     req,
     res,

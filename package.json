@@ -13,7 +13,10 @@
     "start:staging": "cross-env NODE_ENV=staging nodemon index.js",
     "start:production": "cross-env NODE_ENV=production nodemon index.js",
     "seed:staging:superadmin": "cross-env NODE_ENV=staging node src/seeders/superAdmin.js",
-    "seed:production:superadmin": "cross-env NODE_ENV=production node src/seeders/superAdmin.js"
+    "seed:production:superadmin": "cross-env NODE_ENV=production node src/seeders/superAdmin.js",
+    "worker": "node src/workers/emailWorker.js",
+    "worker:staging": "cross-env NODE_ENV=staging nodemon src/workers/emailWorker.js",
+    "worker:production": "cross-env NODE_ENV=production nodemon src/workers/emailWorker.js"
   },
   "repository": {
     "type": "git",
@@ -39,14 +42,19 @@
     "@aws-sdk/client-s3": "^3.839.0",
     "@aws-sdk/s3-request-presigner": "^3.839.0",
     "bcrypt": "^6.0.0",
+    "bullmq": "^5.56.0",
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
     "express-rate-limit": "^7.5.1",
+    "fast-glob": "^3.3.3",
     "firebase-admin": "^13.4.0",
+    "handlebars": "^4.7.8",
     "helmet": "^8.1.0",
+    "ioredis": "^5.6.1",
     "joi": "^17.13.3",
     "mongoose": "^8.16.0",
     "multer": "^2.0.1",
+    "nanoid": "^5.1.5",
     "nodemailer": "^7.0.3"
   }
 }
