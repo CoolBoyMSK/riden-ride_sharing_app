@@ -4,6 +4,7 @@ import { pathToFileURL } from 'url';
 import redisClient from '../config/redisConfig.js';
 
 const connection = redisClient;
+const QUEUE_NAME = '{emails}emails';
 
 async function loadJobs() {
   const files = await fg('src/workers/jobs/*.js', {
@@ -25,7 +26,7 @@ async function loadJobs() {
   const jobs = await loadJobs();
 
   const worker = new Worker(
-    'emails',
+    QUEUE_NAME,
     async (job) => {
       const fn = jobs[job.name];
       if (!fn) throw new Error(`No handler for job ${job.name}`);
@@ -34,11 +35,13 @@ async function loadJobs() {
     { connection },
   );
 
+  worker.on('ready', () => {
+    console.log(
+      `🔌 Email worker connected; registered jobs: ${Object.keys(jobs).join(', ')}`,
+    );
+  });
+
   worker.on('failed', (job, err) => {
     console.error(`❌ Job ${job.id} (${job.name}) failed:`, err);
   });
-
-  console.log(
-    `📬 Email worker listening, registered jobs: ${Object.keys(jobs).join(', ')}`,
-  );
 })();
