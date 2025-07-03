@@ -11,3 +11,4 @@ export const findResetOtp = (otp) =>
   AdminOtpModel.findOne({ otp, type: 'reset_password' }).lean();
 
 export const deleteResetOtpById = (id) => AdminOtpModel.deleteOne({ _id: id });
+ 
