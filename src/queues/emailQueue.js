@@ -1,9 +1,6 @@
 import { Queue } from 'bullmq';
-import IORedis from 'ioredis';
-import env from '../config/envConfig.js';
+import redisClient from '../config/redisConfig.js';
 
-const connection = new IORedis(env.REDIS_URL, {
-  maxRetriesPerRequest: null,
+export const emailQueue = new Queue('emails', {
+  connection: redisClient,
 });
-
-export const emailQueue = new Queue('emails', { connection });

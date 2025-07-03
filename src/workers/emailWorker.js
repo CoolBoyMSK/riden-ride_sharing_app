@@ -1,12 +1,9 @@
 import { Worker } from 'bullmq';
-import IORedis from 'ioredis';
 import fg from 'fast-glob';
 import { pathToFileURL } from 'url';
-import env from '../config/envConfig.js';
+import redisClient from '../config/redisConfig.js';
 
-const connection = new IORedis(env.REDIS_URL, {
-  maxRetriesPerRequest: null,
-});
+const connection = redisClient;
 
 async function loadJobs() {
   const files = await fg('src/workers/jobs/*.js', {
