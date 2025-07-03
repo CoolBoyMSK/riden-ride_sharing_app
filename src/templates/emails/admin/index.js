@@ -27,4 +27,24 @@ export const sendAdminPasswordResetEmail = async (toEmail, token) => {
   });
 };
 
-('./html/passwordReset.html');
+const inviteTplPath = path.join(
+  process.cwd(),
+  'src',
+  'templates',
+  'emails',
+  'admin',
+  'html',
+  'invitation.html',
+);
+const inviteSource = fs.readFileSync(inviteTplPath, 'utf8');
+const invitationTpl = Handlebars.compile(inviteSource);
+
+export const sendAdminInvitationEmail = async (toEmail, password) => {
+  const loginLink = `${env.FRONTEND_URL}/admin/login`;
+  const html = invitationTpl({ email: toEmail, password, loginLink });
+  await sendEmail({
+    to: toEmail,
+    subject: 'You’re Invited as a Riden App Admin',
+    html,
+  });
+};

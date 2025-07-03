@@ -1,5 +1,7 @@
+import { nanoid } from 'nanoid';
 import {
   deleteResetOtpById,
+  findResetOtp,
   upsertResetOtp,
 } from '../../../dal/admin/adminOTP/index.js';
 import { findAdminByEmail, findAdminById } from '../../../dal/admin/index.js';
@@ -12,6 +14,7 @@ import {
   hashPassword,
   verifyRefreshToken,
 } from '../../../utils/auth.js';
+import { emailQueue } from '../../../queues/emailQueue.js';
 
 export const loginService = async ({ email, password }, resp) => {
   const admin = await findAdminByEmail(email);
@@ -79,7 +82,7 @@ export const initiateAdminPasswordReset = async (email, resp) => {
   const token = nanoid(32);
   await upsertResetOtp(admin._id.toString(), token);
 
-  await sendAdminPasswordResetEmail(email, token);
+  await emailQueue.add('adminPasswordReset', { email, token });
 
   return resp;
 };

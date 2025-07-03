@@ -11,6 +11,7 @@ import {
   upsertAdminAccess,
 } from '../../../dal/admin/adminAccess/index.js';
 import { hashPassword } from '../../../utils/auth.js';
+import { emailQueue } from '../../../queues/emailQueue.js';
 
 export const getAllAdmins = async (currentAdmin, resp) => {
   const admins = await findAllAdmins();
@@ -65,6 +66,11 @@ export const createAdmin = async (
   const adminObj = newAdmin.toObject();
   delete adminObj.password;
   adminObj.modules = modules;
+
+  await emailQueue.add('adminInvitation', {
+    email,
+    password,
+  });
 
   resp.data = adminObj;
   return resp;
