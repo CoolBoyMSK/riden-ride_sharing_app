@@ -4,6 +4,7 @@ import globalRateLimiter from './config/rateLimiter.js';
 import routes from './routes/index.js';
 import env from './config/envConfig.js';
 import { requestLogger } from './middlewares/requestLogger.js';
+import cors from './config/cors.js';
 
 const app = express();
 
@@ -11,6 +12,7 @@ app.use(helmet());
 app.use(globalRateLimiter);
 app.use(express.json());
 app.use(requestLogger);
+app.use(cors);
 
 app.use('/api', routes);
 

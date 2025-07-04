@@ -29,10 +29,10 @@ const userSchema = new mongoose.Schema(
       unique: true,
       sparse: true,
     },
-    type: {
-      type: String,
+    roles: {
+      type: [String],
       enum: USER_TYPES,
-      default: 'user',
+      default: ['passenger'],
     },
     isEmailVerified: {
       type: Boolean,
