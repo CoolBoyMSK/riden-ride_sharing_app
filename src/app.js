@@ -5,6 +5,7 @@ import routes from './routes/index.js';
 import env from './config/envConfig.js';
 import { requestLogger } from './middlewares/requestLogger.js';
 import cors from './config/cors.js';
+import listEndpoints from 'express-list-endpoints';
 
 const app = express();
 app.use(cors);
