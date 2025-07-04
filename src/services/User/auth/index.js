@@ -11,6 +11,14 @@ import {
   createUser,
   updateUserById,
 } from '../../../dal/user/index.js';
+import {
+  createPassengerProfile,
+  findPassengerByUserId,
+} from '../../../dal/passenger.js';
+import {
+  createDriverProfile,
+  findDriverByUserId,
+} from '../../../dal/driver.js';
 
 export const signupUser = async (
   { name, email, phoneNumber, password },
@@ -64,11 +72,28 @@ export const loginUser = async ({ email, password }, resp) => {
     return resp;
   }
 
-  const payload = { id: user._id, roles: user.roles };
+  const userId = user._id.toString();
+
+  if (user.roles.includes('passenger')) {
+    const passenger = await findPassengerByUserId(userId);
+    if (!passenger) {
+      await createPassengerProfile(userId);
+    }
+  }
+
+  if (user.roles.includes('driver')) {
+    const driver = await findDriverByUserId(userId);
+    if (!driver) {
+      await createDriverProfile(userId);
+    }
+  }
+
+  const payload = { id: userId, roles: user.roles };
   resp.data = {
     accessToken: generateAccessToken(payload),
     refreshToken: generateRefreshToken(payload),
   };
+
   return resp;
 };
 
