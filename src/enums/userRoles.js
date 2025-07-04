@@ -1,1 +1,1 @@
-export const USER_TYPES = ['user', 'driver'];
+export const USER_TYPES = ['passenger', 'driver'];
