@@ -1,5 +1,6 @@
 import { authenticate } from '../middlewares/passengerAuth.js';
 import { driverAuthenticate } from '../middlewares/driverAuth.js';
+import { anyUserAuth } from '../middlewares/anyUserAuth.js';
 import {
   adminAuthenticate,
   permitModule,
@@ -41,65 +42,69 @@ export const registerRoute = ({
 }) => {
   if (!router || !route) return;
 
-  const authMiddlewares = [];
-  if (passenger_auth_enable) authMiddlewares.push(authenticate);
-  if (driver_auth_enable) authMiddlewares.push(driverAuthenticate);
-  if (admin_auth_enable) authMiddlewares.push(adminAuthenticate);
+  const auth = [];
+  if (passenger_auth_enable && driver_auth_enable) {
+    auth.push(anyUserAuth);
+  } else {
+    if (passenger_auth_enable) auth.push(authenticate);
+    if (driver_auth_enable) auth.push(driverAuthenticate);
+  }
+  if (admin_auth_enable) auth.push(adminAuthenticate);
 
-  const withAuthPermSuper = (permission, superEnable, extras) => {
-    const chain = [...authMiddlewares];
+  const wrap = (permission, superEnable, extra, handler) => {
+    const chain = [...auth];
     if (permission) chain.push(permitModule(permission));
     if (superEnable) chain.push(onlySuperAdmin);
-    chain.push(...extras);
+    if (extra.length) chain.push(...extra);
+    chain.push(handler);
     return chain;
   };
 
-  if (get_method)
+  if (get_method) {
     router.get(
       route,
-      ...withAuthPermSuper(get_permission, get_super_enable, get_middlewares),
-      get_method,
+      ...wrap(get_permission, get_super_enable, get_middlewares, get_method),
     );
-
-  if (post_method)
+  }
+  if (post_method) {
     router.post(
       route,
-      ...withAuthPermSuper(
+      ...wrap(
         post_permission,
         post_super_enable,
         post_middlewares,
+        post_method,
       ),
-      post_method,
     );
-
-  if (put_method)
+  }
+  if (put_method) {
     router.put(
       route,
-      ...withAuthPermSuper(put_permission, put_super_enable, put_middlewares),
-      put_method,
+      ...wrap(put_permission, put_super_enable, put_middlewares, put_method),
     );
-
-  if (delete_method)
+  }
+  if (delete_method) {
     router.delete(
       route,
-      ...withAuthPermSuper(
+      ...wrap(
         delete_permission,
         delete_super_enable,
         delete_middlewares,
+        delete_method,
       ),
-      delete_method,
     );
-
-  if (patch_method)
+  }
+  if (patch_method) {
     router.patch(
       route,
-      ...withAuthPermSuper(
+      ...wrap(
         patch_permission,
         patch_super_enable,
         patch_middlewares,
+        patch_method,
       ),
-      patch_method,
     );
+  }
 
-  router.all(route, ...authMiddlewares, WRONG_HTTP_METHOD);
+  router.all(route, ...auth, WRONG_HTTP_METHOD);
 };

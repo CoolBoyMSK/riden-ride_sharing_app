@@ -8,15 +8,14 @@ const passengerSchema = new mongoose.Schema(
       unique: true,
       required: true,
     },
-    favoritePlaces: [
-      {
-        name: { type: String, trim: true },
-        coords: {
-          lat: { type: Number, required: true },
-          lng: { type: Number, required: true },
-        },
-      },
-    ],
+    isActive: {
+      type: Boolean,
+      default: false,
+    },
+    isBlocked: {
+      tye: Boolean,
+      default: false,
+    },
     paymentMethods: [
       {
         type: {

@@ -1,4 +1,10 @@
-import { hashPassword } from '../../../utils/auth.js';
+import {
+  hashPassword,
+  comparePasswords,
+  generateAccessToken,
+  generateRefreshToken,
+  verifyRefreshToken,
+} from '../../../utils/auth.js';
 import {
   findUserByEmail,
   findUserByPhone,
@@ -40,5 +46,45 @@ export const resetUserPassword = async (newPassword, firebasePhone, resp) => {
   const hashed = await hashPassword(newPassword);
   await updateUserById(user._id, { password: hashed });
   resp.data = {};
+  return resp;
+};
+
+export const loginUser = async ({ email, password }, resp) => {
+  const user = await findUserByEmail(email);
+  if (!user) {
+    resp.error = true;
+    resp.error_message = 'Invalid credentials';
+    return resp;
+  }
+
+  const match = await comparePasswords(password, user.password);
+  if (!match) {
+    resp.error = true;
+    resp.error_message = 'Invalid credentials';
+    return resp;
+  }
+
+  const payload = { id: user._id, roles: user.roles };
+  resp.data = {
+    accessToken: generateAccessToken(payload),
+    refreshToken: generateRefreshToken(payload),
+  };
+  return resp;
+};
+
+export const refreshTokens = async ({ refreshToken }, resp) => {
+  const payload = verifyRefreshToken(refreshToken);
+  if (!payload) {
+    resp.error = true;
+    resp.error_message = 'Invalid refresh token';
+    return resp;
+  }
+  resp.data = {
+    accessToken: generateAccessToken({ id: payload.id, roles: payload.roles }),
+    refreshToken: generateRefreshToken({
+      id: payload.id,
+      roles: payload.roles,
+    }),
+  };
   return resp;
 };

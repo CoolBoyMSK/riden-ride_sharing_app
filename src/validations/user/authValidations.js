@@ -17,3 +17,10 @@ const resetSchema = Joi.object({
 });
 
 export const validateResetPassword = (body) => resetSchema.validateAsync(body);
+
+const loginSchema = Joi.object({
+  email: Joi.string().email().required(),
+  password: Joi.string().min(8).max(128).required(),
+});
+
+export const validateLogin = (payload) => loginSchema.validateAsync(payload);
