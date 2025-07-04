@@ -1,5 +1,25 @@
 import mongoose from 'mongoose';
 
+const suspensionSchema = new mongoose.Schema(
+  {
+    reason: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    start: {
+      type: Date,
+      required: true,
+      default: () => new Date(),
+    },
+    end: {
+      type: Date,
+      required: true,
+    },
+  },
+  { _id: false },
+);
+
 const driverSchema = new mongoose.Schema(
   {
     userId: {
@@ -26,6 +46,18 @@ const driverSchema = new mongoose.Schema(
     payoutDetails: {
       bankAccount: { type: String, trim: true },
       ifscCode: { type: String, trim: true },
+    },
+    isBlocked: {
+      type: Boolean,
+      default: false,
+    },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+    },
+    suspensions: {
+      type: [suspensionSchema],
+      default: [],
     },
   },
   {
