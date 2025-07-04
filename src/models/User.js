@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { USER_TYPES } from '../enums/userRoles.js';
+import { GENDER_TYPES } from '../enums/genderEnums.js';
 
 const userSchema = new mongoose.Schema(
   {
@@ -33,6 +34,11 @@ const userSchema = new mongoose.Schema(
       type: [String],
       enum: USER_TYPES,
       default: ['passenger'],
+    },
+    gender: {
+      type: String,
+      enum: GENDER_TYPES,
+      required: false,
     },
     isEmailVerified: {
       type: Boolean,
