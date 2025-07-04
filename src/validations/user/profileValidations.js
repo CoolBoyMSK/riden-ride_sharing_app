@@ -7,6 +7,7 @@ export const validateProfileUpdate = (body) =>
     phoneNumber: Joi.string()
       .pattern(/^[0-9+\- ]{7,20}$/)
       .message('phoneNumber must be a valid phone'),
+    gender: Joi.string().valid('male', 'female', 'other'),
   })
     .or('name', 'email', 'phoneNumber')
     .messages({
