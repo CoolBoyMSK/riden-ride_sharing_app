@@ -13,7 +13,7 @@ const passengerSchema = new mongoose.Schema(
       default: false,
     },
     isBlocked: {
-      tye: Boolean,
+      type: Boolean,
       default: false,
     },
     paymentMethods: [
