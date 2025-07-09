@@ -21,7 +21,7 @@ import {
 } from '../../../dal/driver.js';
 
 export const signupUser = async (
-  { name, email, phoneNumber, password },
+  { name, email, phoneNumber, password, type },
   resp,
 ) => {
   if (await findUserByEmail(email)) {
@@ -36,7 +36,14 @@ export const signupUser = async (
   }
 
   const hashed = await hashPassword(password);
-  const user = await createUser({ name, email, phoneNumber, password: hashed });
+  const roles = type?.includes('driver') ? ['driver'] : ['passenger'];
+  const user = await createUser({
+    name,
+    email,
+    phoneNumber,
+    password: hashed,
+    roles,
+  });
 
   const userObj = user.toObject();
   delete userObj.password;

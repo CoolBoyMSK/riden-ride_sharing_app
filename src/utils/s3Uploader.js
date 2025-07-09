@@ -42,3 +42,9 @@ export const uploadAdminImage = (adminId, file) =>
     makeKey('admin', adminId, file.originalname),
     file.mimetype,
   );
+
+export async function uploadDriverDocumentToS3(driverId, docType, file) {
+  const ext = path.extname(file.originalname) || '';
+  const key = `documents/${driverId}/${docType}/${uuidv4()}${ext}`;
+  return uploadFileToS3(file.buffer, key, file.mimetype);
+}

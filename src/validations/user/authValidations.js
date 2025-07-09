@@ -8,6 +8,9 @@ export const validateSignup = (body) => {
       .pattern(/^[0-9+\- ]{7,20}$/)
       .required(),
     password: Joi.string().min(8).max(128).required(),
+    type: Joi.array()
+      .items(Joi.string().valid('passenger', 'driver'))
+      .optional(),
   });
   return schema.validateAsync(body);
 };

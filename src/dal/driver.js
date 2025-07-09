@@ -42,3 +42,39 @@ export const removeDriverBlock = (driverId) =>
     { $set: { isBlocked: false } },
     { new: true },
   ).lean();
+
+export const findDriverDocuments = (driverId) =>
+  DriverModel.findById(driverId, { documents: 1, _id: 0 }).lean();
+
+export const updateDriverDocumentRecord = (driverId, docType, imageUrl) =>
+  DriverModel.findOneAndUpdate(
+    { userId: driverId },
+    {
+      $set: {
+        [`documents.${docType}.imageUrl`]: imageUrl,
+        [`documents.${docType}.status`]: 'submitted',
+      },
+    },
+    { new: true, select: `documents.${docType}` },
+  ).lean();
+
+export const findVehicleByUserId = (userId) =>
+  DriverModel.findOne({ userId }, 'vehicle').lean();
+
+export const upsertVehicle = (userId, vehicle) =>
+  DriverModel.findOneAndUpdate(
+    { userId },
+    { vehicle },
+    { new: true, upsert: true, runValidators: true, select: 'vehicle' },
+  ).lean();
+
+export const patchVehicleFields = (userId, updates) =>
+  DriverModel.findOneAndUpdate(
+    { userId },
+    {
+      $set: Object.fromEntries(
+        Object.entries(updates).map(([k, v]) => [`vehicle.${k}`, v]),
+      ),
+    },
+    { new: true, runValidators: true, select: 'vehicle' },
+  ).lean();

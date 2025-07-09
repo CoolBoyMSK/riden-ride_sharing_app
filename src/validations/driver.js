@@ -7,3 +7,18 @@ const suspensionSchema = Joi.object({
 
 export const validateDriverSuspension = (body) =>
   suspensionSchema.validateAsync(body);
+
+export const validateDocTypeParam = (params) => {
+  const schema = Joi.object({
+    docType: Joi.string()
+      .valid(
+        'proofOfWork',
+        'driversLicense',
+        'commercialDrivingRecord',
+        'vehicleOwnerCertificateAndInsurance',
+        'vehicleInspection',
+      )
+      .required(),
+  });
+  return schema.validateAsync(params);
+};

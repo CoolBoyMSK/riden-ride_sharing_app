@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { CAR_TYPES } from '../enums/carType.js';
 
 const suspensionSchema = new mongoose.Schema(
   {
@@ -20,6 +21,22 @@ const suspensionSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const documentSchema = new mongoose.Schema(
+  {
+    imageUrl: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    status: {
+      type: String,
+      enum: ['not_submitted', 'submitted', 'verified'],
+      default: 'not_submitted',
+    },
+  },
+  { _id: false },
+);
+
 const driverSchema = new mongoose.Schema(
   {
     userId: {
@@ -28,25 +45,30 @@ const driverSchema = new mongoose.Schema(
       unique: true,
       required: true,
     },
-    licenseDocs: {
-      frontUrl: { type: String, required: true, trim: true },
-      backUrl: { type: String, required: true, trim: true },
-    },
+
     vehicle: {
-      make: { type: String, trim: true },
+      type: { type: String, enum: CAR_TYPES },
       model: { type: String, trim: true },
       plateNumber: { type: String, trim: true },
       color: { type: String, trim: true },
+      imageUrl: {
+        type: String,
+        trim: true,
+        default: '',
+      },
     },
+
     backgroundCheckStatus: {
       type: String,
       enum: ['pending', 'approved', 'rejected'],
       default: 'pending',
     },
+
     payoutDetails: {
       bankAccount: { type: String, trim: true },
       ifscCode: { type: String, trim: true },
     },
+
     isBlocked: {
       type: Boolean,
       default: false,
@@ -55,9 +77,21 @@ const driverSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+
     suspensions: {
       type: [suspensionSchema],
       default: [],
+    },
+
+    documents: {
+      proofOfWork: { type: documentSchema, default: () => ({}) },
+      driversLicense: { type: documentSchema, default: () => ({}) },
+      commercialDrivingRecord: { type: documentSchema, default: () => ({}) },
+      vehicleOwnerCertificateAndInsurance: {
+        type: documentSchema,
+        default: () => ({}),
+      },
+      vehicleInspection: { type: documentSchema, default: () => ({}) },
     },
   },
   {
