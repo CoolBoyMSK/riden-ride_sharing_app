@@ -1,6 +1,6 @@
 import express from 'express';
 import authRouter from './Auth/index.js';
-import userProfileRouter from './profile/index.js';
+import userProfileRouter from './Profile/index.js';
 import driverRouter from './Driver/index.js';
 
 const userRouter = express.Router();
