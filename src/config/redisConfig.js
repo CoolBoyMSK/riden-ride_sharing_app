@@ -16,8 +16,13 @@ if (protocol === 'rediss:') {
     },
     maxRetriesPerRequest: null,
   });
+  client.on('connect', () => {
+    console.log('🟢 Redis (TLS) connected:', host, port);
+  });
 
-  client.on('error', (err) => console.error('🔴 Redis (TLS) error:', err  , port));
+  client.on('error', (err) =>
+    console.error('🔴 Redis (TLS) error:', err, port),
+  );
 } else {
   client = new IORedis(env.REDIS_URL, {
     maxRetriesPerRequest: null,

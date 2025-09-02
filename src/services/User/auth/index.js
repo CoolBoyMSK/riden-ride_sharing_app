@@ -1,5 +1,6 @@
 import {
   hashPassword,
+  generateOtp,
   comparePasswords,
   generateAccessToken,
   generateRefreshToken,
@@ -35,6 +36,7 @@ export const signupUser = async (
     return resp;
   }
 
+  const otp = generateOtp()
   const hashed = await hashPassword(password);
   const roles = type?.includes('driver') ? ['driver'] : ['passenger'];
   const user = await createUser({

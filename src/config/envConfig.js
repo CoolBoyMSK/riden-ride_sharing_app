@@ -54,6 +54,9 @@ const env = {
   AWS_S3_BUCKET: required(process.env.AWS_S3_BUCKET, 'AWS_S3_BUCKET'),
   FRONTEND_URL: required(process.env.FRONTEND_URL, 'FRONTEND_URL'),
   REDIS_URL: required(process.env.REDIS_URL, 'REDIS_URL'),
+  TWILIO_ACCOUNT_SID: required(process.env.TWILIO_ACCOUNT_SID, 'TWILIO_ACCOUNT_SID'),
+  TWILIO_AUTH_TOKEN: required(process.env.TWILIO_AUTH_TOKEN, 'TWILIO_AUTH_TOKEN'),
+  TWILIO_PHONE_NUMBER: required(process.env.TWILIO_PHONE_NUMBER, 'TWILIO_PHONE_NUMBER')
 };
 
 export default env;

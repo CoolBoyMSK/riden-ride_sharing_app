@@ -1,6 +1,7 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import env from '../config/envConfig.js';
+import crypto from 'crypto';
 
 const SALT_ROUNDS = env.SALT_ROUNDS;
 const JWT_ACCESS_SECRET = env.JWT_ACCESS_SECRET;
@@ -14,6 +15,10 @@ const hashPassword = async (plainPassword) => {
 
 const comparePasswords = async (plainPassword, hashedPassword) => {
   return await bcrypt.compare(plainPassword, hashedPassword);
+};
+
+const generateOtp = () => {
+  return crypto.randomInt(100000, 999999).toString();
 };
 
 const generateAccessToken = (payload) => {
@@ -60,6 +65,7 @@ const censorString = (value, visibleCount = 3) => {
 export {
   hashPassword,
   comparePasswords,
+  generateOtp,
   generateAccessToken,
   verifyAccessToken,
   generateRefreshToken,
