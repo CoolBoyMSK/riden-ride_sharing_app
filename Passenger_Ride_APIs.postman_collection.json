@@ -1,0 +1,468 @@
+{
+  "info": {
+    "name": "Passenger Ride APIs",
+    "description": "Complete collection of passenger ride booking and management APIs",
+    "version": "1.0.0",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{passenger_access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3000/api/user/rides",
+      "type": "string"
+    },
+    {
+      "key": "passenger_access_token",
+      "value": "your_passenger_jwt_token_here",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Ride Booking Flow",
+      "item": [
+        {
+          "name": "Get Fare Estimate",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{passenger_access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pickupLocation\": {\n    \"coordinates\": [-74.006, 40.7128],\n    \"address\": \"123 Main St, New York, NY 10001\",\n    \"placeName\": \"Empire State Building\"\n  },\n  \"dropoffLocation\": {\n    \"coordinates\": [-73.935, 40.7282],\n    \"address\": \"456 Broadway, New York, NY 10013\",\n    \"placeName\": \"Times Square\"\n  },\n  \"carType\": \"standard\",\n  \"promoCode\": \"SAVE20\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/estimate-fare",
+              "host": ["{{base_url}}"],
+              "path": ["estimate-fare"]
+            },
+            "description": "Get fare estimate for a ride with optional promo code"
+          }
+        },
+        {
+          "name": "Get Available Car Types",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{passenger_access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pickupLocation\": {\n    \"coordinates\": [-74.006, 40.7128],\n    \"address\": \"123 Main St, New York, NY 10001\",\n    \"placeName\": \"Empire State Building\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/available-cars",
+              "host": ["{{base_url}}"],
+              "path": ["available-cars"]
+            },
+            "description": "Get available car types with driver counts and estimated wait times"
+          }
+        },
+        {
+          "name": "Validate Promo Code",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{passenger_access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"promoCode\": \"SAVE20\",\n  \"estimatedFare\": 25.50\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/validate-promo",
+              "host": ["{{base_url}}"],
+              "path": ["validate-promo"]
+            },
+            "description": "Validate promo code and get discount details"
+          }
+        },
+        {
+          "name": "Book Ride",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.success && response.data.rideId) {",
+                  "        pm.environment.set('ride_id', response.data.rideId);",
+                  "        console.log('Ride ID saved:', response.data.rideId);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{passenger_access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pickupLocation\": {\n    \"coordinates\": [-74.006, 40.7128],\n    \"address\": \"123 Main St, New York, NY 10001\",\n    \"placeName\": \"Empire State Building\"\n  },\n  \"dropoffLocation\": {\n    \"coordinates\": [-73.935, 40.7282],\n    \"address\": \"456 Broadway, New York, NY 10013\",\n    \"placeName\": \"Times Square\"\n  },\n  \"carType\": \"standard\",\n  \"paymentMethod\": \"card\",\n  \"promoCode\": \"SAVE20\",\n  \"scheduledTime\": \"2024-01-20T15:30:00.000Z\",\n  \"specialRequests\": \"Please call when you arrive\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/book",
+              "host": ["{{base_url}}"],
+              "path": ["book"]
+            },
+            "description": "Book a new ride with all details including promo code and payment method"
+          }
+        }
+      ],
+      "description": "Complete ride booking flow from estimation to confirmation"
+    },
+    {
+      "name": "2. Ride Tracking & Management",
+      "item": [
+        {
+          "name": "Get Current Ride",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{passenger_access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/current",
+              "host": ["{{base_url}}"],
+              "path": ["current"]
+            },
+            "description": "Get current active ride for the passenger"
+          }
+        },
+        {
+          "name": "Get Ride Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{passenger_access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/{{ride_id}}/status",
+              "host": ["{{base_url}}"],
+              "path": ["{{ride_id}}", "status"]
+            },
+            "description": "Get detailed status of a specific ride"
+          }
+        },
+        {
+          "name": "Get Driver Location",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{passenger_access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/{{ride_id}}/driver-location",
+              "host": ["{{base_url}}"],
+              "path": ["{{ride_id}}", "driver-location"]
+            },
+            "description": "Get real-time driver location for tracking"
+          }
+        },
+        {
+          "name": "Cancel Ride",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{passenger_access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Changed my mind\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/{{ride_id}}/cancel",
+              "host": ["{{base_url}}"],
+              "path": ["{{ride_id}}", "cancel"]
+            },
+            "description": "Cancel an active ride with optional reason"
+          }
+        }
+      ],
+      "description": "Track and manage active rides"
+    },
+    {
+      "name": "3. Payment & Billing",
+      "item": [
+        {
+          "name": "Get Payment Methods",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{passenger_access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/payment-methods",
+              "host": ["{{base_url}}"],
+              "path": ["payment-methods"]
+            },
+            "description": "Get all available payment methods for the user"
+          }
+        },
+        {
+          "name": "Get Ride Cost Breakdown",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{passenger_access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/{{ride_id}}/cost-breakdown",
+              "host": ["{{base_url}}"],
+              "path": ["{{ride_id}}", "cost-breakdown"]
+            },
+            "description": "Get detailed cost breakdown for a completed ride"
+          }
+        },
+        {
+          "name": "Process Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{passenger_access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/{{ride_id}}/process-payment",
+              "host": ["{{base_url}}"],
+              "path": ["{{ride_id}}", "process-payment"]
+            },
+            "description": "Process payment for a completed ride"
+          }
+        }
+      ],
+      "description": "Payment and billing related operations"
+    },
+    {
+      "name": "4. History & Analytics",
+      "item": [
+        {
+          "name": "Get Ride History",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{passenger_access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/history?page=1&limit=10&status=RIDE_COMPLETED",
+              "host": ["{{base_url}}"],
+              "path": ["history"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "status",
+                  "value": "RIDE_COMPLETED"
+                }
+              ]
+            },
+            "description": "Get paginated ride history with optional status filter"
+          }
+        },
+        {
+          "name": "Get Ride Statistics",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{passenger_access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/stats?startDate=2024-01-01&endDate=2024-01-31",
+              "host": ["{{base_url}}"],
+              "path": ["stats"],
+              "query": [
+                {
+                  "key": "startDate",
+                  "value": "2024-01-01"
+                },
+                {
+                  "key": "endDate",
+                  "value": "2024-01-31"
+                }
+              ]
+            },
+            "description": "Get ride statistics for a date range"
+          }
+        }
+      ],
+      "description": "Historical data and analytics"
+    },
+    {
+      "name": "5. Sample Test Scenarios",
+      "item": [
+        {
+          "name": "Complete Ride Flow Test",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{passenger_access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pickupLocation\": {\n    \"coordinates\": [-74.0059, 40.7589],\n    \"address\": \"Central Park, New York, NY\",\n    \"placeName\": \"Central Park South\"\n  },\n  \"dropoffLocation\": {\n    \"coordinates\": [-73.9857, 40.7484],\n    \"address\": \"Grand Central Terminal, New York, NY\",\n    \"placeName\": \"Grand Central\"\n  },\n  \"carType\": \"premium\",\n  \"paymentMethod\": \"wallet\",\n  \"promoCode\": \"FIRST10\",\n  \"specialRequests\": \"Premium car needed for business meeting\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/book",
+              "host": ["{{base_url}}"],
+              "path": ["book"]
+            },
+            "description": "Test booking a premium ride with wallet payment and promo code"
+          }
+        },
+        {
+          "name": "Test Invalid Promo Code",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{passenger_access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"promoCode\": \"INVALID1\",\n  \"estimatedFare\": 30.00\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/validate-promo",
+              "host": ["{{base_url}}"],
+              "path": ["validate-promo"]
+            },
+            "description": "Test validation with an invalid promo code"
+          }
+        },
+        {
+          "name": "Test Cash Payment Booking",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{passenger_access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pickupLocation\": {\n    \"coordinates\": [-73.9442, 40.8080],\n    \"address\": \"Bronx Zoo, Bronx, NY\",\n    \"placeName\": \"Bronx Zoo Main Entrance\"\n  },\n  \"dropoffLocation\": {\n    \"coordinates\": [-73.8648, 40.7489],\n    \"address\": \"LaGuardia Airport, Queens, NY\",\n    \"placeName\": \"LGA Terminal B\"\n  },\n  \"carType\": \"suv\",\n  \"paymentMethod\": \"cash\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/book",
+              "host": ["{{base_url}}"],
+              "path": ["book"]
+            },
+            "description": "Test booking an SUV with cash payment (no promo code)"
+          }
+        }
+      ],
+      "description": "Sample test scenarios for different use cases"
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Set environment variables if not already set",
+          "if (!pm.environment.get('ride_id')) {",
+          "    pm.environment.set('ride_id', 'RIDE_12345_SAMPLE');",
+          "}"
+        ]
+      }
+    }
+  ]
+}

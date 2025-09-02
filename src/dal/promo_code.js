@@ -20,3 +20,26 @@ export const updatePromoById = async (id, update) => {
 export const deletePromoById = async (id) => {
   return PromoCodeModel.findByIdAndDelete(id);
 };
+
+// Validate promo code for ride booking
+export const validatePromoCode = async (code) => {
+  const currentDate = new Date();
+  
+  return await PromoCodeModel.findOne({
+    code: code.toUpperCase(),
+    isActive: true,
+    startsAt: { $lte: currentDate },
+    endsAt: { $gte: currentDate }
+  }).lean();
+};
+
+// Find active promo codes
+export const findActivePromoCodes = async () => {
+  const currentDate = new Date();
+  
+  return await PromoCodeModel.find({
+    isActive: true,
+    startsAt: { $lte: currentDate },
+    endsAt: { $gte: currentDate }
+  }).lean();
+};

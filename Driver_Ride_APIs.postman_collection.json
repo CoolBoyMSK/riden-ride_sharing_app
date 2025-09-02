@@ -1,0 +1,740 @@
+{
+  "info": {
+    "name": "Driver Ride APIs",
+    "description": "Complete collection of driver ride management and tracking APIs",
+    "version": "1.0.0",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{driver_access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3000/api/user/rides",
+      "type": "string"
+    },
+    {
+      "key": "driver_access_token",
+      "value": "your_driver_jwt_token_here",
+      "type": "string"
+    },
+    {
+      "key": "driver_id",
+      "value": "driver_id_from_auth",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Driver Location Management",
+      "item": [
+        {
+          "name": "Update Driver Location - Online",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driver_access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coordinates\": [-74.006, 40.7128],\n  \"heading\": 45,\n  \"speed\": 25,\n  \"accuracy\": 5\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/driver/location",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "location"]
+            },
+            "description": "Update driver's current location with GPS data"
+          }
+        },
+        {
+          "name": "Update Driver Location - Moving",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driver_access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coordinates\": [-73.9857, 40.7484],\n  \"heading\": 180,\n  \"speed\": 35,\n  \"accuracy\": 3\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/driver/location",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "location"]
+            },
+            "description": "Update driver location while moving (higher speed)"
+          }
+        },
+        {
+          "name": "Update Driver Location - Stationary",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driver_access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coordinates\": [-73.935, 40.7282],\n  \"heading\": 0,\n  \"speed\": 0,\n  \"accuracy\": 2\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/driver/location",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "location"]
+            },
+            "description": "Update driver location when stationary (waiting)"
+          }
+        }
+      ],
+      "description": "Manage driver's real-time location for ride matching and tracking"
+    },
+    {
+      "name": "2. Ride Status Management",
+      "item": [
+        {
+          "name": "Update Status - Driver Arriving",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driver_access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"DRIVER_ARRIVING\",\n  \"notes\": \"On my way to pickup location\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/{{ride_id}}/status",
+              "host": ["{{base_url}}"],
+              "path": ["{{ride_id}}", "status"]
+            },
+            "description": "Update ride status when driver is en route to pickup"
+          }
+        },
+        {
+          "name": "Update Status - Driver Arrived",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driver_access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"DRIVER_ARRIVED\",\n  \"notes\": \"Arrived at pickup location\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/{{ride_id}}/status",
+              "host": ["{{base_url}}"],
+              "path": ["{{ride_id}}", "status"]
+            },
+            "description": "Update ride status when driver has arrived at pickup location"
+          }
+        },
+        {
+          "name": "Update Status - Ride In Progress",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driver_access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"RIDE_IN_PROGRESS\",\n  \"notes\": \"Passenger picked up, heading to destination\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/{{ride_id}}/status",
+              "host": ["{{base_url}}"],
+              "path": ["{{ride_id}}", "status"]
+            },
+            "description": "Update ride status during the trip"
+          }
+        }
+      ],
+      "description": "Update ride status throughout the ride lifecycle"
+    },
+    {
+      "name": "3. Ride Lifecycle Actions",
+      "item": [
+        {
+          "name": "Start Ride",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driver_access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/{{ride_id}}/start",
+              "host": ["{{base_url}}"],
+              "path": ["{{ride_id}}", "start"]
+            },
+            "description": "Start the ride when passenger is picked up"
+          }
+        },
+        {
+          "name": "Complete Ride - Short Distance",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driver_access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"actualDistance\": 5.2,\n  \"waitingTime\": 3\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/{{ride_id}}/complete",
+              "host": ["{{base_url}}"],
+              "path": ["{{ride_id}}", "complete"]
+            },
+            "description": "Complete a short distance ride with minimal waiting time"
+          }
+        },
+        {
+          "name": "Complete Ride - Long Distance",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driver_access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"actualDistance\": 18.7,\n  \"waitingTime\": 8\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/{{ride_id}}/complete",
+              "host": ["{{base_url}}"],
+              "path": ["{{ride_id}}", "complete"]
+            },
+            "description": "Complete a long distance ride with some waiting time"
+          }
+        },
+        {
+          "name": "Complete Ride - Airport Run",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driver_access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"actualDistance\": 25.4,\n  \"waitingTime\": 15\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/{{ride_id}}/complete",
+              "host": ["{{base_url}}"],
+              "path": ["{{ride_id}}", "complete"]
+            },
+            "description": "Complete an airport ride with extended waiting time"
+          }
+        }
+      ],
+      "description": "Actions to start and complete rides with different scenarios"
+    },
+    {
+      "name": "4. Ride Information & Tracking",
+      "item": [
+        {
+          "name": "Get Ride Status (Driver View)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driver_access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/{{ride_id}}/status",
+              "host": ["{{base_url}}"],
+              "path": ["{{ride_id}}", "status"]
+            },
+            "description": "Get detailed ride information from driver's perspective"
+          }
+        },
+        {
+          "name": "Get Ride Cost Breakdown (Driver)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driver_access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/{{ride_id}}/cost-breakdown",
+              "host": ["{{base_url}}"],
+              "path": ["{{ride_id}}", "cost-breakdown"]
+            },
+            "description": "View fare breakdown for completed ride"
+          }
+        }
+      ],
+      "description": "View ride information and details from driver perspective"
+    },
+    {
+      "name": "5. Driver Workflow Scenarios",
+      "item": [
+        {
+          "name": "Scenario 1: City Ride Workflow",
+          "item": [
+            {
+              "name": "1. Go Online",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{driver_access_token}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"coordinates\": [-74.006, 40.7128],\n  \"heading\": 0,\n  \"speed\": 0,\n  \"accuracy\": 5\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/driver/location",
+                  "host": ["{{base_url}}"],
+                  "path": ["driver", "location"]
+                },
+                "description": "Driver goes online in Manhattan"
+              }
+            },
+            {
+              "name": "2. Accept Ride & Drive to Pickup",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{driver_access_token}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"status\": \"DRIVER_ARRIVING\",\n  \"notes\": \"Driving to pickup location\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/{{ride_id}}/status",
+                  "host": ["{{base_url}}"],
+                  "path": ["{{ride_id}}", "status"]
+                },
+                "description": "Update status when driving to pickup"
+              }
+            },
+            {
+              "name": "3. Arrive at Pickup",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{driver_access_token}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"status\": \"DRIVER_ARRIVED\",\n  \"notes\": \"Arrived at pickup location\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/{{ride_id}}/status",
+                  "host": ["{{base_url}}"],
+                  "path": ["{{ride_id}}", "status"]
+                },
+                "description": "Mark arrival at pickup location"
+              }
+            },
+            {
+              "name": "4. Start Trip",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{driver_access_token}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/{{ride_id}}/start",
+                  "host": ["{{base_url}}"],
+                  "path": ["{{ride_id}}", "start"]
+                },
+                "description": "Start the ride with passenger onboard"
+              }
+            },
+            {
+              "name": "5. Complete Trip",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{driver_access_token}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"actualDistance\": 7.5,\n  \"waitingTime\": 2\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/{{ride_id}}/complete",
+                  "host": ["{{base_url}}"],
+                  "path": ["{{ride_id}}", "complete"]
+                },
+                "description": "Complete the city ride"
+              }
+            }
+          ],
+          "description": "Complete workflow for a typical city ride"
+        },
+        {
+          "name": "Scenario 2: Airport Pickup Workflow",
+          "item": [
+            {
+              "name": "1. Head to Airport",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{driver_access_token}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"coordinates\": [-73.8648, 40.7489],\n  \"heading\": 90,\n  \"speed\": 45,\n  \"accuracy\": 3\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/driver/location",
+                  "host": ["{{base_url}}"],
+                  "path": ["driver", "location"]
+                },
+                "description": "Update location while driving to LaGuardia Airport"
+              }
+            },
+            {
+              "name": "2. Airport Arrival",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{driver_access_token}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"status\": \"DRIVER_ARRIVED\",\n  \"notes\": \"Arrived at Terminal B - Gate 5\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/{{ride_id}}/status",
+                  "host": ["{{base_url}}"],
+                  "path": ["{{ride_id}}", "status"]
+                },
+                "description": "Mark arrival at airport pickup location"
+              }
+            },
+            {
+              "name": "3. Wait for Passenger",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{driver_access_token}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"coordinates\": [-73.8648, 40.7489],\n  \"heading\": 0,\n  \"speed\": 0,\n  \"accuracy\": 2\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/driver/location",
+                  "host": ["{{base_url}}"],
+                  "path": ["driver", "location"]
+                },
+                "description": "Update location while waiting (stationary)"
+              }
+            },
+            {
+              "name": "4. Start Airport Trip",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{driver_access_token}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/{{ride_id}}/start",
+                  "host": ["{{base_url}}"],
+                  "path": ["{{ride_id}}", "start"]
+                },
+                "description": "Start the airport trip"
+              }
+            },
+            {
+              "name": "5. Complete Airport Trip",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{driver_access_token}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"actualDistance\": 22.8,\n  \"waitingTime\": 12\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/{{ride_id}}/complete",
+                  "host": ["{{base_url}}"],
+                  "path": ["{{ride_id}}", "complete"]
+                },
+                "description": "Complete airport trip with luggage loading time"
+              }
+            }
+          ],
+          "description": "Complete workflow for airport pickup with waiting time"
+        }
+      ],
+      "description": "Real-world driver workflow scenarios"
+    },
+    {
+      "name": "6. Location Update Patterns",
+      "item": [
+        {
+          "name": "Real-time Location Updates",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driver_access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coordinates\": [{{$randomLongitude}}, {{$randomLatitude}}],\n  \"heading\": {{$randomInt}},\n  \"speed\": {{$randomInt}},\n  \"accuracy\": {{$randomInt}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/driver/location",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "location"]
+            },
+            "description": "Simulate real-time location updates with random data"
+          }
+        },
+        {
+          "name": "Highway Driving Update",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driver_access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coordinates\": [-73.7781, 40.6413],\n  \"heading\": 270,\n  \"speed\": 65,\n  \"accuracy\": 8\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/driver/location",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "location"]
+            },
+            "description": "Update location during highway driving (higher speed)"
+          }
+        },
+        {
+          "name": "Traffic Jam Update",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driver_access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coordinates\": [-73.9442, 40.8080],\n  \"heading\": 45,\n  \"speed\": 5,\n  \"accuracy\": 3\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/driver/location",
+              "host": ["{{base_url}}"],
+              "path": ["driver", "location"]
+            },
+            "description": "Update location during traffic jam (very low speed)"
+          }
+        }
+      ],
+      "description": "Different patterns of location updates based on driving conditions"
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Set default ride_id if not set",
+          "if (!pm.environment.get('ride_id')) {",
+          "    pm.environment.set('ride_id', 'RIDE_67890_SAMPLE');",
+          "}",
+          "",
+          "// Generate random coordinates within NYC area for testing",
+          "const nycCoords = {",
+          "    minLat: 40.4774,",
+          "    maxLat: 40.9176,",
+          "    minLng: -74.2591,",
+          "    maxLng: -73.7004",
+          "};",
+          "",
+          "pm.globals.set('randomLatitude', (Math.random() * (nycCoords.maxLat - nycCoords.minLat) + nycCoords.minLat).toFixed(6));",
+          "pm.globals.set('randomLongitude', (Math.random() * (nycCoords.maxLng - nycCoords.minLng) + nycCoords.minLng).toFixed(6));"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Common test script for all requests",
+          "pm.test('Status code is success', function () {",
+          "    pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+          "});",
+          "",
+          "pm.test('Response has success field', function () {",
+          "    const response = pm.response.json();",
+          "    pm.expect(response).to.have.property('success');",
+          "});",
+          "",
+          "// Log response for debugging",
+          "console.log('Response:', pm.response.json());"
+        ]
+      }
+    }
+  ]
+}
