@@ -1,29 +1,94 @@
 import Joi from 'joi';
 
+// --- Signup ---
 export const validateSignup = (body) => {
   const schema = Joi.object({
     name: Joi.string().trim().min(2).max(100).required(),
     email: Joi.string().email().required(),
     phoneNumber: Joi.string()
-      .pattern(/^[0-9+\- ]{7,20}$/)
+      .pattern(/^\+?[0-9]{7,15}$/) // E.164 format recommended
       .required(),
     password: Joi.string().min(8).max(128).required(),
     type: Joi.array()
       .items(Joi.string().valid('passenger', 'driver'))
       .optional(),
   });
+
   return schema.validateAsync(body);
 };
 
+// --- Login ---
+const loginSchema = Joi.object({
+  // Either email OR phoneNumber is required for passenger
+  email: Joi.string().email().optional(),
+  phoneNumber: Joi.string()
+    .pattern(/^[0-9+\- ]{7,20}$/)
+    .optional(),
+
+  // Password is only required for passengers
+  password: Joi.string().min(8).max(128).optional(),
+
+  // Role must be either passenger or driver
+  role: Joi.string().valid("passenger", "driver").required(),
+}).custom((value, helpers) => {
+  // Passenger flow: needs email/phone + password
+  if (value.role === "passenger") {
+    if ((!value.email && !value.phoneNumber) || !value.password) {
+      return helpers.error("any.invalid", {
+        message: "Passenger login requires email/phone and password",
+      });
+    }
+  }
+
+  // Driver flow: only needs phone number
+  if (value.role === "driver") {
+    if (!value.phoneNumber) {
+      return helpers.error("any.invalid", {
+        message: "Driver login requires phoneNumber",
+      });
+    }
+  }
+
+  return value;
+}, "role-specific validation");
+
+export const validateLogin = (payload) =>
+  loginSchema.validateAsync(payload, { abortEarly: false });
+
+// --- Reset Password ---
+// API expects: phoneNumber + newPassword
 const resetSchema = Joi.object({
+  phoneNumber: Joi.string()
+    .pattern(/^\+?[0-9]{7,15}$/)
+    .required(),
   newPassword: Joi.string().min(8).max(128).required(),
 });
 
 export const validateResetPassword = (body) => resetSchema.validateAsync(body);
 
-const loginSchema = Joi.object({
-  email: Joi.string().email().required(),
-  password: Joi.string().min(8).max(128).required(),
+// --- Forgot Password ---
+// API expects: phoneNumber
+const forgotSchema = Joi.object({
+  phoneNumber: Joi.string()
+    .pattern(/^\+?[0-9]{7,15}$/)
+    .required(),
 });
 
-export const validateLogin = (payload) => loginSchema.validateAsync(payload);
+export const validateForgotPassword = (body) =>
+  forgotSchema.validateAsync(body);
+
+// --- OTP Verification ---
+// API expects: role, otp, and either phoneNumber or email
+const otpVerifySchema = Joi.object({
+  role: Joi.string().valid('driver', 'passenger').required(),
+  otp: Joi.string().length(5).required(), // assuming 5-digit OTP
+  phoneNumber: Joi.string()
+    .pattern(/^\+?[0-9]{7,15}$/)
+    .optional(),
+  email: Joi.string().email().optional(),
+  type: Joi.string()
+    .valid('login', 'register', 'reset-password', 'verify-passenger')
+    .optional(),
+}).xor('phoneNumber', 'email'); // must provide exactly one
+
+export const validateOtpVerify = (body) => otpVerifySchema.validateAsync(body);

@@ -5,6 +5,8 @@ import {
   resetPasswordController,
   loginController,
   refreshController,
+  otpVerificationController,
+  forgotPasswordController,
 } from '../../../controllers/User/authIndex.js';
 import { verifyFirebaseToken } from '../../../middlewares/firebaseAuth.js';
 
@@ -18,15 +20,26 @@ registerRoute({
 
 registerRoute({
   router,
+  route: '/login',
+  post_method: loginController,
+});
+
+registerRoute({
+  router,
   route: '/reset-password',
-  post_middlewares: [verifyFirebaseToken],
   post_method: resetPasswordController,
 });
 
 registerRoute({
   router,
-  route: '/login',
-  post_method: loginController,
+  route: '/verify-otp',
+  post_method: otpVerificationController,
+});
+
+registerRoute({
+  router,
+  route: '/forgot-password',
+  post_method: forgotPasswordController,
 });
 
 registerRoute({

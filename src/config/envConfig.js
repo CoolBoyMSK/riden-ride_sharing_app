@@ -54,9 +54,25 @@ const env = {
   AWS_S3_BUCKET: required(process.env.AWS_S3_BUCKET, 'AWS_S3_BUCKET'),
   FRONTEND_URL: required(process.env.FRONTEND_URL, 'FRONTEND_URL'),
   REDIS_URL: required(process.env.REDIS_URL, 'REDIS_URL'),
-  TWILIO_ACCOUNT_SID: required(process.env.TWILIO_ACCOUNT_SID, 'TWILIO_ACCOUNT_SID'),
-  TWILIO_AUTH_TOKEN: required(process.env.TWILIO_AUTH_TOKEN, 'TWILIO_AUTH_TOKEN'),
-  TWILIO_PHONE_NUMBER: required(process.env.TWILIO_PHONE_NUMBER, 'TWILIO_PHONE_NUMBER')
+  TWILIO_ACCOUNT_SID: required(
+    process.env.TWILIO_ACCOUNT_SID,
+    'TWILIO_ACCOUNT_SID',
+  ),
+  TWILIO_AUTH_TOKEN: required(
+    process.env.TWILIO_AUTH_TOKEN,
+    'TWILIO_AUTH_TOKEN',
+  ),
+  TWILIO_PHONE_NUMBER: required(
+    process.env.TWILIO_PHONE_NUMBER,
+    'TWILIO_PHONE_NUMBER',
+  ),
+  OTP_TTL_SECONDS: required(process.env.OTP_TTL_SECONDS, 'OTP_TTL_SECONDS'),
+  OTP_COOLDOWN_SECONDS: required(
+    process.env.OTP_COOLDOWN_SECONDS,
+    'OTP_COOLDOWN_SECONDS',
+  ),
+  OTP_MAX_ATTEMPTS_PER_HOUR: required(process.env, 'OTP_MAX_ATTEMPTS_PER_HOUR'),
+  OTP_HMAC_KEY: required(process.env.OTP_HMAC_KEY, 'OTP_HMAC_KEY'),
 };
 
 export default env;

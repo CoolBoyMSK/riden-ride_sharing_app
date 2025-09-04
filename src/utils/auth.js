@@ -18,7 +18,7 @@ const comparePasswords = async (plainPassword, hashedPassword) => {
 };
 
 const generateOtp = () => {
-  return crypto.randomInt(100000, 999999).toString();
+  return crypto.randomInt(10000, 99999).toString();
 };
 
 const generateAccessToken = (payload) => {

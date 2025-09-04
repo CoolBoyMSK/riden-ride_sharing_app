@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { USER_TYPES } from '../enums/userRoles.js';
 import { GENDER_TYPES } from '../enums/genderEnums.js';
+import { AUTH_PROVIDERS } from '../enums/authProviders.js';
 
 const userSchema = new mongoose.Schema(
   {
@@ -48,6 +49,15 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    canResetPassword: {
+      type: Boolean,
+      default: false,
+    },
+    // authProvider: {
+    //   type: String,
+    //   enum: AUTH_PROVIDERS,
+    //   default: ['email'],
+    // },
   },
   {
     timestamps: true,

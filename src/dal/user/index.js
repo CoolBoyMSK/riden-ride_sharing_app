@@ -3,7 +3,7 @@ import UserModel from '../../models/User.js';
 export const findUserByEmail = (email) => UserModel.findOne({ email }).lean();
 
 export const findUserByPhone = (phoneNumber) =>
-  UserModel.findOne({ phoneNumber }).lean();
+  UserModel.findOne({ phoneNumber, isPhoneVerified: true }).lean();
 
 export const createUser = (payload) => new UserModel(payload).save();
 

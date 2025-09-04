@@ -3,6 +3,8 @@ import {
   refreshTokens,
   resetUserPassword,
   signupUser,
+  otpVerification,
+  forgotPassword,
 } from '../../services/User/auth/index.js';
 import { handleResponse } from '../../utils/handleRespone.js';
 import {
@@ -23,18 +25,6 @@ export const signupController = (req, res) =>
     res,
   );
 
-export const resetPasswordController = (req, res) =>
-  handleResponse(
-    {
-      handler: resetUserPassword,
-      validationFn: validateResetPassword,
-      handlerParams: [req.body.newPassword, req.firebasePhone],
-      successMessage: 'Password has been reset',
-    },
-    req,
-    res,
-  );
-
 export const loginController = (req, res) =>
   handleResponse(
     {
@@ -42,6 +32,42 @@ export const loginController = (req, res) =>
       validationFn: validateLogin,
       handlerParams: [req.body],
       successMessage: 'User logged in successfully',
+    },
+    req,
+    res,
+  );
+
+export const otpVerificationController = (req, res) =>
+  handleResponse(
+    {
+      handler: otpVerification,
+      validationFn: null, // you may add validateOtp if you create one
+      handlerParams: [req.body],
+      successMessage: 'OTP verified successfully',
+    },
+    req,
+    res,
+  );
+
+export const forgotPasswordController = (req, res) =>
+  handleResponse(
+    {
+      handler: forgotPassword,
+      validationFn: null,
+      handlerParams: [req.body],
+      successMessage: 'OTP sent for password reset',
+    },
+    req,
+    res,
+  );
+
+export const resetPasswordController = (req, res) =>
+  handleResponse(
+    {
+      handler: resetUserPassword,
+      validationFn: validateResetPassword,
+      handlerParams: [req.body],
+      successMessage: 'Password has been reset',
     },
     req,
     res,
