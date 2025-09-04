@@ -53,6 +53,26 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    addresses: [
+      {
+        title: {
+          type: String,
+          trim: true,
+        },
+        location: {
+          type: {
+            type: String,
+            enum: ['Point'],
+            default: 'Point',
+          },
+          coordinates: {
+            type: [Number], // [longitude, latitude]
+            required: true,
+            index: '2dsphere',
+          },
+        },
+      },
+    ],
     // authProvider: {
     //   type: String,
     //   enum: AUTH_PROVIDERS,

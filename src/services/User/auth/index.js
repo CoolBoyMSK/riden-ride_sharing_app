@@ -52,46 +52,6 @@ export const signupUser = async (
   return resp;
 };
 
-// export const loginUser = async ({ email, password }, resp) => {
-//   const user = await findUserByEmail(email);
-//   if (!user) {
-//     resp.error = true;
-//     resp.error_message = 'Invalid credentials';
-//     return resp;
-//   }
-
-//   const match = await comparePasswords(password, user.password);
-//   if (!match) {
-//     resp.error = true;
-//     resp.error_message = 'Invalid credentials';
-//     return resp;
-//   }
-
-//   const userId = user._id.toString();
-
-//   if (user.roles.includes('passenger')) {
-//     const passenger = await findPassengerByUserId(userId);
-//     if (!passenger) {
-//       await createPassengerProfile(userId);
-//     }
-//   }
-
-//   if (user.roles.includes('driver')) {
-//     const driver = await findDriverByUserId(userId);
-//     if (!driver) {
-//       await createDriverProfile(userId);
-//     }
-//   }
-
-//   const payload = { id: userId, roles: user.roles };
-//   resp.data = {
-//     accessToken: generateAccessToken(payload),
-//     refreshToken: generateRefreshToken(payload),
-//   };
-
-//   return resp;
-// };
-
 export const loginUser = async (
   { email, phoneNumber, password, role },
   resp,
