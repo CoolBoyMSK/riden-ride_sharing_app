@@ -32,6 +32,7 @@ export const loginService = async ({ email, password }, resp) => {
 
   const payload = { id: admin._id, type: admin.type };
   resp.data = {
+    user: admin,
     accessToken: generateAccessToken(payload),
     refreshToken: generateRefreshToken(payload),
   };
