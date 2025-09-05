@@ -1,5 +1,6 @@
 import express from 'express';
 import {
+  getAddressesController,
   addAddressController,
   updateAddressController,
   deleteAddressController,
@@ -7,6 +8,13 @@ import {
 import { registerRoute } from '../../../utils/registerRoute.js';
 
 const router = express.Router();
+
+registerRoute({
+  router,
+  route: '/',
+  passenger_auth_enable: true,
+  get_method: getAddressesController,
+});
 
 registerRoute({
   router,
@@ -26,7 +34,7 @@ registerRoute({
   router,
   route: '/delete',
   passenger_auth_enable: true,
-  patch_method: deleteAddressController,
+  delete_method: deleteAddressController,
 });
 
 export default router;

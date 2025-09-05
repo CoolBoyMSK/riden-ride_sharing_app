@@ -247,7 +247,7 @@ export const otpVerification = async (
     if (role === 'passenger') {
       // verify phone if not already verified
       if (!user.isPhoneVerified) {
-        await updateUserById(userId, { isPhoneVerified: true });
+        await updateUserById({_id: userId}, { isPhoneVerified: true });
       }
 
       const payload = { id: userId, roles: user.roles };

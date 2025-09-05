@@ -1,4 +1,5 @@
 import {
+  getAddresses,
   addAddress,
   updateAddress,
   deleteAddress,
@@ -10,12 +11,25 @@ import {
   validateDeleteAddress,
 } from '../../../validations/user/passenger/addressManagementValidators.js';
 
+export const getAddressesController = (req, res) => {
+  handleResponse(
+    {
+      handler: getAddresses,
+      validationFn: null,
+      handlerParams: [req.user],
+      successMessage: 'Address(es) fetched successfully',
+    },
+    req,
+    res,
+  );
+};
+
 export const addAddressController = (req, res) => {
   handleResponse(
     {
       handler: addAddress,
       validationFn: validateAddAddress,
-      handlerParams: [req.body],
+      handlerParams: [req.user, req.body],
       successMessage: 'Address Added successfully',
     },
     req,
@@ -28,10 +42,10 @@ export const updateAddressController = (req, res) => {
     {
       handler: updateAddress,
       validationFn: validateUpdateAddress,
-      handlerParams: [req.body],
+      handlerParams: [req.user, req.body],
       successMessage: 'Address Updated successfully',
     },
-    res,
+    req,
     res,
   );
 };
@@ -41,7 +55,7 @@ export const deleteAddressController = (req, res) => {
     {
       handler: deleteAddress,
       validationFn: validateDeleteAddress,
-      handleParams: [req.body],
+      handlerParams: [req.user, req.body],
       successMessage: 'Address Deleted Successfully',
     },
     req,

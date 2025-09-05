@@ -7,7 +7,7 @@ export const findUserByPhone = (phoneNumber) =>
 
 export const createUser = (payload) => new UserModel(payload).save();
 
-export const updateUserById = (id, update) =>
-  UserModel.findByIdAndUpdate(id, update, { new: true });
+export const updateUserById = (filter, update) =>
+  UserModel.findOneAndUpdate(filter, update, { new: true });
 
 export const findUserById = (id) => UserModel.findById(id).lean();

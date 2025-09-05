@@ -9,6 +9,7 @@ export const authenticateUser = (req, res, next) => {
       .json({ code: 401, message: 'Missing or invalid auth header' });
   }
   const payload = verifyAccessToken(token);
+  console.log('Payload', payload);
   if (!payload) {
     return res
       .status(401)

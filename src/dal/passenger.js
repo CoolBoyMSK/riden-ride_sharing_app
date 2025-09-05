@@ -13,6 +13,9 @@ export const createPassengerProfile = (userId) =>
 
 export const countPassengers = () => PassengerModel.countDocuments();
 
+export const updatePassenger = (filter, payload) =>
+  PassengerModel.findOneAndUpdate(filter, payload, { new: true });
+
 export const updatePassengerById = (passengerId, payload) =>
   PassengerModel.findByIdAndUpdate(passengerId, payload, { new: true });
 

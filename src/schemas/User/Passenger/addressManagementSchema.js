@@ -11,13 +11,6 @@ const objectId = () =>
 
 // --- Add Address Schema ---
 export const addAddressSchema = Joi.object({
-  user: Joi.object({
-    id: objectId().required().messages({
-      'any.required': 'User ID is required',
-      'any.invalid': 'Invalid user ID format',
-    }),
-  }).required(),
-
   title: Joi.string().trim().min(2).max(50).required().messages({
     'string.base': 'Title must be a string',
     'string.empty': 'Title cannot be empty',
@@ -43,13 +36,6 @@ export const addAddressSchema = Joi.object({
 
 // --- Update Address Schema ---
 export const updateAddressSchema = Joi.object({
-  user: Joi.object({
-    id: objectId().required().messages({
-      'any.required': 'User ID is required',
-      'any.invalid': 'Invalid user ID format',
-    }),
-  }).required(),
-
   addressId: objectId().required().messages({
     'any.required': 'Address ID is required',
     'any.invalid': 'Invalid address ID format',
@@ -82,13 +68,6 @@ export const updateAddressSchema = Joi.object({
 
 // --- Delete Address Schema ---
 export const deleteAddressSchema = Joi.object({
-  user: Joi.object({
-    id: objectId().required().messages({
-      'any.required': 'User ID is required',
-      'any.invalid': 'Invalid user ID format',
-    }),
-  }).required(),
-
   addressId: objectId().required().messages({
     'any.required': 'Address ID is required',
     'any.invalid': 'Invalid address ID format',
