@@ -3,6 +3,7 @@ import redisConfig from '../config/redisConfig.js';
 import { otpQueue } from '../queues/otpQueue.js';
 import { getTwilioClient, TWILIO_CONFIG } from '../config/twilioConfig.js';
 import env from '../config/envConfig.js';
+let client = getTwilioClient();
 
 const HMAC_KEY = env.OTP_HMAC_KEY;
 
@@ -40,75 +41,108 @@ const setWithTTL = async (key, ttlSeconds, value) => {
 };
 
 // used both for phone-signup (driver) and social/email when phone provided
-export const requestOtp = async (phoneNumber, context = {}) => {
-  // cooldown check
-  const cdTtl = await redisConfig.ttl(cooldownKey(phoneNumber));
-  if (cdTtl > 0) return { ok: false, waitSeconds: cdTtl };
+// export const requestOtp = async (phoneNumber, context = {}) => {
+//   // cooldown check
+//   const cdTtl = await redisConfig.ttl(cooldownKey(phoneNumber));
+//   if (cdTtl > 0) return { ok: false, waitSeconds: cdTtl };
 
-  // generate + hash
-  const otp = generateOtp();
-  console.log('Generated OTP:', otp);
-  const hashed = hashOtp(otp);
+//   // generate + hash
+//   const otp = generateOtp();
+//   console.log('Generated OTP:', otp);
+//   const hashed = hashOtp(otp);
 
-  // store hashed otp with TTL
-  await setWithTTL(otpKey(phoneNumber), env.OTP_TTL_SECONDS, hashed);
+//   // store hashed otp with TTL
+//   await setWithTTL(otpKey(phoneNumber), env.OTP_TTL_SECONDS, hashed);
 
-  // set cooldown
-  await setWithTTL(cooldownKey(phoneNumber), env.OTP_COOLDOWN_SECONDS, '1');
+//   // set cooldown
+//   await setWithTTL(cooldownKey(phoneNumber), env.OTP_COOLDOWN_SECONDS, '1');
 
-  // store pending payload if provided
-  if (Object.keys(context || {}).length > 0) {
-    await setWithTTL(
-      pendingKey(phoneNumber),
-      env.OTP_TTL_SECONDS,
-      JSON.stringify(context),
-    );
-  }
+//   // store pending payload if provided
+//   if (Object.keys(context || {}).length > 0) {
+//     await setWithTTL(
+//       pendingKey(phoneNumber),
+//       env.OTP_TTL_SECONDS,
+//       JSON.stringify(context),
+//     );
+//   }
 
-  // enqueue SMS job (Twilio consumer will process this)
-  await otpQueue.add('sendOtp', { phoneNumber, otp });
+//   // enqueue SMS job (Twilio consumer will process this)
+//   await otpQueue.add('sendOtp', { phoneNumber, otp });
 
-  // return ok (⚠️ never return OTP in production!)
-  return { ok: true };
-};
+//   // return ok (⚠️ never return OTP in production!)
+//   return { ok: true };
+// };
 
-export const verifyOtp = async (phoneNumber, otpRaw) => {
-  const storedHash = await redisConfig.get(otpKey(phoneNumber));
-  if (!storedHash) return { ok: false, reason: 'expired_or_not_requested' };
+// export const verifyOtp = async (phoneNumber, otpRaw) => {
+//   const storedHash = await redisConfig.get(otpKey(phoneNumber));
+//   if (!storedHash) return { ok: false, reason: 'expired_or_not_requested' };
 
-  const inputHash = hashOtp(otpRaw);
-  const match = compareHash(storedHash, inputHash);
-  if (!match) return { ok: false, reason: 'invalid_otp' };
+//   const inputHash = hashOtp(otpRaw);
+//   const match = compareHash(storedHash, inputHash);
+//   if (!match) return { ok: false, reason: 'invalid_otp' };
 
-  // read pending payload
-  const pending = await redisConfig.get(pendingKey(phoneNumber));
+//   // read pending payload
+//   const pending = await redisConfig.get(pendingKey(phoneNumber));
 
-  // cleanup after success
-  await redisConfig.del(
-    otpKey(phoneNumber),
-    cooldownKey(phoneNumber),
-    pendingKey(phoneNumber),
-  );
+//   // cleanup after success
+//   await redisConfig.del(
+//     otpKey(phoneNumber),
+//     cooldownKey(phoneNumber),
+//     pendingKey(phoneNumber),
+//   );
 
-  return { ok: true, pending: pending ? JSON.parse(pending) : null };
-};
+//   return { ok: true, pending: pending ? JSON.parse(pending) : null };
+// };
 
-export const resendOtp = async (phoneNumber, context = {}) => {
-  return requestOtp(phoneNumber, context);
-};
+// export const resendOtp = async (phoneNumber, context = {}) => {
+//   return requestOtp(phoneNumber, context);
+// };
 
-export const sendOtpSms = async (receiver, otp) => {
+// export const sendOtpSms = async (receiver, otp) => {
+//   try {
+//     const client = getTwilioClient();
+
+//     const message = await client.messages.create({
+//       body: `Your OTP code is ${otp}. Please do not share it with anyone.`,
+//       from: TWILIO_CONFIG.phoneNumber,
+//       to: receiver,
+//     });
+
+//     return message.sid;
+//   } catch (error) {
+//     console.error('❌ Failed to send OTP SMS:', error.message);
+//   }
+// };
+
+export const sendOtp = async (phoneNumber) => {
   try {
-    const client = getTwilioClient();
+    console.log(`🔔 Sending OTP to ${phoneNumber}...`);
 
-    const message = await client.messages.create({
-      body: `Your OTP code is ${otp}. Please do not share it with anyone.`,
-      from: TWILIO_CONFIG.phoneNumber,
-      to: receiver,
-    });
+    const verification = await client.verify.v2
+      .services(env.TWILIO_VERIFY_SERVICE_SID)
+      .verifications.create({
+        to: phoneNumber,
+        channel: 'sms',
+      });
+    return { success: true };
+  } catch (err) {
+    console.error(`ERROR SENDING OTP to ${phoneNumber}: ${err.message}`);
+    throw new Error('Failed to send OTP, please try again later.');
+  }
+};
 
-    return message.sid;
-  } catch (error) {
-    console.error('❌ Failed to send OTP SMS:', error.message);
+export const verifyOtp = async (phoneNumber, code) => {
+  try {
+    const verificationCheck = await client.verify.v2
+      .services(env.TWILIO_VERIFY_SERVICE_SID)
+      .verificationChecks.create({
+        to: phoneNumber,
+        code,
+      });
+
+    return verificationCheck.status === 'approved';
+  } catch (err) {
+    console.error(`OTP VERIFICATION ERROR for ${phoneNumber}: ${err.message}`);
+    throw new Error('Failed to verify OTP, please try again later.');
   }
 };

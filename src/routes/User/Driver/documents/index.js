@@ -5,6 +5,7 @@ import {
   uploadDocumentController,
 } from '../../../../controllers/User/Drivers/Documents/index.js';
 import { uploadDriverDocumentToS3 } from '../../../../utils/s3Uploader.js';
+import { uploadSingle } from '../../../../middlewares/upload.js';
 
 const router = express.Router();
 
@@ -19,7 +20,7 @@ registerRoute({
   router,
   route: '/upload/:docType',
   driver_auth_enable: true,
-  put_middlewares: [uploadDriverDocumentToS3],
+  put_middlewares: [uploadSingle],
   put_method: uploadDocumentController,
 });
 

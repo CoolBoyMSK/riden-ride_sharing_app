@@ -19,7 +19,8 @@ import {
   createDriverProfile,
   findDriverByUserId,
 } from '../../../dal/driver.js';
-import { verifyOtp, requestOtp } from '../../../utils/otpUtils.js';
+// import { otpQueue } from '../../../queues/otpQueue.js';
+import { verifyOtp, sendOtp } from '../../../utils/otpUtils.js';
 
 export const signupUser = async (
   { name, email, phoneNumber, password, type },
@@ -92,12 +93,13 @@ export const loginUser = async (
       // ✅ Check if phone is verified
       if (!user.isPhoneVerified) {
         // send OTP to phone
-        await requestOtp(phoneNumber, {
-          type: 'verify-passenger',
-          role: 'passenger',
-          userId: user?._id,
-        });
 
+        const sent = await sendOtp(phoneNumber);
+        if (!sent.success) {
+          resp.error = true;
+          resp.error_message = 'Failed to send otp';
+          return resp;
+        }
         resp.data = { otpSent: true, flow: 'verify-phone' };
         return resp;
       }
@@ -125,11 +127,11 @@ export const loginUser = async (
 
       if (user && user.isPhoneVerified) {
         // ✅ Existing verified driver → Send OTP for login
-        await requestOtp(phoneNumber, {
-          type: 'login',
-          role: 'driver',
-          userId: user?._id,
-        });
+      
+        console.log('before');
+        const sent = await sendOtp(phoneNumber);
+        console.log('after');
+        console.log(sent);
 
         resp.data = { otpSent: true, flow: 'login' };
         return resp;
@@ -145,11 +147,13 @@ export const loginUser = async (
           });
         }
 
-        await requestOtp(phoneNumber, {
-          type: 'register',
-          role: 'driver',
-          userId: user?._id,
-        });
+        const sent = await sendOtp(phoneNumber);
+        if (!sent.success) {
+          resp.error = true;
+          resp.error_message = 'Failed to send otp';
+          return resp;
+        }
+
         resp.data = { otpSent: true, flow: 'register' };
         return resp;
       }
@@ -213,9 +217,9 @@ export const otpVerification = async (
 
     if (role === 'driver') {
       if (!user.isPhoneVerified) {
-        await updateUserById(userId, {
+        user = await updateUserById(userId, {
           isPhoneVerified: true,
-          status: 'active',
+          // status: 'active',
         });
 
         let driverProfile = await findDriverByUserId(userId);
@@ -247,7 +251,7 @@ export const otpVerification = async (
     if (role === 'passenger') {
       // verify phone if not already verified
       if (!user.isPhoneVerified) {
-        await updateUserById({_id: userId}, { isPhoneVerified: true });
+        await updateUserById({ _id: userId }, { isPhoneVerified: true });
       }
 
       const payload = { id: userId, roles: user.roles };
@@ -271,7 +275,7 @@ export const otpVerification = async (
   }
 };
 
-export const forgotPassword = async ({phoneNumber}, resp) => {
+export const forgotPassword = async ({ phoneNumber }, resp) => {
   try {
     const user = await findUserByPhone(phoneNumber);
 
@@ -293,12 +297,13 @@ export const forgotPassword = async ({phoneNumber}, resp) => {
       return resp;
     }
 
-    // Send OTP for password reset
-    await requestOtp(phoneNumber, {
-      type: 'reset-password',
-      role: 'passenger',
-      userId: user?._id,
-    });
+    // Send OTP for password rese
+    const sent = await sendOtp(phoneNumber);
+    if (!sent.success) {
+      resp.error = true;
+      resp.error_message = 'Failed to send otp';
+      return resp;
+    }
 
     resp.data = { otpSent: true };
     return resp;
@@ -310,7 +315,7 @@ export const forgotPassword = async ({phoneNumber}, resp) => {
   }
 };
 
-export const resetUserPassword = async ({newPassword, phoneNumber}, resp) => {
+export const resetUserPassword = async ({ newPassword, phoneNumber }, resp) => {
   try {
     const user = await findUserByPhone(phoneNumber);
     if (!user) {

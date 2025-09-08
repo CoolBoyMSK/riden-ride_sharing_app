@@ -22,6 +22,8 @@ export const uploadDriverDocument = async (user, file, docType, resp) => {
     return resp;
   }
 
+  console.log(file)
+
   const imageUrl = await uploadDriverDocumentToS3(user.id, docType, file);
 
   const updated = await updateDriverDocumentRecord(user.id, docType, imageUrl);

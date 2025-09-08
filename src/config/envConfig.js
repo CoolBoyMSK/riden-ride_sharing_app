@@ -62,6 +62,7 @@ const env = {
     process.env.TWILIO_AUTH_TOKEN,
     'TWILIO_AUTH_TOKEN',
   ),
+  TWILIO_VERIFY_SERVICE_SID: required(process.env.TWILIO_VERIFY_SERVICE_SID, "TWILIO_VERIFY_SERVICE_SID"),
   TWILIO_PHONE_NUMBER: required(
     process.env.TWILIO_PHONE_NUMBER,
     'TWILIO_PHONE_NUMBER',

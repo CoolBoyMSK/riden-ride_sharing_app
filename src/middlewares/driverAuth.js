@@ -11,7 +11,7 @@ export const driverAuthenticate = async (req, res, next) => {
     return res.status(401).json({ code: 401, message: 'Unauthorized' });
 
   const user = await UserModel.findById(payload.id);
-  if (!user || user.type !== 'driver') {
+  if (!user || !user.roles.includes('driver')) {
     return res.status(403).json({ code: 403, message: 'Forbidden' });
   }
 

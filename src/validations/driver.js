@@ -13,6 +13,7 @@ export const validateDocTypeParam = (params) => {
     docType: Joi.string()
       .valid(
         'proofOfWork',
+        'profilePicture',
         'driversLicense',
         'commercialDrivingRecord',
         'vehicleOwnerCertificateAndInsurance',

@@ -85,6 +85,7 @@ const driverSchema = new mongoose.Schema(
 
     documents: {
       proofOfWork: { type: documentSchema, default: () => ({}) },
+      profilePicture: { type: documentSchema, default: () => ({}) },
       driversLicense: { type: documentSchema, default: () => ({}) },
       commercialDrivingRecord: { type: documentSchema, default: () => ({}) },
       vehicleOwnerCertificateAndInsurance: {
@@ -93,6 +94,11 @@ const driverSchema = new mongoose.Schema(
       },
       vehicleInspection: { type: documentSchema, default: () => ({}) },
     },
+
+    legalAgreemant: {
+      type: Boolean,
+      default: false
+    }
   },
   {
     timestamps: true,

@@ -1,7 +1,6 @@
 import mongoose from 'mongoose';
 import { USER_TYPES } from '../enums/userRoles.js';
 import { GENDER_TYPES } from '../enums/genderEnums.js';
-import { AUTH_PROVIDERS } from '../enums/authProviders.js';
 
 const userSchema = new mongoose.Schema(
   {
