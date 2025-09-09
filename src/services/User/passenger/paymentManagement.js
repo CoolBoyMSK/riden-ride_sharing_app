@@ -7,12 +7,11 @@ import mongoose from 'mongoose';
 
 export const addPaymentMethod = async (
   user,
-  { type, isDefault, card, wallet },
+  { type, isDefault, card },
   resp,
 ) => {
   try {
-    const payload = { type, isDefault };
-    type === 'CARD' ? (payload.card = card) : (payload.wallet = wallet);
+    const payload = { type, isDefault, card };
 
     const passenger = await updatePassenger(
       { userId: user.id },

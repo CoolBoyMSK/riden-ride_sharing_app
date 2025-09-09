@@ -1,23 +1,27 @@
 import mongoose from 'mongoose';
-import PAYMENT_METHODS from '../enums/paymentMethods.js';
 import CARD_BRANDS from '../enums/cardBrands.js';
-import WALLET_PROVIDERS from '../enums/walletProviders.js';
 
 const cardPaymentSchema = new mongoose.Schema(
   {
-    cardToken: {
+    cardNumber: {
       type: String,
       trim: true,
     },
-    last4: {
+    holderName: {
       type: String,
       minLenght: 4,
       maxLength: 4,
       require: true,
     },
-    cardBrand: {
+    BankName: {
       type: String,
-      enum: CARD_BRANDS,
+      required: true,
+      trim: true,
+    },
+    cvv: {
+      type: String,
+      minLenght: 3,
+      maxLength: 4,
       required: true,
     },
     expiryMonth: {
@@ -34,28 +38,12 @@ const cardPaymentSchema = new mongoose.Schema(
   { _id: false },
 );
 
-const walletPaymentSchema = new mongoose.Schema(
-  {
-    walletId: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-    walletProvider: {
-      type: String,
-      enum: WALLET_PROVIDERS,
-      required: true,
-    },
-  },
-  { _id: false },
-);
-
 const paymentMethodSchema = new mongoose.Schema(
   {
     type: {
       type: String,
-      enum: PAYMENT_METHODS,
-      required: true,
+      enum: ['CARD'],
+      default: 'CARD',
     },
     isDefault: {
       type: Boolean,
@@ -65,12 +53,6 @@ const paymentMethodSchema = new mongoose.Schema(
       type: cardPaymentSchema,
       required: () => {
         return this.type === 'CARD';
-      },
-    },
-    wallet: {
-      type: walletPaymentSchema,
-      required: () => {
-        return this.type === 'WALLET';
       },
     },
   },

@@ -1,41 +1,64 @@
 import Joi from 'joi';
-import PAYMENT_METHODS from '../../../enums/paymentMethods.js';
 import CARD_BRANDS from '../../../enums/cardBrands.js';
-import WALLET_PROVIDERS from '../../../enums/walletProviders.js';
 
 const cardSchema = Joi.object({
-  cardToken: Joi.string().trim().required(),
-  last4: Joi.string().length(4).pattern(/^\d+$/).required(),
-  cardBrand: Joi.string()
-    .valid(...CARD_BRANDS)
-    .required(),
-  expiryMonth: Joi.number().integer().min(1).max(12).required(),
-  expiryYear: Joi.number().integer().min(new Date().getFullYear()).required(),
-});
+  cardNumber: Joi.string().creditCard().required().messages({
+    'string.base': 'Card number must be a string',
+    'string.creditCard': 'Invalid card number format',
+    'any.required': 'Card number is required',
+  }),
 
-const walletSchema = Joi.object({
-  walletId: Joi.string().trim().required(),
-  walletProvider: Joi.string()
-    .valid(...WALLET_PROVIDERS)
-    .required(),
+  holderName: Joi.string().min(4).max(50).required().messages({
+    'string.base': 'Holder name must be a string',
+    'string.min': 'Holder name must be at least 4 characters long',
+    'string.max': 'Holder name cannot exceed 50 characters',
+    'any.required': 'Holder name is required',
+  }),
+
+  BankName: Joi.string().min(3).max(100).required().messages({
+    'string.base': 'Bank name must be a string',
+    'string.min': 'Bank name must be at least 3 characters long',
+    'string.max': 'Bank name cannot exceed 100 characters',
+    'any.required': 'Bank name is required',
+  }),
+
+  cvv: Joi.string()
+    .pattern(/^\d{3,4}$/)
+    .required()
+    .messages({
+      'string.pattern.base': 'CVV must be 3 or 4 digits',
+      'any.required': 'CVV is required',
+    }),
+
+  expiryMonth: Joi.number().integer().min(1).max(12).required().messages({
+    'number.base': 'Expiry month must be a number',
+    'number.min': 'Expiry month must be at least 1',
+    'number.max': 'Expiry month cannot be more than 12',
+    'any.required': 'Expiry month is required',
+  }),
+
+  expiryYear: Joi.number()
+    .integer()
+    .min(new Date().getFullYear())
+    .required()
+    .messages({
+      'number.base': 'Expiry year must be a number',
+      'number.min': 'Expiry year cannot be in the past',
+      'any.required': 'Expiry year is required',
+    }),
 });
 
 export const addPaymentMethodSchema = Joi.object({
-  type: Joi.string()
-    .valid(...PAYMENT_METHODS)
-    .required(),
+  type: Joi.string().valid('CARD').default('CARD').required().messages({
+    'any.only': "Type must be 'CARD'",
+    'any.required': 'Payment method type is required',
+  }),
 
   isDefault: Joi.boolean().default(false),
 
   card: Joi.when('type', {
     is: 'CARD',
     then: cardSchema.required(),
-    otherwise: Joi.forbidden(),
-  }),
-
-  wallet: Joi.when('type', {
-    is: 'WALLET',
-    then: walletSchema.required(),
     otherwise: Joi.forbidden(),
   }),
 });
