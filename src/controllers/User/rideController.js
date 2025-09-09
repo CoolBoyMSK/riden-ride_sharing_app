@@ -2,7 +2,7 @@ import {
   getFareEstimate,
   bookRide,
   cancelRide,
-  getAvailableCarTypes
+  getAvailableCarTypes,
 } from '../../services/User/ride/rideBookingService.js';
 import {
   getRideStatus,
@@ -13,22 +13,23 @@ import {
   completeRide,
   updateRideStatus,
   getRideHistory,
-  getUserRideStats
+  getUserRideStats,
 } from '../../services/User/ride/rideTrackingService.js';
 import {
   processRidePayment,
   refundPayment,
   getUserPaymentMethods,
-  getRideCostBreakdown
+  getRideCostBreakdown,
 } from '../../services/User/ride/paymentService.js';
 import { validatePromoCode } from '../../dal/promo_code.js';
 import { createResponseObject } from '../../utils/responseFactory.js';
-import { 
-  getMessagesByRide, 
+import {
+  getMessagesByRide,
   markAllMessagesRead,
   getChatStats,
-  getUnreadMessageCount 
+  getUnreadMessageCount,
 } from '../../dal/chat.js';
+import { findDriverByUserId } from '../../dal/driver.js';
 
 // Passenger Controllers
 
@@ -36,25 +37,30 @@ import {
 export const getFareEstimateController = async (req, res) => {
   try {
     const { pickupLocation, dropoffLocation, carType, promoCode } = req.body;
-    
-    const result = await getFareEstimate(pickupLocation, dropoffLocation, carType, promoCode);
-    
+
+    const result = await getFareEstimate(
+      pickupLocation,
+      dropoffLocation,
+      carType,
+      promoCode,
+    );
+
     if (result.success) {
       return res.status(200).json({
         success: true,
-        data: result.estimate
+        data: result.estimate,
       });
     } else {
       return res.status(400).json({
         success: false,
-        message: result.message
+        message: result.message,
       });
     }
   } catch (error) {
     console.error('Get fare estimate error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to get fare estimate'
+      message: 'Failed to get fare estimate',
     });
   }
 };
@@ -64,28 +70,28 @@ export const bookRideController = async (req, res) => {
   try {
     const userId = req.user.id;
     const rideData = req.body;
-    
+
     const result = await bookRide(userId, rideData);
-    
+
     if (result.success) {
       return res.status(201).json({
         success: true,
         message: result.message,
         data: result.ride,
-        driverSearchInfo: result.driverSearchInfo
+        driverSearchInfo: result.driverSearchInfo,
       });
     } else {
       return res.status(400).json({
         success: false,
         message: result.message,
-        activeRide: result.activeRide
+        activeRide: result.activeRide,
       });
     }
   } catch (error) {
     console.error('Book ride error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to book ride'
+      message: 'Failed to book ride',
     });
   }
 };
@@ -96,26 +102,26 @@ export const cancelRideController = async (req, res) => {
     const { rideId } = req.params;
     const userId = req.user.id;
     const { reason } = req.body;
-    
+
     const result = await cancelRide(rideId, userId, reason);
-    
+
     if (result.success) {
       return res.status(200).json({
         success: true,
         message: result.message,
-        data: result.ride
+        data: result.ride,
       });
     } else {
       return res.status(400).json({
         success: false,
-        message: result.message
+        message: result.message,
       });
     }
   } catch (error) {
     console.error('Cancel ride error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to cancel ride'
+      message: 'Failed to cancel ride',
     });
   }
 };
@@ -124,19 +130,19 @@ export const cancelRideController = async (req, res) => {
 export const getCurrentRideController = async (req, res) => {
   try {
     const userId = req.user.id;
-    
+
     const result = await getCurrentRide(userId);
-    
+
     return res.status(200).json({
       success: result.success,
       message: result.message,
-      data: result.ride
+      data: result.ride,
     });
   } catch (error) {
     console.error('Get current ride error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to get current ride'
+      message: 'Failed to get current ride',
     });
   }
 };
@@ -145,25 +151,25 @@ export const getCurrentRideController = async (req, res) => {
 export const getRideStatusController = async (req, res) => {
   try {
     const { rideId } = req.params;
-    
+
     const result = await getRideStatus(rideId);
-    
+
     if (result.success) {
       return res.status(200).json({
         success: true,
-        data: result.ride
+        data: result.ride,
       });
     } else {
       return res.status(404).json({
         success: false,
-        message: result.message
+        message: result.message,
       });
     }
   } catch (error) {
     console.error('Get ride status error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to get ride status'
+      message: 'Failed to get ride status',
     });
   }
 };
@@ -172,25 +178,25 @@ export const getRideStatusController = async (req, res) => {
 export const getDriverLocationController = async (req, res) => {
   try {
     const { rideId } = req.params;
-    
+
     const result = await getDriverLocation(rideId);
-    
+
     if (result.success) {
       return res.status(200).json({
         success: true,
-        data: result
+        data: result,
       });
     } else {
       return res.status(404).json({
         success: false,
-        message: result.message
+        message: result.message,
       });
     }
   } catch (error) {
     console.error('Get driver location error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to get driver location'
+      message: 'Failed to get driver location',
     });
   }
 };
@@ -199,25 +205,25 @@ export const getDriverLocationController = async (req, res) => {
 export const getAvailableCarTypesController = async (req, res) => {
   try {
     const { pickupLocation } = req.body;
-    
+
     const result = await getAvailableCarTypes(pickupLocation);
-    
+
     if (result.success) {
       return res.status(200).json({
         success: true,
-        data: result.carTypes
+        data: result.carTypes,
       });
     } else {
       return res.status(400).json({
         success: false,
-        message: result.message
+        message: result.message,
       });
     }
   } catch (error) {
     console.error('Get available car types error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to get available car types'
+      message: 'Failed to get available car types',
     });
   }
 };
@@ -227,15 +233,15 @@ export const getRideHistoryController = async (req, res) => {
   try {
     const userId = req.user.id;
     const { page, limit, status } = req.query;
-    
+
     const options = {
       page: parseInt(page) || 1,
       limit: parseInt(limit) || 10,
-      ...(status && { status })
+      ...(status && { status }),
     };
-    
+
     const result = await getRideHistory(userId, options);
-    
+
     if (result.success) {
       return res.status(200).json({
         success: true,
@@ -244,21 +250,21 @@ export const getRideHistoryController = async (req, res) => {
           pagination: {
             page: options.page,
             limit: options.limit,
-            total: result.rides.length
-          }
-        }
+            total: result.rides.length,
+          },
+        },
       });
     } else {
       return res.status(400).json({
         success: false,
-        message: result.message
+        message: result.message,
       });
     }
   } catch (error) {
     console.error('Get ride history error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to get ride history'
+      message: 'Failed to get ride history',
     });
   }
 };
@@ -268,25 +274,25 @@ export const getUserRideStatsController = async (req, res) => {
   try {
     const userId = req.user.id;
     const { startDate, endDate } = req.query;
-    
+
     const result = await getUserRideStats(userId, startDate, endDate);
-    
+
     if (result.success) {
       return res.status(200).json({
         success: true,
-        data: result.stats
+        data: result.stats,
       });
     } else {
       return res.status(400).json({
         success: false,
-        message: result.message
+        message: result.message,
       });
     }
   } catch (error) {
     console.error('Get user ride stats error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to get ride statistics'
+      message: 'Failed to get ride statistics',
     });
   }
 };
@@ -295,13 +301,13 @@ export const getUserRideStatsController = async (req, res) => {
 export const validatePromoCodeController = async (req, res) => {
   try {
     const { promoCode, estimatedFare } = req.body;
-    
+
     const validPromo = await validatePromoCode(promoCode);
-    
+
     if (validPromo) {
       const discount = (estimatedFare * validPromo.discount) / 100;
       const finalAmount = Math.max(0, estimatedFare - discount);
-      
+
       return res.status(200).json({
         success: true,
         data: {
@@ -311,20 +317,20 @@ export const validatePromoCodeController = async (req, res) => {
           discountAmount: discount,
           originalFare: estimatedFare,
           finalFare: finalAmount,
-          savings: discount
-        }
+          savings: discount,
+        },
       });
     } else {
       return res.status(400).json({
         success: false,
-        message: 'Invalid or expired promo code'
+        message: 'Invalid or expired promo code',
       });
     }
   } catch (error) {
     console.error('Validate promo code error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to validate promo code'
+      message: 'Failed to validate promo code',
     });
   }
 };
@@ -334,27 +340,29 @@ export const validatePromoCodeController = async (req, res) => {
 // Update driver location
 export const updateDriverLocationController = async (req, res) => {
   try {
-    const driverId = req.user.driverId; // Assuming driver middleware sets this
+    const userId = req.user.id;
+    const driver = await findDriverByUserId(userId);
+
     const locationData = req.body;
-    
-    const result = await updateDriverLocation(driverId, locationData);
-    
+
+    const result = await updateDriverLocation(driver._id, locationData);
+
     if (result.success) {
       return res.status(200).json({
         success: true,
-        data: result.location
+        data: result.location,
       });
     } else {
       return res.status(400).json({
         success: false,
-        message: result.message
+        message: result.message,
       });
     }
   } catch (error) {
     console.error('Update driver location error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to update location'
+      message: 'Failed to update location',
     });
   }
 };
@@ -364,26 +372,26 @@ export const startRideController = async (req, res) => {
   try {
     const { rideId } = req.params;
     const driverId = req.user.driverId;
-    
+
     const result = await startRide(rideId, driverId);
-    
+
     if (result.success) {
       return res.status(200).json({
         success: true,
         message: result.message,
-        data: result.ride
+        data: result.ride,
       });
     } else {
       return res.status(400).json({
         success: false,
-        message: result.message
+        message: result.message,
       });
     }
   } catch (error) {
     console.error('Start ride error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to start ride'
+      message: 'Failed to start ride',
     });
   }
 };
@@ -394,29 +402,29 @@ export const completeRideController = async (req, res) => {
     const { rideId } = req.params;
     const driverId = req.user.driverId;
     const completionData = req.body;
-    
+
     const result = await completeRide(rideId, driverId, completionData);
-    
+
     if (result.success) {
       return res.status(200).json({
         success: true,
         message: result.message,
         data: {
           ride: result.ride,
-          fareBreakdown: result.fareBreakdown
-        }
+          fareBreakdown: result.fareBreakdown,
+        },
       });
     } else {
       return res.status(400).json({
         success: false,
-        message: result.message
+        message: result.message,
       });
     }
   } catch (error) {
     console.error('Complete ride error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to complete ride'
+      message: 'Failed to complete ride',
     });
   }
 };
@@ -426,25 +434,25 @@ export const updateRideStatusController = async (req, res) => {
   try {
     const { rideId } = req.params;
     const { status, notes } = req.body;
-    
+
     const result = await updateRideStatus(rideId, status, { notes });
-    
+
     if (result.success) {
       return res.status(200).json({
         success: true,
-        data: result.ride
+        data: result.ride,
       });
     } else {
       return res.status(400).json({
         success: false,
-        message: result.message
+        message: result.message,
       });
     }
   } catch (error) {
     console.error('Update ride status error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to update ride status'
+      message: 'Failed to update ride status',
     });
   }
 };
@@ -455,27 +463,27 @@ export const updateRideStatusController = async (req, res) => {
 export const processPaymentController = async (req, res) => {
   try {
     const { rideId } = req.params;
-    
+
     const result = await processRidePayment(rideId);
-    
+
     if (result.success) {
       return res.status(200).json({
         success: true,
         message: result.message,
-        data: result.payment
+        data: result.payment,
       });
     } else {
       return res.status(400).json({
         success: false,
         message: result.message,
-        payment: result.payment
+        payment: result.payment,
       });
     }
   } catch (error) {
     console.error('Process payment error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Payment processing failed'
+      message: 'Payment processing failed',
     });
   }
 };
@@ -484,25 +492,25 @@ export const processPaymentController = async (req, res) => {
 export const getPaymentMethodsController = async (req, res) => {
   try {
     const userId = req.user.id;
-    
+
     const result = await getUserPaymentMethods(userId);
-    
+
     if (result.success) {
       return res.status(200).json({
         success: true,
-        data: result.paymentMethods
+        data: result.paymentMethods,
       });
     } else {
       return res.status(400).json({
         success: false,
-        message: result.message
+        message: result.message,
       });
     }
   } catch (error) {
     console.error('Get payment methods error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to get payment methods'
+      message: 'Failed to get payment methods',
     });
   }
 };
@@ -511,25 +519,25 @@ export const getPaymentMethodsController = async (req, res) => {
 export const getRideCostBreakdownController = async (req, res) => {
   try {
     const { rideId } = req.params;
-    
+
     const result = await getRideCostBreakdown(rideId);
-    
+
     if (result.success) {
       return res.status(200).json({
         success: true,
-        data: result.costBreakdown
+        data: result.costBreakdown,
       });
     } else {
       return res.status(404).json({
         success: false,
-        message: result.message
+        message: result.message,
       });
     }
   } catch (error) {
     console.error('Get ride cost breakdown error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to get cost breakdown'
+      message: 'Failed to get cost breakdown',
     });
   }
 };
@@ -542,39 +550,39 @@ export const getChatHistoryController = async (req, res) => {
     const { rideId } = req.params;
     const { before, limit, includeDeleted } = req.query;
     const userId = req.user.id;
-    
+
     // Verify user has access to this ride
     const { findRideByRideId } = await import('../../dal/ride.js');
     const ride = await findRideByRideId(rideId);
-    
+
     if (!ride) {
       return res.status(404).json({
         success: false,
-        message: 'Ride not found'
+        message: 'Ride not found',
       });
     }
-    
+
     // Check if user is participant in this ride
     const participants = [
       ride.passengerId?.userId?.toString(),
       ride.driverId?.userId?.toString(),
     ].filter(Boolean);
-    
+
     if (!participants.includes(userId)) {
       return res.status(403).json({
         success: false,
-        message: 'Access denied: Not a participant in this ride'
+        message: 'Access denied: Not a participant in this ride',
       });
     }
-    
+
     const options = {
       before,
       limit: parseInt(limit) || 50,
-      includeDeleted: includeDeleted === 'true'
+      includeDeleted: includeDeleted === 'true',
     };
-    
+
     const messages = await getMessagesByRide(rideId, options);
-    
+
     // Mark messages as delivered for this user
     try {
       const { markAllMessagesDelivered } = await import('../../dal/chat.js');
@@ -582,22 +590,22 @@ export const getChatHistoryController = async (req, res) => {
     } catch (error) {
       console.error('Failed to mark messages as delivered:', error);
     }
-    
+
     return res.status(200).json({
       success: true,
       data: {
         messages,
         pagination: {
           limit: options.limit,
-          hasMore: messages.length === options.limit
-        }
-      }
+          hasMore: messages.length === options.limit,
+        },
+      },
     });
   } catch (error) {
     console.error('Get chat history error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to get chat history'
+      message: 'Failed to get chat history',
     });
   }
 };
@@ -607,33 +615,33 @@ export const markMessagesReadController = async (req, res) => {
   try {
     const { rideId } = req.params;
     const userId = req.user.id;
-    
+
     // Verify user has access to this ride
     const { findRideByRideId } = await import('../../dal/ride.js');
     const ride = await findRideByRideId(rideId);
-    
+
     if (!ride) {
       return res.status(404).json({
         success: false,
-        message: 'Ride not found'
+        message: 'Ride not found',
       });
     }
-    
+
     // Check if user is participant in this ride
     const participants = [
       ride.passengerId?.userId?.toString(),
       ride.driverId?.userId?.toString(),
     ].filter(Boolean);
-    
+
     if (!participants.includes(userId)) {
       return res.status(403).json({
         success: false,
-        message: 'Access denied: Not a participant in this ride'
+        message: 'Access denied: Not a participant in this ride',
       });
     }
-    
+
     const result = await markAllMessagesRead(rideId, userId);
-    
+
     // Emit read receipt to other participants
     try {
       const { emitToRide } = await import('../../realtime/socket.js');
@@ -641,24 +649,24 @@ export const markMessagesReadController = async (req, res) => {
         rideId,
         readBy: userId,
         readAt: new Date(),
-        count: result.modifiedCount
+        count: result.modifiedCount,
       });
     } catch (error) {
       console.error('Failed to emit read receipt:', error);
     }
-    
+
     return res.status(200).json({
       success: true,
       data: {
         messagesRead: result.modifiedCount,
-        readAt: new Date()
-      }
+        readAt: new Date(),
+      },
     });
   } catch (error) {
     console.error('Mark messages read error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to mark messages as read'
+      message: 'Failed to mark messages as read',
     });
   }
 };
@@ -668,51 +676,48 @@ export const getChatStatsController = async (req, res) => {
   try {
     const { rideId } = req.params;
     const userId = req.user.id;
-    
+
     // Verify user has access to this ride
     const { findRideByRideId } = await import('../../dal/ride.js');
     const ride = await findRideByRideId(rideId);
-    
+
     if (!ride) {
       return res.status(404).json({
         success: false,
-        message: 'Ride not found'
+        message: 'Ride not found',
       });
     }
-    
+
     // Check if user is participant in this ride
     const participants = [
       ride.passengerId?.userId?.toString(),
       ride.driverId?.userId?.toString(),
     ].filter(Boolean);
-    
+
     if (!participants.includes(userId)) {
       return res.status(403).json({
         success: false,
-        message: 'Access denied: Not a participant in this ride'
+        message: 'Access denied: Not a participant in this ride',
       });
     }
-    
+
     const [stats, unreadCount] = await Promise.all([
       getChatStats(rideId),
-      getUnreadMessageCount(rideId, userId)
+      getUnreadMessageCount(rideId, userId),
     ]);
-    
+
     return res.status(200).json({
       success: true,
       data: {
         ...stats,
-        unreadCount
-      }
+        unreadCount,
+      },
     });
   } catch (error) {
     console.error('Get chat stats error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to get chat statistics'
+      message: 'Failed to get chat statistics',
     });
   }
 };
-
-
-

@@ -2,27 +2,55 @@ import {
   createRide,
   findActiveRideByPassenger,
   updateRideByRideId,
-  findRideByRideId
+  findRideByRideId,
 } from '../../../dal/ride.js';
 import { findPassengerByUserId } from '../../../dal/passenger.js';
 import { validatePromoCode } from '../../../dal/promo_code.js';
 import { calculateEstimatedFare } from './fareCalculationService.js';
-import { findAndAssignDriver, getNearbyDriversCount } from './driverMatchingService.js';
+import {
+  findAndAssignDriver,
+  getNearbyDriversCount,
+} from './driverMatchingService.js';
+import crypto from 'crypto';
 
 // Calculate distance using simple Haversine formula (for estimation)
 const calculateDistance = (pickup, dropoff) => {
   const R = 6371; // Earth's radius in kilometers
-  const dLat = (dropoff.coordinates[1] - pickup.coordinates[1]) * Math.PI / 180;
-  const dLon = (dropoff.coordinates[0] - pickup.coordinates[0]) * Math.PI / 180;
-  
-  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(pickup.coordinates[1] * Math.PI / 180) * Math.cos(dropoff.coordinates[1] * Math.PI / 180) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  
+  const dLat =
+    ((dropoff.coordinates[1] - pickup.coordinates[1]) * Math.PI) / 180;
+  const dLon =
+    ((dropoff.coordinates[0] - pickup.coordinates[0]) * Math.PI) / 180;
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((pickup.coordinates[1] * Math.PI) / 180) *
+      Math.cos((dropoff.coordinates[1] * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   const distance = R * c;
-  
+
   return distance;
+};
+
+// Generate Ride ID
+export const generateCryptoId = (length = 16) => {
+  const base62chars =
+    '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+  const toBase62 = (buffer) => {
+    let num = BigInt('0x' + buffer.toString('hex'));
+    let s = '';
+    while (num > 0n) {
+      s = base62chars[Number(num % 62n)] + s;
+      num = num / 62n;
+    }
+    return s || '0';
+  };
+
+  const randomBytes = crypto.randomBytes(length);
+  return toBase62(randomBytes);
 };
 
 // Estimate duration based on distance (simple calculation)
@@ -32,25 +60,35 @@ const estimateDuration = (distance) => {
 };
 
 // Get fare estimate
-export const getFareEstimate = async (pickupLocation, dropoffLocation, carType, promoCode = null) => {
+export const getFareEstimate = async (
+  pickupLocation,
+  dropoffLocation,
+  carType,
+  promoCode = null,
+) => {
   try {
     // Calculate distance and duration
     const distance = calculateDistance(pickupLocation, dropoffLocation);
     const duration = estimateDuration(distance);
-    
+
     // Calculate fare
-    const fareResult = await calculateEstimatedFare(carType, distance, duration, promoCode);
-    
+    const fareResult = await calculateEstimatedFare(
+      carType,
+      distance,
+      duration,
+      promoCode,
+    );
+
     if (!fareResult.success) {
       return {
         success: false,
-        message: fareResult.error
+        message: fareResult.error,
       };
     }
-    
+
     // Get nearby drivers count
     const driversInfo = await getNearbyDriversCount(pickupLocation, carType);
-    
+
     return {
       success: true,
       estimate: {
@@ -61,15 +99,14 @@ export const getFareEstimate = async (pickupLocation, dropoffLocation, carType, 
         promoDetails: fareResult.promoDetails,
         currency: fareResult.currency,
         availableDrivers: driversInfo.count,
-        estimatedWaitTime: driversInfo.estimatedWaitTime
-      }
+        estimatedWaitTime: driversInfo.estimatedWaitTime,
+      },
     };
-    
   } catch (error) {
     return {
       success: false,
       message: 'Failed to calculate fare estimate',
-      error: error.message
+      error: error.message,
     };
   }
 };
@@ -84,41 +121,44 @@ export const bookRide = async (userId, rideData) => {
       paymentMethod,
       promoCode,
       scheduledTime,
-      specialRequests
+      specialRequests,
     } = rideData;
-    
+
     // Find passenger profile
     const passenger = await findPassengerByUserId(userId);
     if (!passenger) {
       return {
         success: false,
-        message: 'Passenger profile not found'
+        message: 'Passenger profile not found',
       };
     }
-    
+
     // Check if passenger has any active rides
     const activeRide = await findActiveRideByPassenger(passenger._id);
     if (activeRide) {
       return {
         success: false,
         message: 'You already have an active ride',
-        activeRide: activeRide
+        activeRide: activeRide,
       };
     }
-    
+
     // Validate payment method exists in passenger profile
-    const hasPaymentMethod = passenger.paymentMethods.some(pm => pm.type === paymentMethod);
+    const hasPaymentMethod = passenger.paymentMethods.some(
+      (pm) => pm.type === paymentMethod,
+    );
     if (!hasPaymentMethod) {
       return {
         success: false,
-        message: 'Selected payment method not available. Please add payment method first.'
+        message:
+          'Selected payment method not available. Please add payment method first.',
       };
     }
-    
+
     // Calculate distance and duration
     const distance = calculateDistance(pickupLocation, dropoffLocation);
     const duration = estimateDuration(distance);
-    
+
     // Validate and apply promo code if provided
     let promoDetails = null;
     if (promoCode) {
@@ -126,28 +166,34 @@ export const bookRide = async (userId, rideData) => {
       if (!validPromo) {
         return {
           success: false,
-          message: 'Invalid or expired promo code'
+          message: 'Invalid or expired promo code',
         };
       }
       promoDetails = {
         code: validPromo.code,
         discount: validPromo.discount,
-        isApplied: true
+        isApplied: true,
       };
     }
-    
+
     // Calculate fare with promo code
-    const fareResult = await calculateEstimatedFare(carType, distance, duration, promoCode);
-    
+    const fareResult = await calculateEstimatedFare(
+      carType,
+      distance,
+      duration,
+      promoCode,
+    );
+
     if (!fareResult.success) {
       return {
         success: false,
-        message: fareResult.error
+        message: fareResult.error,
       };
     }
-    
+
     // Create ride record
     const ridePayload = {
+      rideId: generateCryptoId(12),
       passengerId: passenger._id,
       pickupLocation,
       dropoffLocation,
@@ -160,18 +206,18 @@ export const bookRide = async (userId, rideData) => {
       estimatedDuration: duration,
       estimatedFare: fareResult.estimatedFare,
       fareBreakdown: fareResult.fareBreakdown,
-      status: 'REQUESTED'
+      status: 'REQUESTED',
     };
-    
+
     const newRide = await createRide(ridePayload);
-    
+
     // Try to find and assign a driver
     const driverAssignment = await findAndAssignDriver(
       newRide._id,
       pickupLocation,
-      carType
+      carType,
     );
-    
+
     if (driverAssignment.success) {
       return {
         success: true,
@@ -186,8 +232,8 @@ export const bookRide = async (userId, rideData) => {
           driver: driverAssignment.assignedDriver,
           pickupLocation,
           dropoffLocation,
-          scheduledTime: newRide.scheduledTime
-        }
+          scheduledTime: newRide.scheduledTime,
+        },
       };
     } else {
       // No driver available immediately, but ride is created
@@ -203,21 +249,20 @@ export const bookRide = async (userId, rideData) => {
           promoDetails: promoDetails,
           pickupLocation,
           dropoffLocation,
-          scheduledTime: newRide.scheduledTime
+          scheduledTime: newRide.scheduledTime,
         },
         driverSearchInfo: {
           availableDriversCount: driverAssignment.availableDriversCount || 0,
-          message: driverAssignment.message
-        }
+          message: driverAssignment.message,
+        },
       };
     }
-    
   } catch (error) {
     console.error('Ride booking error:', error);
     return {
       success: false,
       message: 'Failed to book ride. Please try again.',
-      error: error.message
+      error: error.message,
     };
   }
 };
@@ -230,54 +275,60 @@ export const cancelRide = async (rideId, userId, reason = null) => {
     if (!ride) {
       return {
         success: false,
-        message: 'Ride not found'
+        message: 'Ride not found',
       };
     }
-    
+
     // Check if user is the passenger
     const passenger = await findPassengerByUserId(userId);
-    if (!passenger || ride.passengerId.toString() !== passenger._id.toString()) {
+    if (
+      !passenger ||
+      ride.passengerId.toString() !== passenger._id.toString()
+    ) {
       return {
         success: false,
-        message: 'Unauthorized to cancel this ride'
+        message: 'Unauthorized to cancel this ride',
       };
     }
-    
+
     // Check if ride can be cancelled
-    const cancellableStatuses = ['REQUESTED', 'DRIVER_ASSIGNED', 'DRIVER_ARRIVING'];
+    const cancellableStatuses = [
+      'REQUESTED',
+      'DRIVER_ASSIGNED',
+      'DRIVER_ARRIVING',
+    ];
     if (!cancellableStatuses.includes(ride.status)) {
       return {
         success: false,
-        message: `Cannot cancel ride. Current status: ${ride.status}`
+        message: `Cannot cancel ride. Current status: ${ride.status}`,
       };
     }
-    
+
     // Update ride status
     const updatedRide = await updateRideByRideId(rideId, {
       status: 'CANCELLED_BY_PASSENGER',
       cancelledBy: 'passenger',
       cancellationReason: reason,
-      paymentStatus: 'CANCELLED'
+      paymentStatus: 'CANCELLED',
     });
-    
+
     // Release driver if assigned
     if (ride.driverId) {
       const { releaseDriver } = await import('./driverMatchingService.js');
       await releaseDriver(ride.driverId);
     }
-    
+
     return {
       success: true,
       message: 'Ride cancelled successfully',
-      ride: updatedRide
+      ride: updatedRide,
     };
-    
   } catch (error) {
     console.error('Ride cancellation error:', error);
     return {
       success: false,
       message: 'Failed to cancel ride. Please try again.',
-      error: error.message
+      error: error.message,
     };
   }
 };
@@ -286,31 +337,30 @@ export const cancelRide = async (rideId, userId, reason = null) => {
 export const getAvailableCarTypes = async (pickupLocation) => {
   try {
     const { CAR_TYPES } = await import('../../../enums/carType.js');
-    
+
     const carTypesWithInfo = await Promise.all(
       CAR_TYPES.map(async (carType) => {
-        const driversInfo = await getNearbyDriversCount(pickupLocation, carType);
+        const driversInfo = await getNearbyDriversCount(
+          pickupLocation,
+          carType,
+        );
         return {
           type: carType,
           availableDrivers: driversInfo.count,
-          estimatedWaitTime: driversInfo.estimatedWaitTime
+          estimatedWaitTime: driversInfo.estimatedWaitTime,
         };
-      })
+      }),
     );
-    
+
     return {
       success: true,
-      carTypes: carTypesWithInfo
+      carTypes: carTypesWithInfo,
     };
-    
   } catch (error) {
     return {
       success: false,
       message: 'Failed to get available car types',
-      error: error.message
+      error: error.message,
     };
   }
 };
-
-
-

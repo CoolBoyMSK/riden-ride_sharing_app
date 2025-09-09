@@ -20,7 +20,7 @@ import {
   getRideCostBreakdownController,
   getChatHistoryController,
   markMessagesReadController,
-  getChatStatsController
+  getChatStatsController,
 } from '../../../controllers/User/rideController.js';
 import {
   fareEstimateValidation,
@@ -33,7 +33,7 @@ import {
   rideHistoryValidation,
   rideStatsValidation,
   promoCodeValidation,
-  rideIdValidation
+  rideIdValidation,
 } from '../../../validations/user/rideValidations.js';
 import { authenticateUser } from '../../../middlewares/genericAuth.js';
 import { authenticate as passengerAuth } from '../../../middlewares/passengerAuth.js';
@@ -163,6 +163,7 @@ registerRoute({
   router,
   route: '/driver/location',
   put_middlewares: [driverAuthenticate],
+  // driver_auth_enable: true,
   put_method: updateDriverLocationController,
   validation: driverLocationUpdateValidation,
 });
@@ -172,7 +173,7 @@ registerRoute({
   router,
   route: '/:rideId/start',
   put_middlewares: [driverAuthenticate],
-  put_method:      startRideController,
+  put_method: startRideController,
 });
 
 // Complete ride (driver)
@@ -220,6 +221,3 @@ registerRoute({
 });
 
 export default router;
-
-
-

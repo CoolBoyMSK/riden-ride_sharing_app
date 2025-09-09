@@ -66,5 +66,5 @@ export async function uploadDriverDocumentToS3(driverId, docType, file) {
   }
 
   const key = `documents/${driverId}/${docType}/${uuidv4()}${ext}`;
-  // return uploadFileToS3(file.buffer, key, file.mimetype);
+  return uploadFileToS3(file.buffer, key, file.mimetype);
 }

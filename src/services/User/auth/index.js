@@ -126,35 +126,59 @@ export const loginUser = async (
       let user = await findUserByPhone(phoneNumber);
 
       if (user && user.isPhoneVerified) {
-        // ✅ Existing verified driver → Send OTP for login
+        // For Production
+        // const sent = await sendOtp(phoneNumber);
+        // resp.data = { otpSent: true, flow: 'login' };
+        // For Production
 
-        console.log('before');
-        const sent = await sendOtp(phoneNumber);
-        console.log('after');
-        console.log(sent);
+        // For Testing
+        const payload = { id: user._id, roles: user.roles };
+        resp.data = {
+          user: user,
+          accessToken: generateAccessToken(payload),
+          refreshToken: generateRefreshToken(payload),
+          flow: 'login',
+        };
+        // For Testing
 
-        resp.data = { otpSent: true, flow: 'login' };
         return resp;
       } else {
-        // 🚀 New driver OR unverified driver → Send OTP for registration
         if (!user) {
-          // Create a pending driver record
           user = await createUser({
             phoneNumber,
             roles: ['driver'],
             status: 'pending',
-            isPhoneVerified: false,
+            // For Production
+            // isPhoneVerified: false,
+            // For Production
+
+            // For Testing
+            isPhoneVerified: true,
+            // For Testing
           });
+          await createDriverProfile(user._id);
         }
 
-        const sent = await sendOtp(phoneNumber);
-        if (!sent.success) {
-          resp.error = true;
-          resp.error_message = 'Failed to send otp';
-          return resp;
-        }
+        // For Production
+        // const sent = await sendOtp(phoneNumber);
+        // if (!sent.success) {
+        //   resp.error = true;
+        //   resp.error_message = 'Failed to send otp';
+        //   return resp;
+        // }
+        // resp.data = { otpSent: true, flow: 'register' };
+        // For Production
 
-        resp.data = { otpSent: true, flow: 'register' };
+        // For Testing
+        const payload = { id: user._id, roles: user.roles };
+        resp.data = {
+          user: user,
+          accessToken: generateAccessToken(payload),
+          refreshToken: generateRefreshToken(payload),
+          flow: 'login',
+        };
+        // For Testing
+
         return resp;
       }
     }
