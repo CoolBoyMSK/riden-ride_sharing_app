@@ -9,7 +9,7 @@ const cardPaymentSchema = new mongoose.Schema(
     },
     holderName: {
       type: String,
-      minLenght: 4,
+      minLength: 4,
       maxLength: 4,
       require: true,
     },
@@ -131,4 +131,4 @@ passengerSchema.index(
   },
 );
 
-export default mongoose.model('Passenger', passengerSchema);
+export default mongoose.model('Passenger', passengerSchema);
