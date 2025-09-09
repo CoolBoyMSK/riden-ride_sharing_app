@@ -1,7 +1,7 @@
-import fareManagement from '../models/fareManagement.js';
+import FareManagement from '../models/fareManagement.js';
 
 export async function createFareManagement(carType, dailyFares) {
-  const doc = new fareManagement({ carType, dailyFares });
+  const doc = new FareManagement({ carType, dailyFares });
   return await doc.save();
 }
 

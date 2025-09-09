@@ -1,4 +1,81 @@
 import mongoose from 'mongoose';
+import PAYMENT_METHODS from '../enums/paymentMethods.js';
+import CARD_BRANDS from '../enums/cardBrands.js';
+import WALLET_PROVIDERS from '../enums/walletProviders.js';
+
+const cardPaymentSchema = new mongoose.Schema(
+  {
+    cardToken: {
+      type: String,
+      trim: true,
+    },
+    last4: {
+      type: String,
+      minLenght: 4,
+      maxLength: 4,
+      require: true,
+    },
+    cardBrand: {
+      type: String,
+      enum: CARD_BRANDS,
+      required: true,
+    },
+    expiryMonth: {
+      type: Number,
+      min: 1,
+      max: 12,
+      required: true,
+    },
+    expiryYear: {
+      type: Number,
+      min: new Date().getFullYear(),
+    },
+  },
+  { _id: false },
+);
+
+const walletPaymentSchema = new mongoose.Schema(
+  {
+    walletId: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    walletProvider: {
+      type: String,
+      enum: WALLET_PROVIDERS,
+      required: true,
+    },
+  },
+  { _id: false },
+);
+
+const paymentMethodSchema = new mongoose.Schema(
+  {
+    type: {
+      type: String,
+      enum: PAYMENT_METHODS,
+      required: true,
+    },
+    isDefault: {
+      type: Boolean,
+      default: false,
+    },
+    card: {
+      type: cardPaymentSchema,
+      required: () => {
+        return this.type === 'CARD';
+      },
+    },
+    wallet: {
+      type: walletPaymentSchema,
+      required: () => {
+        return this.type === 'WALLET';
+      },
+    },
+  },
+  { _id: true, timestamps: true },
+);
 
 const addressSchema = new mongoose.Schema(
   {
@@ -56,23 +133,19 @@ const passengerSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-    paymentMethods: [
-      {
-        type: {
-          type: String,
-          enum: ['card', 'wallet', 'cash'],
-          required: true,
-        },
-        details: {
-          cardToken: String,
-          walletId: String,
-        },
-      },
-    ],
+    paymentMethods: [paymentMethodSchema],
     addresses: [addressSchema],
   },
   {
     timestamps: true,
+  },
+);
+
+passengerSchema.index(
+  { userId: 1, 'paymentMethods.isDefault': 1 },
+  {
+    unique: true,
+    partialFilterExpression: { 'paymentMethods.isDefault': true },
   },
 );
 

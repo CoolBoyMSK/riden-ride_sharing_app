@@ -1,5 +1,8 @@
 import PassengerModel from '../models/Passenger.js';
 
+export const findPassenger = (filter, project = {}, options = {}) =>
+  PassengerModel.findOne(filter, project, options);
+
 export const findPassengerByUserId = (userId) =>
   PassengerModel.findOne({ userId }).lean();
 
@@ -13,8 +16,8 @@ export const createPassengerProfile = (userId) =>
 
 export const countPassengers = () => PassengerModel.countDocuments();
 
-export const updatePassenger = (filter, payload) =>
-  PassengerModel.findOneAndUpdate(filter, payload, { new: true });
+export const updatePassenger = (filter, payload, options = {}) =>
+  PassengerModel.findOneAndUpdate(filter, payload, { new: true, ...options });
 
 export const updatePassengerById = (passengerId, payload) =>
   PassengerModel.findByIdAndUpdate(passengerId, payload, { new: true });

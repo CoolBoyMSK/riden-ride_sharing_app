@@ -3,78 +3,75 @@ import redisConfig from '../config/redisConfig.js';
 import { otpQueue } from '../queues/otpQueue.js';
 import { getTwilioClient, TWILIO_CONFIG } from '../config/twilioConfig.js';
 import env from '../config/envConfig.js';
+import { sendEmailVerificationOtp } from '../templates/emails/user/index.js';
+
 let client = getTwilioClient();
 
-const HMAC_KEY = env.OTP_HMAC_KEY;
+// const HMAC_KEY = env.OTP_HMAC_KEY;
 
-const generateOtp = () => {
-  return Math.floor(10000 + Math.random() * 90000).toString();
-};
+// // -------- Helpers -------- //
+// const generateOtp = () => Math.floor(10000 + Math.random() * 90000).toString();
 
-const hashOtp = (otp) => {
-  return crypto.createHmac('sha256', HMAC_KEY).update(otp).digest('hex');
-};
+// const hashOtp = (otp) =>
+//   crypto.createHmac('sha256', HMAC_KEY).update(otp).digest('hex');
 
-const compareHash = (a, b) => {
-  const A = Buffer.from(a, 'hex');
-  const B = Buffer.from(b, 'hex');
-  if (A.length !== B.length) return false;
-  return crypto.timingSafeEqual(A, B);
-};
+// const compareHash = (a, b) => {
+//   const A = Buffer.from(a, 'hex');
+//   const B = Buffer.from(b, 'hex');
+//   if (A.length !== B.length) return false;
+//   return crypto.timingSafeEqual(A, B);
+// };
 
-const otpKey = (phone) => `otp:${phone}`;
-const cooldownKey = (phone) => `otp_cd:${phone}`;
-const pendingKey = (phone) => `otp_pending:${phone}`;
+// // Redis keys
+// const otpKey = (email) => `email_otp:${email}`;
+// const cooldownKey = (email) => `email_otp_cd:${email}`;
+// const pendingKey = (email) => `email_otp_pending:${email}`;
 
-/**
- * Helper wrapper for Redis set with TTL
- * Works for both ioredis and node-redis v4+
- */
-const setWithTTL = async (key, ttlSeconds, value) => {
-  if (typeof redisConfig.setEx === 'function') {
-    // node-redis v4+
-    return redisConfig.setEx(key, ttlSeconds, value);
-  } else {
-    // ioredis or node-redis v3
-    return redisConfig.set(key, value, 'EX', ttlSeconds);
-  }
-};
+// // Set with TTL
+// const setWithTTL = async (key, ttlSeconds, value) => {
+//   if (typeof redisConfig.setEx === 'function') {
+//     return redisConfig.setEx(key, ttlSeconds, value);
+//   } else {
+//     return redisConfig.set(key, value, 'EX', ttlSeconds);
+//   }
+// };
 
-// used both for phone-signup (driver) and social/email when phone provided
-// export const requestOtp = async (phoneNumber, context = {}) => {
+// // -------- Services -------- //
+
+// // Request Email OTP
+// export const requestEmailOtp = async (email, username, context = {}) => {
 //   // cooldown check
-//   const cdTtl = await redisConfig.ttl(cooldownKey(phoneNumber));
+//   const cdTtl = await redisConfig.ttl(cooldownKey(email));
 //   if (cdTtl > 0) return { ok: false, waitSeconds: cdTtl };
 
-//   // generate + hash
+//   // generate & hash OTP
 //   const otp = generateOtp();
-//   console.log('Generated OTP:', otp);
 //   const hashed = hashOtp(otp);
 
 //   // store hashed otp with TTL
-//   await setWithTTL(otpKey(phoneNumber), env.OTP_TTL_SECONDS, hashed);
+//   await setWithTTL(otpKey(email), env.OTP_TTL_SECONDS, hashed);
 
 //   // set cooldown
-//   await setWithTTL(cooldownKey(phoneNumber), env.OTP_COOLDOWN_SECONDS, '1');
+//   await setWithTTL(cooldownKey(email), env.OTP_COOLDOWN_SECONDS, '1');
 
 //   // store pending payload if provided
 //   if (Object.keys(context || {}).length > 0) {
 //     await setWithTTL(
-//       pendingKey(phoneNumber),
+//       pendingKey(email),
 //       env.OTP_TTL_SECONDS,
 //       JSON.stringify(context),
 //     );
 //   }
 
-//   // enqueue SMS job (Twilio consumer will process this)
-//   await otpQueue.add('sendOtp', { phoneNumber, otp });
+//   // send email using your nodemailer template
+//   await sendEmailVerificationOtp(email, otp, username); // pass OTP here
 
-//   // return ok (⚠️ never return OTP in production!)
 //   return { ok: true };
 // };
 
-// export const verifyOtp = async (phoneNumber, otpRaw) => {
-//   const storedHash = await redisConfig.get(otpKey(phoneNumber));
+// // Verify Email OTP
+// export const verifyEmailOtp = async (email, otpRaw) => {
+//   const storedHash = await redisConfig.get(otpKey(email));
 //   if (!storedHash) return { ok: false, reason: 'expired_or_not_requested' };
 
 //   const inputHash = hashOtp(otpRaw);
@@ -82,38 +79,20 @@ const setWithTTL = async (key, ttlSeconds, value) => {
 //   if (!match) return { ok: false, reason: 'invalid_otp' };
 
 //   // read pending payload
-//   const pending = await redisConfig.get(pendingKey(phoneNumber));
+//   const pending = await redisConfig.get(pendingKey(email));
 
 //   // cleanup after success
-//   await redisConfig.del(
-//     otpKey(phoneNumber),
-//     cooldownKey(phoneNumber),
-//     pendingKey(phoneNumber),
-//   );
+//   await redisConfig.del(otpKey(email), cooldownKey(email), pendingKey(email));
 
 //   return { ok: true, pending: pending ? JSON.parse(pending) : null };
 // };
 
-// export const resendOtp = async (phoneNumber, context = {}) => {
-//   return requestOtp(phoneNumber, context);
+// // Resend OTP
+// export const resendEmailOtp = async (email,username, context = {}) => {
+//   return requestEmailOtp(email, username, context);
 // };
 
-// export const sendOtpSms = async (receiver, otp) => {
-//   try {
-//     const client = getTwilioClient();
-
-//     const message = await client.messages.create({
-//       body: `Your OTP code is ${otp}. Please do not share it with anyone.`,
-//       from: TWILIO_CONFIG.phoneNumber,
-//       to: receiver,
-//     });
-
-//     return message.sid;
-//   } catch (error) {
-//     console.error('❌ Failed to send OTP SMS:', error.message);
-//   }
-// };
-
+// Phone Number verification Otp Services
 export const sendOtp = async (phoneNumber) => {
   try {
     console.log(`🔔 Sending OTP to ${phoneNumber}...`);

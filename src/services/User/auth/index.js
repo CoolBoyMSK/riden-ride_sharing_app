@@ -64,8 +64,22 @@ export const loginUser = async (
 
       if (email) {
         user = await findUserByEmail(email);
+        if (user && !user.isEmailVerified) {
+          // const code = 12345;
+          // await sendEmailVerificationOtp(email, code, user.name);
+        }
       } else if (phoneNumber) {
         user = await findUserByPhone(phoneNumber);
+        if (user && !user.isPhoneVerified) {
+          const sent = await sendOtp(phoneNumber);
+          if (!sent.success) {
+            resp.error = true;
+            resp.error_message = 'Failed to send otp';
+            return resp;
+          }
+          resp.data = { otpSent: true, flow: 'verify-phone' };
+          return resp;
+        }
       }
 
       if (!user) {
@@ -88,20 +102,6 @@ export const loginUser = async (
       let passenger = await findPassengerByUserId(userId);
       if (!passenger) {
         passenger = await createPassengerProfile(userId);
-      }
-
-      // ✅ Check if phone is verified
-      if (!user.isPhoneVerified) {
-        // send OTP to phone
-
-        const sent = await sendOtp(phoneNumber);
-        if (!sent.success) {
-          resp.error = true;
-          resp.error_message = 'Failed to send otp';
-          return resp;
-        }
-        resp.data = { otpSent: true, flow: 'verify-phone' };
-        return resp;
       }
 
       // ✅ If phone already verified → issue tokens
@@ -127,7 +127,7 @@ export const loginUser = async (
 
       if (user && user.isPhoneVerified) {
         // ✅ Existing verified driver → Send OTP for login
-      
+
         console.log('before');
         const sent = await sendOtp(phoneNumber);
         console.log('after');
