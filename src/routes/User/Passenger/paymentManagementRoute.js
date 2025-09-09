@@ -3,6 +3,7 @@ import {
   addPaymentMethodController,
   setDefaultPaymentMethodController,
   getPaymentMethodsController,
+  updatePaymentMethodController,
   deletePaymentMethodController,
 } from '../../../controllers/User/Passengers/paymentManagementController.js';
 import { registerRoute } from '../../../utils/registerRoute.js';
@@ -28,6 +29,13 @@ registerRoute({
   route: '/set-default',
   passenger_auth_enable: true,
   put_method: setDefaultPaymentMethodController,
+});
+
+registerRoute({
+  router,
+  route: '/edit',
+  passenger_auth_enable: true,
+  put_method: updatePaymentMethodController,
 });
 
 registerRoute({

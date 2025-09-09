@@ -10,13 +10,43 @@ export const addPaymentMethod = async (
   { type, isDefault, card },
   resp,
 ) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
   try {
+    const normalizedCardNumber = card.cardNumber.replace(/\s+/g, '');
+    const existingPassenger = await findPassenger(
+      {
+        userId: user.id,
+        'paymentMethods.card.cardNumber': normalizedCardNumber,
+      },
+      { 'paymentMethods.$': 1 },
+      { session },
+    );
+
+    if (existingPassenger) {
+      resp.error = true;
+      resp.error_message = 'This card is already added';
+      return resp;
+    }
+
+    if (isDefault) {
+      await updatePassenger(
+        { userId: user.id, 'paymentMethods.isDefault': true },
+        { $set: { 'paymentMethods.$[elem].isDefault': false } },
+        {
+          arrayFilters: [{ 'elem.isDefault': true }],
+          multi: true,
+          session,
+        },
+      );
+    }
+
     const payload = { type, isDefault, card };
 
     const passenger = await updatePassenger(
       { userId: user.id },
       { $push: { paymentMethods: payload } },
-      { new: true },
+      { new: true, session },
     );
 
     if (!passenger) {
@@ -24,9 +54,16 @@ export const addPaymentMethod = async (
       resp.error_message = 'Failed to Update the passenger';
       return resp;
     }
+
+    await session.commitTransaction();
+    session.endSession();
+
     resp.data = { paymentMethods: passenger.paymentMethods };
     return resp;
   } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+
     console.error(`API ERROR: ${error}`);
     resp.error = true;
     resp.error_message = 'Something went wrong while adding payment method';
@@ -57,9 +94,6 @@ export const setDefaultPaymentMethod = async (
     );
 
     if (!passenger) {
-      await session.abortTransaction();
-      session.endSession();
-
       resp.error = true;
       resp.error_message = 'Payment method not found or failed to set default';
       return resp;
@@ -103,6 +137,41 @@ export const getPaymentMethods = async (user, resp) => {
   }
 };
 
+export const updatePaymentMethod = async (
+  user,
+  { card, paymentMethodId },
+  resp,
+) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const passenger = await updatePassenger(
+      { userId: user.id, 'paymentMethods._id': paymentMethodId },
+      { $set: { 'paymentMethods.$.card': card } },
+      { session },
+    );
+
+    if (!passenger) {
+      resp.error = true;
+      resp.error_message = 'Failed to update Payment Method';
+      return resp;
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    resp.data = { paymentMethods: passenger.paymentMethods };
+    return resp;
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = 'Something went wrong while updating payment method';
+    return resp;
+  }
+};
+
 export const deletePaymentMethod = async (user, { paymentMethodId }, resp) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -116,7 +185,7 @@ export const deletePaymentMethod = async (user, { paymentMethodId }, resp) => {
 
     if (!passenger) {
       resp.error = true;
-      resp.error_message = error.message || 'Payment method not found';
+      resp.error_message = 'Payment method not found';
       return resp;
     }
 
@@ -149,7 +218,7 @@ export const deletePaymentMethod = async (user, { paymentMethodId }, resp) => {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
     resp.error_message =
-      error.message || 'Something went wrong while deleting the payment method';
+      'Something went wrong while deleting the payment method';
     return resp;
   }
 };

@@ -1,5 +1,14 @@
 import Joi from 'joi';
-import CARD_BRANDS from '../../../enums/cardBrands.js';
+
+const paymentMethodIdSchema = Joi.string()
+  .regex(/^[0-9a-fA-F]{24}$/)
+  .required()
+  .messages({
+    'string.base': 'Payment Method ID must be a string',
+    'string.empty': 'Payment Method ID is required',
+    'any.required': 'Payment Method ID is required',
+    'string.pattern.base': 'Invalid Payment Method ID format',
+  });
 
 const cardSchema = Joi.object({
   cardNumber: Joi.string().creditCard().required().messages({
@@ -64,13 +73,10 @@ export const addPaymentMethodSchema = Joi.object({
 });
 
 export const setDefaultPaymentSchema = Joi.object({
-  paymentMethodId: Joi.string()
-    .required()
-    .regex(/^[0-9a-fA-F]{24}$/)
-    .messages({
-      'string.base': 'Payment Method ID must be a string',
-      'string.empty': 'Payment Method ID is required',
-      'any.required': 'Payment Method ID is required',
-      'string.pattern.base': 'Invalid Payment Method ID format',
-    }),
+  paymentMethodId: paymentMethodIdSchema,
+});
+
+export const updatePaymentMethodSchema = Joi.object({
+  paymentMethodId: paymentMethodIdSchema,
+  card: cardSchema.required(),
 });

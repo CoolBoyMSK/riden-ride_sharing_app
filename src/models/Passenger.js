@@ -1,5 +1,4 @@
 import mongoose from 'mongoose';
-import CARD_BRANDS from '../enums/cardBrands.js';
 
 const cardPaymentSchema = new mongoose.Schema(
   {
@@ -131,4 +130,4 @@ passengerSchema.index(
   },
 );
 
-export default mongoose.model('Passenger', passengerSchema);
+export default mongoose.model('Passenger', passengerSchema);

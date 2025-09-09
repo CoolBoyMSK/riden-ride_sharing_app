@@ -2,12 +2,14 @@ import {
   addPaymentMethod,
   setDefaultPaymentMethod,
   getPaymentMethods,
+  updatePaymentMethod,
   deletePaymentMethod,
 } from '../../../services/User/passenger/paymentManagement.js';
 import { handleResponse } from '../../../utils/handleRespone.js';
 import {
   validatePaymentMethod,
   validateSetDefaultPaymentMethod,
+  validateUpdatePaymentMethodMethod,
 } from '../../../validations/user/passenger/paymentManagementValidators.js';
 
 export const addPaymentMethodController = (req, res) => {
@@ -43,6 +45,19 @@ export const getPaymentMethodsController = (req, res) => {
       validationFn: null,
       handlerParams: [req.user],
       successMessage: 'Payment Methods fetched successfully',
+    },
+    req,
+    res,
+  );
+};
+
+export const updatePaymentMethodController = (req, res) => {
+  handleResponse(
+    {
+      handler: updatePaymentMethod,
+      validationFn: validateUpdatePaymentMethodMethod,
+      handlerParams: [req.user, req.body],
+      successMessage: 'Payment Methods updated successfully',
     },
     req,
     res,
