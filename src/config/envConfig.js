@@ -74,6 +74,7 @@ const env = {
   ),
   OTP_MAX_ATTEMPTS_PER_HOUR: required(process.env, 'OTP_MAX_ATTEMPTS_PER_HOUR'),
   OTP_HMAC_KEY: required(process.env.OTP_HMAC_KEY, 'OTP_HMAC_KEY'),
+  STRIPE_SECRET_KEY: required(process.env.STRIPE_SECRET_KEY, "STRIPE_SECRET_KEY")
 };
 
 export default env;

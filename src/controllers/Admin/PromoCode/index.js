@@ -1,6 +1,7 @@
 import {
   createPromoCode,
   getAllPromoCodes,
+  getPromoCodesById,
   updatePromoCode,
   removePromoCode,
 } from '../../../services/Admin/PromoCodes/index.js';
@@ -26,8 +27,19 @@ export const listPromoCodesController = (req, res) =>
   handleResponse(
     {
       handler: getAllPromoCodes,
-      handlerParams: [],
+      handlerParams: [req.query],
       successMessage: 'Promo codes fetched',
+    },
+    req,
+    res,
+  );
+
+export const getPromoCodesByIdController = (req, res) =>
+  handleResponse(
+    {
+      handler: getPromoCodesById,
+      handlerParams: [req.params.id],
+      successMessage: 'Promo code fetched successfully',
     },
     req,
     res,

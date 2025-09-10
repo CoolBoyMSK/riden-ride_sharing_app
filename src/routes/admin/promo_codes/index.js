@@ -3,6 +3,7 @@ import { registerRoute } from '../../../utils/registerRoute.js';
 import {
   createPromoCodeController,
   deletePromoCodeController,
+  getPromoCodesByIdController,
   listPromoCodesController,
   updatePromoCodeController,
 } from '../../../controllers/Admin/PromoCode/index.js';
@@ -23,6 +24,8 @@ registerRoute({
   router,
   route: '/promocodes/:id',
   admin_auth_enable: true,
+  get_permission: 'promo_code_management',
+  get_method: getPromoCodesByIdController,
   put_permission: 'promo_code_management',
   put_method: updatePromoCodeController,
   delete_permission: 'promo_code_management',

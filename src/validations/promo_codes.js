@@ -25,6 +25,14 @@ const createPromoSchema = Joi.object({
 });
 
 const updatePromoSchema = Joi.object({
+  code: Joi.string()
+    .alphanum()
+    .length(8)
+    .uppercase()
+    .optional()
+    .description(
+      'Optional 8-char alphanumeric code; auto-generated if omitted',
+    ),
   discount: Joi.number()
     .min(0)
     .max(100)
