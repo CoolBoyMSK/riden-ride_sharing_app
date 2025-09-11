@@ -56,7 +56,11 @@ export function replaceFare(req, res) {
   return handleResponse(
     {
       handler: updateFareManagement,
-      validationFn: () => updateFareManagementValidation(req.body),
+      validationFn: () =>
+        updateFareManagementValidation({
+          carType: req.params.carType,
+          dailyFares: req.body.dailyFares,
+        }),
       handlerParams: [
         { carType: req.params.carType, dailyFares: req.body.dailyFares },
       ],

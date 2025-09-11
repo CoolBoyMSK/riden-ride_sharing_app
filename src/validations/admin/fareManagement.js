@@ -39,13 +39,18 @@ export const createFareManagementValidation = async (body) => {
 
 export const updateFareManagementValidation = createFareManagementValidation;
 
-export const updateDailyFareValidation = async (body) => {
+export const updateDailyFareValidation = async ({
+  carType,
+  day,
+  dailyFares,
+}) => {
   const schema = Joi.object({
     carType: Joi.string()
       .valid(...CAR_TYPES)
       .required(),
     day: Joi.string()
       .valid(...DAYS_OF_WEEK)
+      .insensitive()
       .required(),
     partialDailyFare: Joi.object({
       baseFare: Joi.number().min(0),
@@ -64,5 +69,8 @@ export const updateDailyFareValidation = async (body) => {
       .min(1)
       .required(),
   });
-  await schema.validateAsync(body, { abortEarly: false });
+  await schema.validateAsync(
+    { carType, day, dailyFares, partialDailyFare },
+    { abortEarly: false },
+  );
 };
