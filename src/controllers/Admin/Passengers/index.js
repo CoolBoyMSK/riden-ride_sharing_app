@@ -1,5 +1,7 @@
 import {
   blockPassenger,
+  getPassengerById,
+  deletePassengerById,
   getAllPassengers,
   unblockPassenger,
 } from '../../../services/Admin/Passengers/index.js';
@@ -10,9 +12,32 @@ export const fetchAllPassengers = (req, res) =>
   handleResponse(
     {
       handler: getAllPassengers,
-      validationFn: () => validatePagination(req.query),
+      validationFn: () =>
+        validatePagination({ limit: req.query.limit, page: req.query.page }),
       handlerParams: [req.query],
       successMessage: 'Passengers fetched successfully',
+    },
+    req,
+    res,
+  );
+
+export const getPassengerByIdController = (req, res) =>
+  handleResponse(
+    {
+      handler: getPassengerById,
+      handlerParams: [req.params],
+      successMessage: 'Passenger fetched successfully',
+    },
+    req,
+    res,
+  );
+
+export const deletePassengerByIdController = (req, res) =>
+  handleResponse(
+    {
+      handler: deletePassengerById,
+      handlerParams: [req.params],
+      successMessage: 'Passenger deleted successfully',
     },
     req,
     res,

@@ -138,6 +138,7 @@ export const loginUser = async (
           accessToken: generateAccessToken(payload),
           refreshToken: generateRefreshToken(payload),
           flow: 'login',
+          firstTimeLogin: false,
         };
         // For Testing
 
@@ -157,6 +158,18 @@ export const loginUser = async (
             // For Testing
           });
           await createDriverProfile(user._id);
+
+          // For Testing
+          const payload = { id: user._id, roles: user.roles };
+          resp.data = {
+            user: user,
+            accessToken: generateAccessToken(payload),
+            refreshToken: generateRefreshToken(payload),
+            flow: 'login',
+            firstTimeLogin: true,
+          };
+          return resp;
+          // For Testing
         }
 
         // For Production

@@ -62,7 +62,7 @@ export const getAllPromoCodes = async (
         return resp;
       }
 
-      // startsAt >= sDate  AND  endsAt <= eDate  (both inclusive)
+      // startsAt <= sDate  AND  endsAt >= eDate  (both inclusive)
       filter.$expr = {
         $and: [
           {
@@ -102,9 +102,9 @@ export const getAllPromoCodes = async (
         return resp;
       }
 
-      // endsAt <= eDate (inclusive)
+      // endsAt >= eDate (inclusive)
       filter.$expr = {
-        $lte: [
+        $gte: [
           { $dateToString: { format: '%Y-%m-%d', date: '$endsAt' } },
           eDate,
         ],
@@ -113,7 +113,6 @@ export const getAllPromoCodes = async (
     // --- end range logic ---
 
     const totalItems = await countPromos(filter);
-    const totalPages = Math.ceil(totalItems / limit);
 
     const promos = await dalListPromos({ page, limit }, filter);
 
@@ -129,7 +128,7 @@ export const getAllPromoCodes = async (
         total: totalItems,
         page: page ? parseInt(page) : null,
         limit: limit ? parseInt(limit) : null,
-        totalPages,
+        totalPages: Math.ceil(totalItems / limit),
       },
     };
 
