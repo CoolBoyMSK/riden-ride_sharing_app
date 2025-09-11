@@ -1,15 +1,18 @@
 import {
   findPromoById,
+  countPromos,
   createPromoCode as dalCreatePromo,
   listPromos as dalListPromos,
   findPromoByCode,
   updatePromoById,
   deletePromoById,
+  promoAvalability,
 } from '../../../dal/promo_code.js';
 import {
   generatePromoCodeString,
   validateDates,
 } from '../../../utils/promoCode.js';
+import { extractDate } from '../../../utils/ride.js';
 
 export const createPromoCode = async (
   { code, discount, startsAt, endsAt, isActive },
@@ -37,19 +40,18 @@ export const createPromoCode = async (
   return resp;
 };
 
-const extractDate = (dateStr) => {
-  const d = new Date(dateStr);
-  if (isNaN(d)) return null;
-  return d.toISOString().split('T')[0];
-};
-
 export const getAllPromoCodes = async (
-  { page = 1, limit = 10, startsAt, endsAt },
+  { page = 1, limit = 10, startsAt, endsAt, search },
   resp,
 ) => {
   try {
     const filter = {};
 
+    if (search) {
+      filter.code = search.toUpperCase();
+    }
+
+    // --- RANGE LOGIC (inclusive, uses extractDate only) ---
     if (startsAt && endsAt) {
       validateDates(new Date(startsAt), new Date(endsAt));
       const sDate = extractDate(startsAt);
@@ -60,16 +62,17 @@ export const getAllPromoCodes = async (
         return resp;
       }
 
+      // startsAt >= sDate  AND  endsAt <= eDate  (both inclusive)
       filter.$expr = {
         $and: [
           {
-            $eq: [
+            $gte: [
               { $dateToString: { format: '%Y-%m-%d', date: '$startsAt' } },
               sDate,
             ],
           },
           {
-            $eq: [
+            $lte: [
               { $dateToString: { format: '%Y-%m-%d', date: '$endsAt' } },
               eDate,
             ],
@@ -84,8 +87,9 @@ export const getAllPromoCodes = async (
         return resp;
       }
 
+      // startsAt >= sDate (inclusive)
       filter.$expr = {
-        $eq: [
+        $gte: [
           { $dateToString: { format: '%Y-%m-%d', date: '$startsAt' } },
           sDate,
         ],
@@ -98,13 +102,18 @@ export const getAllPromoCodes = async (
         return resp;
       }
 
+      // endsAt <= eDate (inclusive)
       filter.$expr = {
-        $eq: [
+        $lte: [
           { $dateToString: { format: '%Y-%m-%d', date: '$endsAt' } },
           eDate,
         ],
       };
     }
+    // --- end range logic ---
+
+    const totalItems = await countPromos(filter);
+    const totalPages = Math.ceil(totalItems / limit);
 
     const promos = await dalListPromos({ page, limit }, filter);
 
@@ -114,7 +123,17 @@ export const getAllPromoCodes = async (
       return resp;
     }
 
-    resp.data = promos;
+    resp.data = {
+      promos,
+      meta: {
+        total: totalItems,
+        page: page ? parseInt(page) : null,
+        limit: limit ? parseInt(limit) : null,
+        totalPages,
+      },
+    };
+
+    resp.meta = { data: totalItems };
     return resp;
   } catch (err) {
     console.error(err);
@@ -153,7 +172,7 @@ export const updatePromoCode = async (
   }
 
   if (code) {
-    if (await findPromoByCode(code)) {
+    if (await promoAvalability(id, code)) {
       resp.error = true;
       resp.error_message = 'Promo code already exists';
       return resp;

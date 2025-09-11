@@ -4,6 +4,10 @@ export const findPromoById = async (id) => {
   return PromoCodeModel.findOne({ _id: id });
 };
 
+export const countPromos = async (filter) => {
+  return PromoCodeModel.countDocuments(filter);
+};
+
 export const createPromoCode = async (payload) => {
   const promo = new PromoCodeModel(payload);
   return promo.save();
@@ -11,6 +15,13 @@ export const createPromoCode = async (payload) => {
 
 export const findPromoByCode = async (code) => {
   return PromoCodeModel.findOne({ code }).lean();
+};
+
+export const promoAvalability = async (id, code) => {
+  return PromoCodeModel.findOne({
+    code,
+    _id: { $ne: id },
+  }).lean();
 };
 
 export const listPromos = async ({ page, limit }, filter = {}) => {

@@ -371,9 +371,17 @@ export const updateDriverLocationController = async (req, res) => {
 export const startRideController = async (req, res) => {
   try {
     const { rideId } = req.params;
-    const driverId = req.user.driverId;
+    const userId = req.user.id;
 
-    const result = await startRide(rideId, driverId);
+    const driver = await findDriverByUserId(userId);
+    if (!driver) {
+      return res.status(404).json({
+        success: false,
+        message: 'Driver not found',
+      });
+    }
+
+    const result = await startRide(rideId, driver._id);
 
     if (result.success) {
       return res.status(200).json({
@@ -400,10 +408,18 @@ export const startRideController = async (req, res) => {
 export const completeRideController = async (req, res) => {
   try {
     const { rideId } = req.params;
-    const driverId = req.user.driverId;
+    const userId = req.user.id;
     const completionData = req.body;
 
-    const result = await completeRide(rideId, driverId, completionData);
+    const driver = await findDriverByUserId(userId);
+    if (!driver) {
+      return res.status(404).json({
+        success: false,
+        message: 'Driver not found',
+      });
+    }
+
+    const result = await completeRide(rideId, driver._id, completionData);
 
     if (result.success) {
       return res.status(200).json({

@@ -171,7 +171,7 @@ registerRoute({
 // Start ride (driver)
 registerRoute({
   router,
-  route: '/:rideId/start',
+  route: '/start/:rideId',
   put_middlewares: [driverAuthenticate],
   put_method: startRideController,
 });
@@ -179,7 +179,7 @@ registerRoute({
 // Complete ride (driver)
 registerRoute({
   router,
-  route: '/:rideId/complete',
+  route: '/complete/:rideId',
   put_middlewares: [driverAuthenticate],
   put_method: completeRideController,
   validation: rideCompletionValidation,
@@ -188,7 +188,7 @@ registerRoute({
 // Update ride status (driver)
 registerRoute({
   router,
-  route: '/:rideId/status',
+  route: '/status/:rideId',
   put_middlewares: [driverAuthenticate],
   put_method: updateRideStatusController,
   validation: rideStatusUpdateValidation,
