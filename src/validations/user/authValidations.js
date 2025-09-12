@@ -1,4 +1,5 @@
 import Joi from 'joi';
+import { GENDER_TYPES } from '../../enums/genderEnums.js';
 
 // --- Signup ---
 export const validateSignup = (body) => {
@@ -6,12 +7,27 @@ export const validateSignup = (body) => {
     name: Joi.string().trim().min(2).max(100).required(),
     email: Joi.string().email().required(),
     phoneNumber: Joi.string()
-      .pattern(/^\+?[0-9]{7,15}$/) // E.164 format recommended
-      .required(),
+      .pattern(/^\+?[0-9]{7,15}$/)
+      .when('type', {
+        is: Joi.array()
+          .items(Joi.string().valid('passenger', 'driver'))
+          .has('passenger'),
+        then: Joi.required(),
+        otherwise: Joi.optional(),
+      }),
     password: Joi.string().min(8).max(128).required(),
     type: Joi.array()
       .items(Joi.string().valid('passenger', 'driver'))
       .optional(),
+    gender: Joi.string()
+      .valid(...GENDER_TYPES)
+      .when('type', {
+        is: Joi.array()
+          .items(Joi.string().valid('passenger', 'driver'))
+          .has('passenger'),
+        then: Joi.required(),
+        otherwise: Joi.optional(),
+      }),
   });
 
   return schema.validateAsync(body);
@@ -29,28 +45,28 @@ const loginSchema = Joi.object({
   password: Joi.string().min(8).max(128).optional(),
 
   // Role must be either passenger or driver
-  role: Joi.string().valid("passenger", "driver").required(),
+  role: Joi.string().valid('passenger', 'driver').required(),
 }).custom((value, helpers) => {
   // Passenger flow: needs email/phone + password
-  if (value.role === "passenger") {
+  if (value.role === 'passenger') {
     if ((!value.email && !value.phoneNumber) || !value.password) {
-      return helpers.error("any.invalid", {
-        message: "Passenger login requires email/phone and password",
+      return helpers.error('any.invalid', {
+        message: 'Passenger login requires email/phone and password',
       });
     }
   }
 
   // Driver flow: only needs phone number
-  if (value.role === "driver") {
+  if (value.role === 'driver') {
     if (!value.phoneNumber) {
-      return helpers.error("any.invalid", {
-        message: "Driver login requires phoneNumber",
+      return helpers.error('any.invalid', {
+        message: 'Driver login requires phoneNumber',
       });
     }
   }
 
   return value;
-}, "role-specific validation");
+}, 'role-specific validation');
 
 export const validateLogin = (payload) =>
   loginSchema.validateAsync(payload, { abortEarly: false });

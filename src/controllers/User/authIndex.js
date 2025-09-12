@@ -18,7 +18,7 @@ export const signupController = (req, res) =>
     {
       handler: signupUser,
       validationFn: validateSignup,
-      handlerParams: [req.body],
+      handlerParams: [req.user, req.body],
       successMessage: 'User registered successfully',
     },
     req,

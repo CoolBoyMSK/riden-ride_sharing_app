@@ -10,6 +10,7 @@ import {
   findUserByPhone,
   createUser,
   updateUserById,
+  findUserById,
 } from '../../../dal/user/index.js';
 import {
   createPassengerProfile,
@@ -23,34 +24,82 @@ import {
 import { verifyOtp, sendOtp } from '../../../utils/otpUtils.js';
 
 export const signupUser = async (
-  { name, email, phoneNumber, password, type },
+  users,
+  { name, email, phoneNumber, gender, password },
   resp,
 ) => {
+  let user = await findUserById(users.id);
+  const hashed = await hashPassword(password);
+
   if (await findUserByEmail(email)) {
     resp.error = true;
     resp.error_message = 'Email already in use';
     return resp;
   }
-  if (await findUserByPhone(phoneNumber)) {
+
+  if (user.roles.includes('driver')) {
+    user = await updateUserById(
+      { _id: user._id },
+      {
+        email,
+        name,
+        password: hashed,
+        isPhoneVerified: true,
+        isEmailVerified: true,
+        isCompleted: true,
+      },
+    );
+
+    let driverProfile = await findDriverByUserId(user._id);
+    if (!driverProfile) {
+      driverProfile = await createDriverProfile(user._id);
+    }
+
+    const userObj = user.toObject();
+    delete userObj.password;
+    resp.data = userObj;
+    return resp;
+  } else if (user.roles.includes('passenger')) {
+    if (await findUserByEmail(email)) {
+      resp.error = true;
+      resp.error_message = 'Email already in use';
+      return resp;
+    }
+
+    if (await findUserByPhone(phoneNumber)) {
+      resp.error = true;
+      resp.error_message = 'Phone number already in use';
+      return resp;
+    }
+
+    user = await updateUserById(
+      { _id: user._id },
+      {
+        name,
+        email,
+        phoneNumber,
+        gender,
+        password: hashed,
+        isPhoneVerified: true,
+        isEmailVerified: true,
+        isCompleted: true,
+      },
+    );
+
+    let passengerProfile = await findPassengerByUserId(user._id);
+    if (!passengerProfile) {
+      passengerProfile = await createDriverProfile(user._id);
+    }
+
+    const userObj = user.toObject();
+    delete userObj.password;
+    resp.data = userObj;
+    return resp;
+  } else {
     resp.error = true;
-    resp.error_message = 'Phone number already in use';
+    resp.error_message = 'Invalid User role';
     return resp;
   }
-
-  const hashed = await hashPassword(password);
-  const roles = type?.includes('driver') ? ['driver'] : ['passenger'];
-  const user = await createUser({
-    name,
-    email,
-    phoneNumber,
-    password: hashed,
-    roles,
-  });
-
-  const userObj = user.toObject();
-  delete userObj.password;
-  resp.data = userObj;
-  return resp;
 };
 
 export const loginUser = async (
@@ -138,7 +187,6 @@ export const loginUser = async (
           accessToken: generateAccessToken(payload),
           refreshToken: generateRefreshToken(payload),
           flow: 'login',
-          firstTimeLogin: false,
         };
         // For Testing
 
@@ -166,7 +214,6 @@ export const loginUser = async (
             accessToken: generateAccessToken(payload),
             refreshToken: generateRefreshToken(payload),
             flow: 'login',
-            firstTimeLogin: true,
           };
           return resp;
           // For Testing
@@ -261,7 +308,7 @@ export const otpVerification = async (
 
         let driverProfile = await findDriverByUserId(userId);
         if (!driverProfile) {
-          driverProfile = await createDriverProfile(userId);
+          driverProfile = await createPassengerProfile(userId);
         }
 
         const payload = { id: userId, roles: user.roles };
