@@ -14,10 +14,7 @@ export const anyUserAuth = (req, res, next) => {
   if (!payload)
     return res.status(401).json({ code: 401, message: 'Invalid token' });
 
-  if (
-    !payload.roles.includes('driver') &&
-    !payload.roles.includes('passenger')
-  ) {
+  if (!['passenger', 'driver'].includes(payload.type)) {
     return res.status(403).json({ code: 403, message: 'Forbidden' });
   }
   req.user = payload;

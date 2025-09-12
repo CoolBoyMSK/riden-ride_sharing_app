@@ -25,10 +25,13 @@ import { verifyOtp, sendOtp } from '../../../utils/otpUtils.js';
 
 export const signupUser = async (
   users,
-  { name, email, phoneNumber, gender, password },
+  { name, email, phoneNumber, gender, password, type },
   resp,
 ) => {
-  let user = await findUserById(users.id);
+  let user;
+  if (users) {
+    user = await findUserById(users.id);
+  }
   const hashed = await hashPassword(password);
 
   if (await findUserByEmail(email)) {
@@ -37,7 +40,7 @@ export const signupUser = async (
     return resp;
   }
 
-  if (user.roles.includes('driver')) {
+  if (users && users.roles.includes('driver')) {
     user = await updateUserById(
       { _id: user._id },
       {
@@ -59,7 +62,7 @@ export const signupUser = async (
     delete userObj.password;
     resp.data = userObj;
     return resp;
-  } else if (user.roles.includes('passenger')) {
+  } else if (type && type.includes('passenger')) {
     if (await findUserByEmail(email)) {
       resp.error = true;
       resp.error_message = 'Email already in use';
@@ -72,19 +75,16 @@ export const signupUser = async (
       return resp;
     }
 
-    user = await updateUserById(
-      { _id: user._id },
-      {
-        name,
-        email,
-        phoneNumber,
-        gender,
-        password: hashed,
-        isPhoneVerified: true,
-        isEmailVerified: true,
-        isCompleted: true,
-      },
-    );
+    user = await createUser({
+      name,
+      email,
+      phoneNumber,
+      gender,
+      password: hashed,
+      isPhoneVerified: true,
+      isEmailVerified: true,
+      isCompleted: true,
+    });
 
     let passengerProfile = await findPassengerByUserId(user._id);
     if (!passengerProfile) {

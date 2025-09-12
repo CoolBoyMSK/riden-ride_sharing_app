@@ -9,14 +9,15 @@ import {
   forgotPasswordController,
 } from '../../../controllers/User/authIndex.js';
 import { verifyFirebaseToken } from '../../../middlewares/firebaseAuth.js';
-import { anyUserAuth } from '../../../middlewares/anyUserAuth.js';
+import { driverAuthenticate } from '../../../middlewares/driverAuth.js';
 
 const router = express.Router();
 
 registerRoute({
   router,
   route: '/signup',
-  post_middlewares: [anyUserAuth],
+  put_middlewares: [driverAuthenticate],
+  put_method: signupController,
   post_method: signupController,
 });
 
