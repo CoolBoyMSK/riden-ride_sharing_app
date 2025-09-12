@@ -7,6 +7,7 @@ import {
   updatePromoById,
   deletePromoById,
   promoAvalability,
+  searchPromoCode,
 } from '../../../dal/promo_code.js';
 import {
   generatePromoCodeString,
@@ -138,6 +139,25 @@ export const getAllPromoCodes = async (
     console.error(err);
     resp.error = true;
     resp.error_message = 'Something went wrong while fetching promo codes';
+    return resp;
+  }
+};
+
+export const getSearchPromoCode = async ({ search, page, limit }, resp) => {
+  try {
+    const promos = await searchPromoCode(search, page, limit);
+    if (!promos) {
+      resp.error = true;
+      resp.error_message = 'Faild to search promo';
+      return resp;
+    }
+
+    resp.data = promos;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = ' Something went wrong while searching promocodes';
     return resp;
   }
 };

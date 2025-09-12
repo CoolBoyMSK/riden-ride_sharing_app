@@ -1,6 +1,7 @@
 import {
   createPromoCode,
   getAllPromoCodes,
+  getSearchPromoCode,
   getPromoCodesById,
   updatePromoCode,
   removePromoCode,
@@ -29,6 +30,18 @@ export const listPromoCodesController = (req, res) =>
       handler: getAllPromoCodes,
       handlerParams: [req.query],
       successMessage: 'Promo codes fetched',
+    },
+    req,
+    res,
+  );
+
+export const getSearchPromoCodeController = (req, res) =>
+  handleResponse(
+    {
+      handler: getSearchPromoCode,
+      // validationFn: validateCreatePromoCode,
+      handlerParams: [req.query],
+      successMessage: 'Searched Promo codes fetched',
     },
     req,
     res,

@@ -2,6 +2,8 @@ import {
   createAdmin,
   getAllAdmins,
   updateAdmin,
+  getSearchAdmins,
+  deleteAdminById,
 } from '../../../services/Admin/Admins/adminService.js';
 import { handleResponse } from '../../../utils/handleRespone.js';
 import {
@@ -13,7 +15,7 @@ export const fetchAdmins = (req, res) => {
   return handleResponse(
     {
       handler: getAllAdmins,
-      handlerParams: [req.user],
+      handlerParams: [req.user, req.query],
       successMessage: 'Admins fetched successfully',
     },
     req,
@@ -34,6 +36,19 @@ export const addAdmin = (req, res) => {
   );
 };
 
+export const getSearchAdminsController = (req, res) => {
+  return handleResponse(
+    {
+      handler: getSearchAdmins,
+      // validationFn: validateUpdateAdmin,
+      handlerParams: [req.query],
+      successMessage: 'Admin searched successfully',
+    },
+    req,
+    res,
+  );
+};
+
 export const updateAdminController = (req, res) => {
   const payload = { ...req.body, id: req.params.id };
   return handleResponse(
@@ -42,6 +57,19 @@ export const updateAdminController = (req, res) => {
       validationFn: validateUpdateAdmin,
       handlerParams: [payload, req.user],
       successMessage: 'Admin updated successfully',
+    },
+    req,
+    res,
+  );
+};
+
+export const deleteAdminByIdController = (req, res) => {
+  return handleResponse(
+    {
+      handler: deleteAdminById,
+      // validationFn: validateUpdateAdmin,
+      handlerParams: [req.params],
+      successMessage: 'Admin deleted successfully',
     },
     req,
     res,

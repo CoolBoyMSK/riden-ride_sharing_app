@@ -3,6 +3,7 @@ import { registerRoute } from '../../../utils/registerRoute.js';
 import {
   createPromoCodeController,
   deletePromoCodeController,
+  getSearchPromoCodeController,
   getPromoCodesByIdController,
   listPromoCodesController,
   updatePromoCodeController,
@@ -18,6 +19,14 @@ registerRoute({
   get_method: listPromoCodesController,
   post_permission: 'promo_code_management',
   post_method: createPromoCodeController,
+});
+
+registerRoute({
+  router,
+  route: '/',
+  admin_auth_enable: true,
+  get_permission: 'promo_code_management',
+  get_method: getSearchPromoCodeController,
 });
 
 registerRoute({

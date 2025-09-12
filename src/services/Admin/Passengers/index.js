@@ -169,3 +169,11 @@ export const unblockPassenger = async (passengerId, resp) => {
   resp.data = { id: updated._id, isBlocked: updated.isBlocked };
   return resp;
 };
+
+export const getUpdateRequests = async (resp) =>{
+  try {
+    
+  } catch (error) {
+    console.error(``)
+  }
+}

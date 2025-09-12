@@ -62,3 +62,36 @@ export const findActivePromoCodes = async () => {
     endsAt: { $gte: currentDate },
   }).lean();
 };
+
+export const searchPromoCode = async (search, page, limit) => {
+  const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pipeline = [
+    {
+      $match: {
+        code: { $regex: escapedSearch, $options: 'i' },
+      },
+    },
+    {
+      $sort: { createdAt: -1 },
+    },
+    {
+      $facet: {
+        metadata: [{ $count: 'total' }],
+        data: [{ $skip: (page - 1) * limit }, { $limit: limit }],
+      },
+    },
+  ];
+
+  const result = await PromoCodeModel.aggregate(pipeline);
+
+  const total = result[0]?.metadata[0]?.total || 0;
+  const data = result[0]?.data || [];
+
+  return {
+    data,
+    total,
+    page,
+    limit,
+    totalPages: Math.ceil(total / limit),
+  };
+};

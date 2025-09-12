@@ -1,11 +1,19 @@
 import {
   findDriverDocuments,
   updateDriverDocumentRecord,
+  findDriverByUserId,
 } from '../../../../dal/driver.js';
 import { uploadDriverDocumentToS3 } from '../../../../utils/s3Uploader.js';
 
 export const getDriverDocuments = async (driverId, resp) => {
-  const docs = await findDriverDocuments(driverId);
+  const driver = await findDriverByUserId(driverId);
+  if (!driver) {
+    resp.error = true;
+    resp.error_message = 'Driver not found';
+    return resp;
+  }
+
+  const docs = await findDriverDocuments(driver._id);
   if (!docs) {
     resp.error = true;
     resp.error_message = 'Driver not found';

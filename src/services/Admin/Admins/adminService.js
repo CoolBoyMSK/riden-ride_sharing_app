@@ -4,6 +4,9 @@ import {
   createAdmin as dalCreateAdmin,
   findAdminById,
   updateAdminById,
+  countAdmins,
+  searchAdmins,
+  deleteAdmin,
 } from '../../../dal/admin/index.js';
 import {
   createAdminAccess,
@@ -13,8 +16,13 @@ import {
 import { hashPassword } from '../../../utils/auth.js';
 import { emailQueue } from '../../../queues/emailQueue.js';
 
-export const getAllAdmins = async (currentAdmin, resp) => {
-  const admins = await findAllAdmins();
+export const getAllAdmins = async (currentAdmin, { page, limit }, resp) => {
+  const admins = await findAllAdmins(page, limit);
+  if (!admins) {
+    resp.error = true;
+    resp.error_message = 'Failed to fetch admins';
+    return resp;
+  }
 
   const ids = admins.map((a) => a._id);
   const accesses = await findAdminAccesses(ids);
@@ -30,8 +38,35 @@ export const getAllAdmins = async (currentAdmin, resp) => {
     return admin;
   });
 
-  resp.data = result;
+  const totalAdmins = await countAdmins();
+
+  resp.data = {
+    data: result,
+    total: totalAdmins ? parseInt(totalAdmins) : 0,
+    page: page ? parseInt(page) : 0,
+    limit: limit ? parseInt(limit) : 0,
+    totalPages: Math.ceil(parseInt(totalAdmins) / limit),
+  };
   return resp;
+};
+
+export const getSearchAdmins = async ({ search, page, limit }, resp) => {
+  try {
+    const admins = await searchAdmins(search, page, limit);
+    if (!admins) {
+      resp.error = true;
+      resp.error_message = 'Failed to search admins';
+      return resp;
+    }
+
+    resp.data = admins;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = 'Something went wrong while searching admin';
+    return resp;
+  }
 };
 
 export const createAdmin = async (
@@ -122,4 +157,25 @@ export const updateAdmin = async (
   delete updatedAdmin.password;
   resp.data = updatedAdmin;
   return resp;
+};
+
+export const deleteAdminById = async ({ id }, resp) => {
+  try {
+    const deletedAdmin = await deleteAdmin(id);
+    if (!deletedAdmin) {
+      resp.error = true;
+      resp.error_message = 'Admin not found or already deleted';
+      return resp;
+    }
+
+    resp.data = {
+      success: 'Admin deleted successfully',
+    };
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = 'Something went wrong while deleting admin';
+    return resp;
+  }
 };
