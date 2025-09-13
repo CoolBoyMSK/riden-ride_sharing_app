@@ -54,8 +54,8 @@ const userSchema = new mongoose.Schema(
     },
     isCompleted: {
       type: Boolean,
-      default: false
-    }
+      default: false,
+    },
   },
   {
     timestamps: true,

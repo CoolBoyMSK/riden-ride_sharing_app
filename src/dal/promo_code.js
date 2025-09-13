@@ -63,35 +63,41 @@ export const findActivePromoCodes = async () => {
   }).lean();
 };
 
-export const searchPromoCode = async (search, page, limit) => {
+export const searchPromoCode = async (search = '', page = 1, limit = 10) => {
+  // Ensure numbers and bounds
+  const pageNum = Math.max(1, parseInt(page, 10) || 1);
+  const limitNum = Math.max(1, parseInt(limit, 10) || 10);
+  const skip = (pageNum - 1) * limitNum;
+
+  // Escape special regex chars to avoid ReDoS
   const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
   const pipeline = [
     {
       $match: {
         code: { $regex: escapedSearch, $options: 'i' },
       },
     },
-    {
-      $sort: { createdAt: -1 },
-    },
+    { $sort: { createdAt: -1 } },
     {
       $facet: {
         metadata: [{ $count: 'total' }],
-        data: [{ $skip: (page - 1) * limit }, { $limit: limit }],
+        data: [{ $skip: skip }, { $limit: limitNum }],
       },
     },
   ];
 
   const result = await PromoCodeModel.aggregate(pipeline);
 
-  const total = result[0]?.metadata[0]?.total || 0;
-  const data = result[0]?.data || [];
+  const total = result?.[0]?.metadata?.[0]?.total || 0;
+  const data = result?.[0]?.data || [];
 
   return {
     data,
     total,
-    page,
-    limit,
-    totalPages: Math.ceil(total / limit),
+    page: pageNum,
+    limit: limitNum,
+    totalPages: Math.ceil(total / limitNum),
   };
 };
+

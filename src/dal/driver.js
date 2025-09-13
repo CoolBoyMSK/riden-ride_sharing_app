@@ -3,14 +3,18 @@ import DriverModel from '../models/Driver.js';
 export const findDriverByUserId = (userId) =>
   DriverModel.findOne({ userId }).lean();
 
-export const createDriverProfile = (userId) =>
+export const createDriverProfile = (userId, uniqueId) =>
   new DriverModel({
     userId,
+    uniqueId,
     licenseDocs: { frontUrl: '', backUrl: '' },
     vehicle: { make: '', model: '', plateNumber: '', color: '' },
     backgroundCheckStatus: 'pending',
     payoutDetails: { bankAccount: '', ifscCode: '' },
   }).save();
+
+export const updateDriverByUserId = (id, update) =>
+  DriverModel.findOneAndUpdate({ userId: id }, update, { new: true });
 
 export const countDrivers = () => DriverModel.countDocuments();
 

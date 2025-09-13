@@ -2,6 +2,7 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import env from '../config/envConfig.js';
 import crypto from 'crypto';
+import mongoose from 'mongoose';
 
 const SALT_ROUNDS = env.SALT_ROUNDS;
 const JWT_ACCESS_SECRET = env.JWT_ACCESS_SECRET;
@@ -62,6 +63,24 @@ const censorString = (value, visibleCount = 3) => {
   return stars + value.slice(-visibleCount);
 };
 
+const generateUniqueId = (role, userObjectId) => {
+  if (!mongoose.Types.ObjectId.isValid(userObjectId)) {
+    throw new Error('Invalid ObjectId');
+  }
+  let prefix;
+  if (role === 'passenger') {
+    prefix = 'P-';
+  } else if (role === 'driver') {
+    prefix = 'D-';
+  } else {
+    throw new Error('Invalid Role');
+  }
+  const objectIdStr = userObjectId.toString();
+  const last6 = objectIdStr.slice(-6).toUpperCase();
+
+  return prefix + last6;
+};
+
 export {
   hashPassword,
   comparePasswords,
@@ -72,4 +91,5 @@ export {
   verifyRefreshToken,
   extractToken,
   censorString,
+  generateUniqueId,
 };

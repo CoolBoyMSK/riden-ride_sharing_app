@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { CAR_TYPES } from '../enums/carType.js';
+import { DRIVER_STATUS } from '../enums/driver.js';
 
 const suspensionSchema = new mongoose.Schema(
   {
@@ -45,7 +46,16 @@ const driverSchema = new mongoose.Schema(
       unique: true,
       required: true,
     },
-
+    uniqueId: {
+      type: String,
+      unique: true,
+      required: true,
+    },
+    status: {
+      type: String,
+      enum: DRIVER_STATUS,
+      default: 'offline',
+    },
     vehicle: {
       type: { type: String, enum: CAR_TYPES },
       model: { type: String, trim: true },
@@ -57,18 +67,15 @@ const driverSchema = new mongoose.Schema(
         default: '',
       },
     },
-
     backgroundCheckStatus: {
       type: String,
       enum: ['pending', 'approved', 'rejected'],
       default: 'pending',
     },
-
     payoutDetails: {
       bankAccount: { type: String, trim: true },
       ifscCode: { type: String, trim: true },
     },
-
     isBlocked: {
       type: Boolean,
       default: false,
@@ -77,12 +84,10 @@ const driverSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-
     suspensions: {
       type: [suspensionSchema],
       default: [],
     },
-
     documents: {
       proofOfWork: { type: documentSchema, default: () => ({}) },
       profilePicture: { type: documentSchema, default: () => ({}) },
@@ -94,11 +99,10 @@ const driverSchema = new mongoose.Schema(
       },
       vehicleInspection: { type: documentSchema, default: () => ({}) },
     },
-
     legalAgreemant: {
       type: Boolean,
-      default: false
-    }
+      default: false,
+    },
   },
   {
     timestamps: true,

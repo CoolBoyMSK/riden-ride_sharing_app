@@ -1,4 +1,5 @@
 import AdminModel from '../../models/Admin.js';
+import UpdateRequest from '../../models/updateRequest.js';
 
 export const findAdminByEmail = (email) => AdminModel.findOne({ email });
 

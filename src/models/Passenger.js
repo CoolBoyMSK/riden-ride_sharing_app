@@ -106,6 +106,11 @@ const passengerSchema = new mongoose.Schema(
       unique: true,
       required: true,
     },
+    uniqueId: {
+      type: String,
+      unique: true,
+      required: true,
+    },
     isActive: {
       type: Boolean,
       default: false,

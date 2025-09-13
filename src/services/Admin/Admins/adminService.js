@@ -58,8 +58,8 @@ export const getSearchAdmins = async ({ search, page, limit }, resp) => {
       resp.error_message = 'Failed to search admins';
       return resp;
     }
-
     resp.data = admins;
+    console.log(resp.data);
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);

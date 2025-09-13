@@ -1,10 +1,12 @@
+import mongoose from 'mongoose';
 import {
-  countPassengers,
-  findPassengers,
   updatePassengerBlockStatus,
   findPassenger,
   deletePassenger,
   findPassengerDetails,
+  findPassengerUpdateRequests,
+  findPassengersWithSearch,
+  updatePassengerRequest,
 } from '../../../dal/passenger.js';
 import {
   countPassengerBookings,
@@ -12,83 +14,32 @@ import {
   countCanceledBookingsByPassengerId,
   countCompletedBookingsByPassengerId,
 } from '../../../dal/booking.js';
-import { extractDate } from '../../../utils/ride.js';
 
 export const getAllPassengers = async (
-  { page, limit, fromDate, toDate, search },
+  { search, page = 1, limit = 10, fromDate, toDate },
   resp,
 ) => {
   try {
-    let filter = {};
-
-    if (search) {
-      const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      filter['userId.name'] = { $regex: escaped, $options: 'i' };
-    }
-    
-    if (fromDate && toDate) {
-      const start = extractDate(fromDate);
-      const end = extractDate(toDate);
-      if (!start || !end) {
-        resp.error = true;
-        resp.error_message = 'Invalid date format';
-        return resp;
-      }
-
-      filter.createdAt = {
-        $gte: new Date(start), // on or after start
-        $lte: new Date(`${end}T23:59:59.999Z`), // on or before end
-      };
-    } else if (fromDate) {
-      const start = extractDate(fromDate);
-      if (!start) {
-        resp.error = true;
-        resp.error_message = 'Invalid fromDate format';
-        return resp;
-      }
-      
-      filter.createdAt = { $gte: new Date(start) };
-    } else if (toDate) {
-      const end = extractDate(toDate);
-      if (!end) {
-        resp.error = true;
-        resp.error_message = 'Invalid toDate format';
-        return resp;
-      }
-      
-      filter.createdAt = { $lte: new Date(`${end}T23:59:59.999Z`) };
-    }
-    
-    const totalItems = await countPassengers(filter);
-    const items = await findPassengers(filter, { page, limit });
-    if (!items) {
+    const result = await findPassengersWithSearch(
+      search,
+      page,
+      limit,
+      fromDate,
+      toDate,
+    );
+    if (!result) {
       resp.error = true;
-      resp.error_message = 'Failed to find passengers';
+      resp.error_message = 'Failed ti fetch passengers';
       return resp;
     }
 
-    const passengers = await Promise.all(
-      items.map(async (passenger) => {
-        const bookings = await countPassengerBookings(passenger._id);
-        return {
-          ...(passenger.toObject?.() || passenger),
-          bookings: bookings || 0,
-        };
-      }),
-    );
-
-    resp.data = {
-      passengers,
-      page: page ? parseInt(page) : null,
-      limit: limit ? parseInt(limit) : null,
-      totalItems,
-      totalPages: Math.ceil(totalItems / limit),
-    };
+    resp.data = result;
+    resp.error = false;
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while fetching passengers';
+    resp.error_message = 'Something went wrong while searching passenger';
     return resp;
   }
 };
@@ -170,10 +121,68 @@ export const unblockPassenger = async (passengerId, resp) => {
   return resp;
 };
 
-export const getUpdateRequests = async (resp) =>{
+export const getAllUpdateRequests = async (
+  { page, limit, search, fromDate, toDate },
+  resp,
+) => {
   try {
-    
+    const result = await findPassengerUpdateRequests(
+      {},
+      page,
+      limit,
+      search,
+      fromDate,
+      toDate,
+    );
+    if (!result) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch requests';
+      return resp;
+    }
+
+    resp.data = {
+      requests: result.data,
+      total: result.total,
+      page: result.page,
+      limit: result.limit,
+      totalPages: result.totalPages,
+    };
+
+    return resp;
   } catch (error) {
-    console.error(``)
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = 'Something went wrong while Fetching update requests';
+    return resp;
   }
-}
+};
+
+export const toggleUpdateRequest = async ({ status, id }, resp) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const updated = await updatePassengerRequest(id, status, session);
+    if (!updated) {
+      await session.abortTransaction();
+      session.endSession();
+      resp.error = true;
+      resp.error_message = 'Failed to toggle request';
+      return resp;
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    resp.data = updated;
+    return resp;
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message =
+      'Something went wrong while toggling the update request';
+    return resp;
+  }
+};

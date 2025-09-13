@@ -153,6 +153,8 @@ export const getSearchPromoCode = async ({ search, page, limit }, resp) => {
     }
 
     resp.data = promos;
+    
+    console.log(resp.data);
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);

@@ -4,6 +4,7 @@ import {
   generateAccessToken,
   generateRefreshToken,
   verifyRefreshToken,
+  generateUniqueId,
 } from '../../../utils/auth.js';
 import {
   findUserByEmail,
@@ -55,7 +56,8 @@ export const signupUser = async (
 
     let driverProfile = await findDriverByUserId(user._id);
     if (!driverProfile) {
-      driverProfile = await createDriverProfile(user._id);
+      const uniqueId = generateUniqueId(user.roles[0], user._id);
+      driverProfile = await createDriverProfile(user._id, uniqueId);
     }
 
     const userObj = user.toObject();
@@ -88,7 +90,8 @@ export const signupUser = async (
 
     let passengerProfile = await findPassengerByUserId(user._id);
     if (!passengerProfile) {
-      passengerProfile = await createDriverProfile(user._id);
+      const uniqueId = generateUniqueId(user.roles[0], user._id);
+      passengerProfile = await createPassengerProfile(user._id, uniqueId);
     }
 
     const userObj = user.toObject();
@@ -173,7 +176,6 @@ export const loginUser = async (
       }
 
       let user = await findUserByPhone(phoneNumber);
-
       if (user && user.isPhoneVerified) {
         // For Production
         // const sent = await sendOtp(phoneNumber);
@@ -205,7 +207,9 @@ export const loginUser = async (
             isPhoneVerified: true,
             // For Testing
           });
-          await createDriverProfile(user._id);
+          const uniqueId = generateUniqueId(user.roles[0], user._id);
+
+          await createDriverProfile(user._id, uniqueId);
 
           // For Testing
           const payload = { id: user._id, roles: user.roles };

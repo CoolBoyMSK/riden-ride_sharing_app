@@ -6,6 +6,8 @@ import {
   getPassengerByIdController,
   deletePassengerByIdController,
   unblockPassengerController,
+  getAllUpdateRequestsController,
+  toggleUpdateRequestController,
 } from '../../../controllers/Admin/Passengers/index.js';
 
 const router = express.Router();
@@ -48,6 +50,16 @@ registerRoute({
   admin_auth_enable: true,
   patch_permission: 'passenger_management',
   patch_method: unblockPassengerController,
+});
+
+registerRoute({
+  router,
+  route: '/update-requests',
+  admin_auth_enable: true,
+  get_permission: 'passenger_management',
+  get_method: getAllUpdateRequestsController,
+  put_permission: 'passenger_management',
+  put_method: toggleUpdateRequestController,
 });
 
 export default router;
