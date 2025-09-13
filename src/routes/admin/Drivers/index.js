@@ -4,6 +4,7 @@ import {
   fetchAllDrivers,
   suspendDriverController,
   unsuspendDriverController,
+  deleteDriverByIdAPIController,
 } from '../../../controllers/Admin/Drivers/index.js';
 
 const router = express.Router();
@@ -30,6 +31,14 @@ registerRoute({
   admin_auth_enable: true,
   patch_permission: 'driver_management',
   patch_method: unsuspendDriverController,
+});
+
+registerRoute({
+  router,
+  route: '/delete/:driverId',
+  admin_auth_enable: true,
+  patch_permission: 'driver_management',
+  patch_method: deleteDriverByIdAPIController,
 });
 
 export default router;

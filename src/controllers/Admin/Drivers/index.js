@@ -2,6 +2,7 @@ import {
   getAllDrivers,
   suspendDriver,
   unsuspendDriver,
+  deleteDriverByIdAPI,
 } from '../../../services/Admin/Drivers/index.js';
 import { handleResponse } from '../../../utils/handleRespone.js';
 import { validateDriverSuspension } from '../../../validations/driver.js';
@@ -11,7 +12,8 @@ export const fetchAllDrivers = (req, res) =>
   handleResponse(
     {
       handler: getAllDrivers,
-      validationFn: () => validatePagination(req.query),
+      validationFn: () =>
+        validatePagination({ page: req.query.page, limit: req.query.limit }),
       handlerParams: [req.query],
       successMessage: 'Drivers fetched successfully',
     },
@@ -37,6 +39,17 @@ export const unsuspendDriverController = (req, res) =>
       handler: unsuspendDriver,
       handlerParams: [req.params.id],
       successMessage: 'Driver unsuspended',
+    },
+    req,
+    res,
+  );
+
+export const deleteDriverByIdAPIController = (req, res) =>
+  handleResponse(
+    {
+      handler: deleteDriverByIdAPI,
+      handlerParams: [req.params],
+      successMessage: 'Driver deleted successfully',
     },
     req,
     res,

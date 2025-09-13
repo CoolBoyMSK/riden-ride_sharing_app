@@ -1,4 +1,5 @@
 import DriverModel from '../models/Driver.js';
+import UserModel from '../models/User.js';
 
 export const findDriverByUserId = (userId) =>
   DriverModel.findOne({ userId }).lean();
@@ -18,8 +19,8 @@ export const updateDriverByUserId = (id, update) =>
 
 export const countDrivers = () => DriverModel.countDocuments();
 
-export const findDrivers = ({ page, limit }) =>
-  DriverModel.find()
+export const findDrivers = ({ page, limit, filter = {} }) =>
+  DriverModel.find(filter)
     .skip((page - 1) * limit)
     .limit(limit)
     .populate({
@@ -82,3 +83,115 @@ export const patchVehicleFields = (userId, updates) =>
     },
     { new: true, runValidators: true, select: 'vehicle' },
   ).lean();
+
+export const getfindDrivers = async ({
+  page = 1,
+  limit = 10,
+  search = '',
+  fromDate,
+  toDate,
+  isApproved, // true or false
+}) => {
+  // --- Safe pagination ---
+  const safePage =
+    Number.isInteger(Number(page)) && Number(page) > 0 ? Number(page) : 1;
+  const safeLimit =
+    Number.isInteger(Number(limit)) && Number(limit) > 0 ? Number(limit) : 10;
+  const skip = (safePage - 1) * safeLimit;
+
+  // --- Normalize search ---
+  const safeSearch = typeof search === 'string' ? search.trim() : '';
+  const escapedSearch = safeSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const searchMatch =
+    safeSearch.length > 0
+      ? {
+          $or: [
+            { uniqueId: { $regex: escapedSearch, $options: 'i' } },
+            { 'user.name': { $regex: escapedSearch, $options: 'i' } },
+            { 'user.phoneNumber': { $regex: escapedSearch, $options: 'i' } },
+          ],
+        }
+      : {};
+
+  // --- Date filter ---
+  const dateFilter = {};
+  if (fromDate) {
+    const start = new Date(fromDate);
+    if (!isNaN(start)) dateFilter.$gte = start;
+  }
+  if (toDate) {
+    const end = new Date(`${toDate}T23:59:59.999Z`);
+    if (!isNaN(end)) dateFilter.$lte = end;
+  }
+
+  // --- Build match filter ---
+  const matchFilter = {
+    ...(typeof isApproved === 'boolean' ? { isApproved } : {}),
+    ...(Object.keys(searchMatch).length ? searchMatch : {}),
+    ...(Object.keys(dateFilter).length ? { createdAt: dateFilter } : {}),
+  };
+
+  // --- Aggregation pipeline ---
+  const [result] = await DriverModel.aggregate([
+    {
+      $lookup: {
+        from: 'users',
+        localField: 'userId',
+        foreignField: '_id',
+        as: 'user',
+      },
+    },
+    { $unwind: '$user' },
+    { $match: matchFilter },
+    { $sort: { createdAt: -1 } },
+    {
+      $facet: {
+        metadata: [{ $count: 'total' }],
+        data: [
+          { $skip: skip },
+          { $limit: safeLimit },
+          {
+            $project: {
+              _id: 1,
+              uniqueId: 1,
+              isApproved: 1,
+              status: 1,
+              createdAt: 1,
+              updatedAt: 1,
+              'user._id': 1,
+              'user.name': 1,
+              'user.email': 1,
+              'user.phoneNumber': 1,
+              'user.profileImg': 1,
+              'user.roles': 1,
+              'user.gender': 1,
+            },
+          },
+        ],
+      },
+    },
+  ]);
+
+  const total = result?.metadata?.[0]?.total || 0;
+
+  return {
+    data: result?.data || [],
+    total,
+    page: safePage,
+    limit: safeLimit,
+    totalPages: Math.ceil(total / safeLimit) || 0,
+  };
+};
+
+export const deleteDriverTransaction = async (driverId, session) => {
+  const driver = await DriverModel.findById(driverId).session(session);
+  if (!driver) return false;
+
+  const user = await UserModel.findById(driver.userId).session(session);
+  if (!user) return false;
+
+  await DriverModel.deleteOne({ _id: driverId }).session(session);
+  await UserModel.deleteOne({ _id: driver.userId }).session(session);
+
+  return true;
+};
