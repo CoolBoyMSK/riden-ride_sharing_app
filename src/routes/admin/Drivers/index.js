@@ -7,6 +7,10 @@ import {
   deleteDriverByIdAPIController,
   findDriverByIdController,
   updateDriverDocumentStatusController,
+  blockDriverController,
+  unblockDriverController,
+  getAllUpdateRequestsController,
+  toggleUpdateRequestController,
 } from '../../../controllers/Admin/Drivers/index.js';
 
 const router = express.Router();
@@ -57,6 +61,32 @@ registerRoute({
   admin_auth_enable: true,
   patch_permission: 'driver_management',
   patch_method: updateDriverDocumentStatusController,
+});
+
+registerRoute({
+  router,
+  route: '/:driverId/block',
+  admin_auth_enable: true,
+  patch_permission: 'driver_management',
+  patch_method: blockDriverController,
+});
+
+registerRoute({
+  router,
+  route: '/:driverId/unblock',
+  admin_auth_enable: true,
+  patch_permission: 'driver_management',
+  patch_method: unblockDriverController,
+});
+
+registerRoute({
+  router,
+  route: '/update-requests',
+  admin_auth_enable: true,
+  get_permission: 'driver_management',
+  get_method: getAllUpdateRequestsController,
+  put_permission: 'driver_management',
+  put_method: toggleUpdateRequestController,
 });
 
 export default router;

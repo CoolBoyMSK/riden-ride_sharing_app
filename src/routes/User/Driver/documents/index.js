@@ -3,6 +3,8 @@ import { registerRoute } from '../../../../utils/registerRoute.js';
 import {
   fetchMyDriverDocuments,
   uploadDocumentController,
+  updateDriverDocumentController,
+  updateLegalAgreementController,
 } from '../../../../controllers/User/Drivers/Documents/index.js';
 import { uploadDriverDocumentToS3 } from '../../../../utils/s3Uploader.js';
 import { uploadSingle } from '../../../../middlewares/upload.js';
@@ -22,6 +24,21 @@ registerRoute({
   driver_auth_enable: true,
   put_middlewares: [uploadSingle],
   put_method: uploadDocumentController,
+});
+
+registerRoute({
+  router,
+  route: '/update',
+  driver_auth_enable: true,
+  patch_middlewares: [uploadSingle],
+  patch_method: updateDriverDocumentController,
+});
+
+registerRoute({
+  router,
+  route: '/update-agreement',
+  driver_auth_enable: true,
+  patch_method: updateLegalAgreementController,
 });
 
 export default router;

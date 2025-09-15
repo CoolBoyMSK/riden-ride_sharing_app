@@ -88,6 +88,10 @@ const driverSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    isSuspended: {
+      type: Boolean,
+      default: false,
+    },
     suspensions: {
       type: [suspensionSchema],
       default: [],

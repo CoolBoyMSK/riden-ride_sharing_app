@@ -5,3 +5,12 @@ export const DOCUMENT_STATUS = [
   'verified',
   'rejected',
 ];
+
+export const DOCUMENT_TYPES = [
+  'proofOfWork',
+  'profilePicture',
+  'driversLicense',
+  'commercialDrivingRecord',
+  'vehicleOwnerCertificateAndInsurance',
+  'vehicleInspection',
+];

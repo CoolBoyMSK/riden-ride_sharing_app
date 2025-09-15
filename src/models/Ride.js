@@ -77,7 +77,6 @@ const rideSchema = new mongoose.Schema(
   {
     rideId: {
       type: String,
-      // required: true,
       unique: true,
       index: true,
       sparse: true,

@@ -11,7 +11,6 @@ import {
   findAndAssignDriver,
   getNearbyDriversCount,
 } from './driverMatchingService.js';
-import crypto from 'crypto';
 
 // Calculate distance using simple Haversine formula (for estimation)
 const calculateDistance = (pickup, dropoff) => {
@@ -32,25 +31,6 @@ const calculateDistance = (pickup, dropoff) => {
   const distance = R * c;
 
   return distance;
-};
-
-// Generate Ride ID
-export const generateCryptoId = (length = 16) => {
-  const base62chars =
-    '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
-
-  const toBase62 = (buffer) => {
-    let num = BigInt('0x' + buffer.toString('hex'));
-    let s = '';
-    while (num > 0n) {
-      s = base62chars[Number(num % 62n)] + s;
-      num = num / 62n;
-    }
-    return s || '0';
-  };
-
-  const randomBytes = crypto.randomBytes(length);
-  return toBase62(randomBytes);
 };
 
 // Estimate duration based on distance (simple calculation)
@@ -193,7 +173,6 @@ export const bookRide = async (userId, rideData) => {
 
     // Create ride record
     const ridePayload = {
-      rideId: generateCryptoId(12),
       passengerId: passenger._id,
       pickupLocation,
       dropoffLocation,

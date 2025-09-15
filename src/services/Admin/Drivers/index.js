@@ -1,11 +1,15 @@
 import mongoose from 'mongoose';
 import {
   addDriverSuspension,
+  removeDriverSuspension,
+  addDriverBlock,
   removeDriverBlock,
   getfindDrivers,
   deleteDriver,
   findDriver,
   updateDocumentStatus,
+  findDriverUpdateRequests,
+  updateDriverRequest,
 } from '../../../dal/driver.js';
 
 export const getAllDrivers = async (
@@ -60,14 +64,21 @@ export const suspendDriver = async (driverId, { reason, endDate }, resp) => {
 };
 
 export const unsuspendDriver = async (driverId, resp) => {
-  const updated = await removeDriverBlock(driverId);
-  if (!updated) {
+  try {
+    const updated = await removeDriverSuspension(driverId);
+    if (!updated) {
+      resp.error = true;
+      resp.error_message = 'Driver not found';
+      return resp;
+    }
+    resp.data = { id: updated._id, isBlocked: updated.isBlocked };
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Driver not found';
+    resp.error_message = 'Something went wrong while unsuspending driver';
     return resp;
   }
-  resp.data = { id: updated._id, isBlocked: updated.isBlocked };
-  return resp;
 };
 
 export const deleteDriverByIdAPI = async ({ driverId }, resp) => {
@@ -150,6 +161,112 @@ export const updateDriverDocumentStatus = async (
     console.error(`API ERROR: ${error}`);
     resp.error = true;
     resp.error_messagte = 'Something went wrong while updating document status';
+    return resp;
+  }
+};
+
+export const blockDriver = async ({ driverId }, resp) => {
+  try {
+    const updated = await addDriverBlock(driverId);
+    if (!updated) {
+      resp.error = true;
+      resp.error_message = 'Failed to block driver';
+      return resp;
+    }
+    resp.data = { id: updated._id, isBlocked: updated.isBlocked };
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = 'Something went wrong while blocking driver';
+    return resp;
+  }
+};
+
+export const unblockDriver = async ({ driverId }, resp) => {
+  try {
+    const updated = await removeDriverBlock(driverId);
+    if (!updated) {
+      resp.error = true;
+      resp.error_message = 'Failed to unblock driver';
+      return resp;
+    }
+
+    resp.data = { id: updated._id, isBlocked: updated.isBlocked };
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = 'Something went wrong while unblocking driver';
+    return resp;
+  }
+};
+
+export const getAllUpdateRequests = async (
+  { page, limit, search, fromDate, toDate },
+  resp,
+) => {
+  try {
+    const result = await findDriverUpdateRequests(
+      {},
+      page,
+      limit,
+      search,
+      fromDate,
+      toDate,
+    );
+    if (!result) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch requests';
+      return resp;
+    }
+
+    resp.data = {
+      requests: result.data,
+      total: result.total,
+      page: result.page,
+      limit: result.limit,
+      totalPages: result.totalPages,
+    };
+
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = 'Something went wrong while Fetching update requests';
+    return resp;
+  }
+};
+
+export const toggleUpdateRequest = async ({ status, id }, resp) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const updated = await updateDriverRequest(id, status, session);
+    console.log(updated);
+
+    if (!updated) {
+      await session.abortTransaction();
+      session.endSession();
+
+      resp.error = true;
+      resp.error_message = 'Failed to toggle request';
+      return resp;
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    resp.data = updated;
+    return resp;
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message =
+      'Something went wrong while toggling the update request';
     return resp;
   }
 };

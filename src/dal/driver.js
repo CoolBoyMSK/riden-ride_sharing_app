@@ -1,6 +1,8 @@
 import mongoose from 'mongoose';
 import DriverModel from '../models/Driver.js';
 import UserModel from '../models/User.js';
+import UpdateRequestModel from '../models/updateRequest.js';
+import { DOCUMENT_TYPES } from '../enums/driver.js';
 
 export const findDriverByUserId = (userId) =>
   DriverModel.findOne({ userId }).lean();
@@ -15,8 +17,11 @@ export const createDriverProfile = (userId, uniqueId) =>
     payoutDetails: { bankAccount: '', ifscCode: '' },
   }).save();
 
-export const updateDriverByUserId = (id, update) =>
-  DriverModel.findOneAndUpdate({ userId: id }, update, { new: true });
+export const updateDriverByUserId = (id, update, options = {}) =>
+  DriverModel.findOneAndUpdate({ userId: id }, update, {
+    new: true,
+    ...options,
+  }).lean();
 
 export const countDrivers = () => DriverModel.countDocuments();
 
@@ -159,8 +164,22 @@ export const addDriverSuspension = (driverId, reason, endDate) =>
       $push: {
         suspensions: { reason, start: new Date(), end: new Date(endDate) },
       },
-      $set: { isBlocked: true },
+      $set: { isSuspended: true },
     },
+    { new: true },
+  ).lean();
+
+export const removeDriverSuspension = (driverId) =>
+  DriverModel.findByIdAndUpdate(
+    driverId,
+    { $set: { status: 'offline', isSuspended: false } },
+    { new: true },
+  ).lean();
+
+export const addDriverBlock = (driverId) =>
+  DriverModel.findByIdAndUpdate(
+    driverId,
+    { $set: { status: 'blocked', isBlocked: true } },
     { new: true },
   ).lean();
 
@@ -326,4 +345,184 @@ export const updateDocumentStatus = (driverId, type, status, options = {}) => {
     { $set: { [`documents.${type}.status`]: status } },
     { new: true, ...options },
   );
+};
+
+export const createDriverUpdateRequest = (
+  userId,
+  field,
+  oldValue,
+  newValue,
+  options = {},
+) =>
+  UpdateRequestModel.create({
+    userId,
+    request: { field, old: oldValue, new: newValue },
+    options,
+  });
+
+export const findDriverUpdateRequests = async (
+  filter = {},
+  page = 1,
+  limit = 10,
+  search = '',
+  fromDate,
+  toDate,
+) => {
+  // --- Safe pagination ---
+  const safePage =
+    Number.isInteger(Number(page)) && Number(page) > 0 ? Number(page) : 1;
+  const safeLimit =
+    Number.isInteger(Number(limit)) && Number(limit) > 0 ? Number(limit) : 10;
+  const skip = (safePage - 1) * safeLimit;
+
+  // --- Normalize search ---
+  const safeSearch = typeof search === 'string' ? search.trim() : '';
+  const escapedSearch = safeSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const searchMatch =
+    safeSearch.length > 0
+      ? {
+          $or: [
+            { 'user.name': { $regex: escapedSearch, $options: 'i' } },
+            { 'user.email': { $regex: escapedSearch, $options: 'i' } },
+            { 'user.phoneNumber': { $regex: escapedSearch, $options: 'i' } },
+          ],
+        }
+      : {};
+
+  // --- Date filter ---
+  const dateFilter = {};
+  if (fromDate) {
+    const start = new Date(fromDate);
+    if (!isNaN(start)) dateFilter.$gte = start;
+  }
+  if (toDate) {
+    const end = new Date(`${toDate}T23:59:59.999Z`);
+    if (!isNaN(end)) dateFilter.$lte = end;
+  }
+
+  const [result] = await UpdateRequestModel.aggregate([
+    {
+      $lookup: {
+        from: 'users',
+        localField: 'userId',
+        foreignField: '_id',
+        as: 'user',
+      },
+    },
+    { $unwind: '$user' },
+
+    // Merge search, roles, and other filters
+    {
+      $match: {
+        'user.roles': { $regex: /^driver$/i },
+        ...filter,
+        ...(Object.keys(searchMatch).length ? searchMatch : {}),
+        ...(Object.keys(dateFilter).length ? { createdAt: dateFilter } : {}),
+      },
+    },
+
+    {
+      $facet: {
+        metadata: [{ $count: 'total' }],
+        data: [
+          { $sort: { createdAt: -1 } },
+          { $skip: skip },
+          { $limit: safeLimit },
+          {
+            $project: {
+              _id: 1,
+              status: 1,
+              request: 1,
+              createdAt: 1,
+              updatedAt: 1,
+              'user._id': 1,
+              'user.name': 1,
+              'user.email': 1,
+              'user.phoneNumber': 1,
+              'user.profileImg': 1,
+              'user.roles': 1,
+              'user.gender': 1,
+            },
+          },
+        ],
+      },
+    },
+  ]);
+
+  const total = result?.metadata?.[0]?.total || 0;
+
+  return {
+    data: result?.data || [],
+    total,
+    page: safePage,
+    limit: safeLimit,
+    totalPages: Math.ceil(total / safeLimit) || 0,
+  };
+};
+
+export const updateDriverRequest = async (requestId, status, options = {}) => {
+  const request = await UpdateRequestModel.findOneAndUpdate(
+    { _id: requestId },
+    { status },
+    { new: true, ...options },
+  ).lean();
+
+  if (!request) throw new Error('Update request not found');
+
+  if (status === 'approved') {
+    let fieldToUpdate = request.request?.field;
+    let newValue = request.request?.new;
+
+    if (!fieldToUpdate || newValue === undefined) {
+      throw new Error('Invalid request: missing field or new value');
+    }
+
+    if (DOCUMENT_TYPES.includes(request.request?.field)) {
+      const updatedUser = await updateDriverByUserId(
+        request.userId,
+        {
+          $set: {
+            [`documents.${fieldToUpdate}.imageUrl`]: newValue,
+          },
+        },
+        options,
+      );
+
+      return updatedUser;
+    }
+
+    const updateObj = { [fieldToUpdate]: newValue };
+
+    const updatedUser = await UserModel.findOneAndUpdate(
+      { _id: request.userId },
+      updateObj,
+      { new: true, session },
+    )
+      .select('name email phoneNumber roles gender profileImg')
+      .lean();
+
+    if (!updatedUser) throw new Error('User not found');
+
+    return updatedUser;
+  } else {
+    return request;
+  }
+};
+
+export const updateDriverLegalAgreement = async (
+  driverId,
+  status,
+  options = {},
+) => {
+  if (status === 'accepted') {
+    const updated = await DriverModel.findByIdAndUpdate(
+      driverId,
+      { legalAgreemant: true },
+      { new: true, ...options },
+    ).lean();
+
+    return updated;
+  } else {
+    return null;
+  }
 };

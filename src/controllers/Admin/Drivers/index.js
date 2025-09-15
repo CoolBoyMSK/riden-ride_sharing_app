@@ -5,11 +5,16 @@ import {
   deleteDriverByIdAPI,
   findDriverById,
   updateDriverDocumentStatus,
+  blockDriver,
+  unblockDriver,
+  getAllUpdateRequests,
+  toggleUpdateRequest,
 } from '../../../services/Admin/Drivers/index.js';
 import { handleResponse } from '../../../utils/handleRespone.js';
 import {
   validateDriverSuspension,
   validateDocUpdate,
+  validateToggleUpdateRequest,
 } from '../../../validations/driver.js';
 import { validatePagination } from '../../../validations/pagination.js';
 
@@ -30,7 +35,7 @@ export const suspendDriverController = (req, res) =>
   handleResponse(
     {
       handler: suspendDriver,
-      // validationFn: validateDriverSuspension(req.body),
+      validationFn: () => validateDriverSuspension(req.body),
       handlerParams: [req.params.id, req.body],
       successMessage: 'Driver suspended',
     },
@@ -82,6 +87,53 @@ export const updateDriverDocumentStatusController = (req, res) =>
         }),
       handlerParams: [req.query],
       successMessage: 'Document status updated successfully',
+    },
+    req,
+    res,
+  );
+
+export const blockDriverController = (req, res) =>
+  handleResponse(
+    {
+      handler: blockDriver,
+      handlerParams: [req.params],
+      successMessage: 'Driver Blocked successfully',
+    },
+    req,
+    res,
+  );
+
+export const unblockDriverController = (req, res) =>
+  handleResponse(
+    {
+      handler: unblockDriver,
+      handlerParams: [req.params],
+      successMessage: 'Driver Unblocked successfully',
+    },
+    req,
+    res,
+  );
+
+export const getAllUpdateRequestsController = (req, res) =>
+  handleResponse(
+    {
+      handler: getAllUpdateRequests,
+      validationFn: () =>
+        validatePagination({ page: req.query.page, limit: req.query.limit }),
+      handlerParams: [req.query],
+      successMessage: 'Update requests detched successfully',
+    },
+    req,
+    res,
+  );
+
+export const toggleUpdateRequestController = (req, res) =>
+  handleResponse(
+    {
+      handler: toggleUpdateRequest,
+      validationFn: () => validateToggleUpdateRequest(req.query),
+      handlerParams: [req.query],
+      successMessage: 'Driver request updated successfully',
     },
     req,
     res,

@@ -72,6 +72,8 @@ const generateUniqueId = (role, userObjectId) => {
     prefix = 'P-';
   } else if (role === 'driver') {
     prefix = 'D-';
+  } else if (role === 'ride') {
+    prefix = 'R-';
   } else {
     throw new Error('Invalid Role');
   }
