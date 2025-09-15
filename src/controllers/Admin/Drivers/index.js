@@ -3,9 +3,14 @@ import {
   suspendDriver,
   unsuspendDriver,
   deleteDriverByIdAPI,
+  findDriverById,
+  updateDriverDocumentStatus,
 } from '../../../services/Admin/Drivers/index.js';
 import { handleResponse } from '../../../utils/handleRespone.js';
-import { validateDriverSuspension } from '../../../validations/driver.js';
+import {
+  validateDriverSuspension,
+  validateDocUpdate,
+} from '../../../validations/driver.js';
 import { validatePagination } from '../../../validations/pagination.js';
 
 export const fetchAllDrivers = (req, res) =>
@@ -25,8 +30,8 @@ export const suspendDriverController = (req, res) =>
   handleResponse(
     {
       handler: suspendDriver,
-      validationFn: validateDriverSuspension,
-      handlerParams: [req.params.id],
+      // validationFn: validateDriverSuspension(req.body),
+      handlerParams: [req.params.id, req.body],
       successMessage: 'Driver suspended',
     },
     req,
@@ -50,6 +55,33 @@ export const deleteDriverByIdAPIController = (req, res) =>
       handler: deleteDriverByIdAPI,
       handlerParams: [req.params],
       successMessage: 'Driver deleted successfully',
+    },
+    req,
+    res,
+  );
+
+export const findDriverByIdController = (req, res) =>
+  handleResponse(
+    {
+      handler: findDriverById,
+      handlerParams: [req.params],
+      successMessage: 'Driver fetched successfully',
+    },
+    req,
+    res,
+  );
+
+export const updateDriverDocumentStatusController = (req, res) =>
+  handleResponse(
+    {
+      handler: updateDriverDocumentStatus,
+      validationFn: () =>
+        validateDocUpdate({
+          docType: req.query.docType,
+          status: req.query.status,
+        }),
+      handlerParams: [req.query],
+      successMessage: 'Document status updated successfully',
     },
     req,
     res,

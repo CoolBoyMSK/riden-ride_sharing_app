@@ -222,7 +222,6 @@ export const findPassengerUpdateRequests = async (
   };
 };
 
-
 export const updatePassengerRequest = async (requestId, status, session) => {
   const request = await UpdateRequestModel.findOneAndUpdate(
     { _id: requestId },

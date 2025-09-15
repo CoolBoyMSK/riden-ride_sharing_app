@@ -3,6 +3,9 @@ import {
   addDriverSuspension,
   removeDriverBlock,
   getfindDrivers,
+  deleteDriver,
+  findDriver,
+  updateDocumentStatus,
 } from '../../../dal/driver.js';
 
 export const getAllDrivers = async (
@@ -34,19 +37,26 @@ export const getAllDrivers = async (
   }
 };
 
-export const suspendDriver = async (driverId, reason, endDate, resp) => {
-  const updated = await addDriverSuspension(driverId, reason, endDate);
-  if (!updated) {
+export const suspendDriver = async (driverId, { reason, endDate }, resp) => {
+  try {
+    const updated = await addDriverSuspension(driverId, reason, endDate);
+    if (!updated) {
+      resp.error = true;
+      resp.error_message = 'Driver not found';
+      return resp;
+    }
+    resp.data = {
+      id: updated._id,
+      isBlocked: updated.isBlocked,
+      suspension: updated.suspensions.slice(-1)[0],
+    };
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Driver not found';
+    resp.error_message = 'Something went wrong while suspending driver';
     return resp;
   }
-  resp.data = {
-    id: updated._id,
-    isBlocked: updated.isBlocked,
-    suspension: updated.suspensions.slice(-1)[0],
-  };
-  return resp;
 };
 
 export const unsuspendDriver = async (driverId, resp) => {
@@ -65,7 +75,7 @@ export const deleteDriverByIdAPI = async ({ driverId }, resp) => {
   session.startTransaction();
 
   try {
-    const success = await deleteDriverTransaction(driverId, session);
+    const success = await deleteDriver(driverId, session);
 
     if (!success) {
       await session.abortTransaction();
@@ -88,6 +98,58 @@ export const deleteDriverByIdAPI = async ({ driverId }, resp) => {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
     resp.error_message = 'Something went wrong while deleting driver';
+    return resp;
+  }
+};
+
+export const findDriverById = async ({ driverId }, resp) => {
+  try {
+    const driver = await findDriver(driverId);
+    if (!driver) {
+      resp.error = true;
+      resp.error_message = 'Failed to fond driver';
+      return resp;
+    }
+
+    resp.data = driver;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = 'Something went wrong while fetching driver';
+    return resp;
+  }
+};
+
+export const updateDriverDocumentStatus = async (
+  { id, docType, status },
+  resp,
+) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const updated = await updateDocumentStatus(id, docType, status, session);
+    if (!updated) {
+      await session.abortTransaction();
+      session.endSession();
+
+      resp.error = true;
+      resp.error_message = 'Failed to Update Document Status';
+      return resp;
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    resp.data = updated;
+    return resp;
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_messagte = 'Something went wrong while updating document status';
     return resp;
   }
 };

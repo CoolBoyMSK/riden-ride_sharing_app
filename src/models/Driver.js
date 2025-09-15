@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import { CAR_TYPES } from '../enums/carType.js';
-import { DRIVER_STATUS } from '../enums/driver.js';
+import { DRIVER_STATUS, DOCUMENT_STATUS } from '../enums/driver.js';
 
 const suspensionSchema = new mongoose.Schema(
   {
@@ -31,7 +31,7 @@ const documentSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['not_submitted', 'submitted', 'verified'],
+      enum: DOCUMENT_STATUS,
       default: 'not_submitted',
     },
   },

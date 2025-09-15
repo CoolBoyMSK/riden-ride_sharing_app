@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import DriverModel from '../models/Driver.js';
 import UserModel from '../models/User.js';
 
@@ -29,10 +30,132 @@ export const findDrivers = ({ page, limit, filter = {} }) =>
     })
     .lean();
 
+export const findDriver = async (driverId) => {
+  const objectId = new mongoose.Types.ObjectId(driverId);
+
+  const [result] = await DriverModel.aggregate([
+    // Match the specific driver
+    { $match: { _id: objectId } },
+
+    // Populate driver.userId
+    {
+      $lookup: {
+        from: 'users',
+        localField: 'userId',
+        foreignField: '_id',
+        as: 'user',
+      },
+    },
+    { $unwind: '$user' },
+
+    // Lookup bookings for this driver
+    {
+      $lookup: {
+        from: 'bookings',
+        let: { driverId: '$_id' },
+        pipeline: [
+          { $match: { $expr: { $eq: ['$driverId', '$$driverId'] } } },
+
+          {
+            $lookup: {
+              from: 'passengers',
+              localField: 'passengerId',
+              foreignField: '_id',
+              as: 'passenger',
+            },
+          },
+          { $unwind: '$passenger' },
+
+          {
+            $lookup: {
+              from: 'users',
+              localField: 'passenger.userId',
+              foreignField: '_id',
+              as: 'passenger.user',
+            },
+          },
+          { $unwind: '$passenger.user' },
+
+          { $project: { driverId: 0 } },
+        ],
+        as: 'bookings',
+      },
+    },
+
+    // Add statistics
+    {
+      $addFields: {
+        totalBookings: { $size: '$bookings' },
+        completedBookings: {
+          $size: {
+            $filter: {
+              input: '$bookings',
+              as: 'b',
+              cond: { $eq: ['$$b.status', 'RIDE_COMPLETED'] },
+            },
+          },
+        },
+        canceledBookings: {
+          $size: {
+            $filter: {
+              input: '$bookings',
+              as: 'b',
+              cond: {
+                $in: [
+                  '$$b.status',
+                  [
+                    'CANCELLED_BY_PASSENGER',
+                    'CANCELLED_BY_DRIVER',
+                    'CANCELLED_BY_SYSTEM',
+                  ],
+                ],
+              },
+            },
+          },
+        },
+        totalRevenue: {
+          $sum: {
+            $map: {
+              input: {
+                $filter: {
+                  input: '$bookings',
+                  as: 'b',
+                  cond: { $eq: ['$$b.status', 'RIDE_COMPLETED'] },
+                },
+              },
+              as: 'completed',
+              in: '$$completed.fare',
+            },
+          },
+        },
+      },
+    },
+
+    // Merge the entire driver document with its populated user
+    {
+      $project: {
+        _id: 0,
+        driver: {
+          $mergeObjects: ['$$ROOT', { user: '$user' }],
+        },
+        bookings: 1,
+        totalBookings: 1,
+        completedBookings: 1,
+        canceledBookings: 1,
+        totalRevenue: 1,
+      },
+    },
+  ]);
+
+  if (!result) return null;
+  return result;
+};
+
 export const addDriverSuspension = (driverId, reason, endDate) =>
   DriverModel.findByIdAndUpdate(
     driverId,
     {
+      status: 'suspended',
       $push: {
         suspensions: { reason, start: new Date(), end: new Date(endDate) },
       },
@@ -44,7 +167,7 @@ export const addDriverSuspension = (driverId, reason, endDate) =>
 export const removeDriverBlock = (driverId) =>
   DriverModel.findByIdAndUpdate(
     driverId,
-    { $set: { isBlocked: false } },
+    { $set: { status: 'offline', isBlocked: false } },
     { new: true },
   ).lean();
 
@@ -156,6 +279,7 @@ export const getfindDrivers = async ({
               uniqueId: 1,
               isApproved: 1,
               status: 1,
+              suspensions: 1,
               createdAt: 1,
               updatedAt: 1,
               'user._id': 1,
@@ -183,7 +307,7 @@ export const getfindDrivers = async ({
   };
 };
 
-export const deleteDriverTransaction = async (driverId, session) => {
+export const deleteDriver = async (driverId, session) => {
   const driver = await DriverModel.findById(driverId).session(session);
   if (!driver) return false;
 
@@ -194,4 +318,12 @@ export const deleteDriverTransaction = async (driverId, session) => {
   await UserModel.deleteOne({ _id: driver.userId }).session(session);
 
   return true;
+};
+
+export const updateDocumentStatus = (driverId, type, status, options = {}) => {
+  return DriverModel.findOneAndUpdate(
+    { _id: driverId },
+    { $set: { [`documents.${type}.status`]: status } },
+    { new: true, ...options },
+  );
 };
