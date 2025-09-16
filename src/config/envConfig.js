@@ -62,7 +62,10 @@ const env = {
     process.env.TWILIO_AUTH_TOKEN,
     'TWILIO_AUTH_TOKEN',
   ),
-  TWILIO_VERIFY_SERVICE_SID: required(process.env.TWILIO_VERIFY_SERVICE_SID, "TWILIO_VERIFY_SERVICE_SID"),
+  TWILIO_VERIFY_SERVICE_SID: required(
+    process.env.TWILIO_VERIFY_SERVICE_SID,
+    'TWILIO_VERIFY_SERVICE_SID',
+  ),
   TWILIO_PHONE_NUMBER: required(
     process.env.TWILIO_PHONE_NUMBER,
     'TWILIO_PHONE_NUMBER',
@@ -74,7 +77,14 @@ const env = {
   ),
   OTP_MAX_ATTEMPTS_PER_HOUR: required(process.env, 'OTP_MAX_ATTEMPTS_PER_HOUR'),
   OTP_HMAC_KEY: required(process.env.OTP_HMAC_KEY, 'OTP_HMAC_KEY'),
-  STRIPE_SECRET_KEY: required(process.env.STRIPE_SECRET_KEY, "STRIPE_SECRET_KEY")
+  STRIPE_SECRET_KEY: required(
+    process.env.STRIPE_SECRET_KEY,
+    'STRIPE_SECRET_KEY',
+  ),
+  LOCATION_TTL_SECONDS: required(
+    process.env.LOCATION_TTL_SECONDS,
+    'LOCATION_TTL_SECONDS',
+  ),
 };
 
 export default env;

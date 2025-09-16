@@ -243,7 +243,6 @@ export const toggleUpdateRequest = async ({ status, id }, resp) => {
   session.startTransaction();
   try {
     const updated = await updateDriverRequest(id, status, session);
-    console.log(updated);
 
     if (!updated) {
       await session.abortTransaction();

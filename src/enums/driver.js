@@ -1,4 +1,10 @@
-export const DRIVER_STATUS = ['offline', 'online', 'suspended', 'blocked'];
+export const DRIVER_STATUS = [
+  'offline',
+  'online',
+  'suspended',
+  'blocked',
+  'on_ride',
+];
 export const DOCUMENT_STATUS = [
   'not_submitted',
   'submitted',

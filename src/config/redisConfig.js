@@ -12,7 +12,7 @@ if (protocol === 'rediss:') {
     host,
     port,
     tls: {
-      // rejectUnauthorized: false,
+      rejectUnauthorized: false,
     },
     maxRetriesPerRequest: null,
   });

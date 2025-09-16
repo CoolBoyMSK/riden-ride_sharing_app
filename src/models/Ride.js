@@ -197,6 +197,9 @@ const rideSchema = new mongoose.Schema(
     driverAssignedAt: {
       type: Date,
     },
+    driverArrivingAt: {
+      type: Date,
+    },
     driverArrivedAt: {
       type: Date,
     },

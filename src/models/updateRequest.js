@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { REQUEST_STATUS, REQUESTED_FIELD } from '../enums/requestStatus.js';
+import { CAR_TYPES } from '../enums/carType.js';
 
 const requestSchema = new mongoose.Schema(
   {
@@ -30,6 +31,41 @@ const requestSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const vehicleSchema = new mongoose.Schema(
+  {
+    type: {
+      type: String,
+      enum: CAR_TYPES,
+    },
+    model: {
+      type: String,
+      trim: true,
+    },
+    plateNumber: {
+      type: String,
+      trim: true,
+    },
+    color: {
+      type: String,
+      trim: true,
+    },
+    imageUrl: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+  },
+  { _id: false },
+);
+
+const vehicleRequestSchema = new mongoose.Schema(
+  {
+    new: vehicleSchema,
+    old: vehicleSchema,
+  },
+  { _id: false },
+);
+
 const schema = new mongoose.Schema(
   {
     userId: {
@@ -43,6 +79,7 @@ const schema = new mongoose.Schema(
       default: 'pending',
     },
     request: requestSchema,
+    vehicleRequest: { type: vehicleRequestSchema, default: null },
   },
   { timestamps: true },
 );

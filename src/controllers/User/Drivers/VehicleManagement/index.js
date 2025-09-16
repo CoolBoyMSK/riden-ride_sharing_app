@@ -5,7 +5,7 @@ import {
 import { handleResponse } from '../../../../utils/handleRespone.js';
 import {
   getVehicle,
-  patchVehicle,
+  updateDriverVehicleRequest,
   upsertVehicle,
 } from '../../../../services/User/driver/VehicleManagement/index.js';
 import { uploadDriverImage } from '../../../../utils/s3Uploader.js';
@@ -41,13 +41,19 @@ export function viewVehicle(req, res) {
   );
 }
 
-export function editVehicle(req, res) {
+export function updateDriverVehicleRequestController(req, res) {
   return handleResponse(
     {
-      handler: patchVehicle,
+      handler: async (user, file, vehicle, resp) => {
+        if (file) {
+          const imageUrl = await uploadDriverImage(user._id, file);
+          vehicle.imageUrl = imageUrl;
+        }
+        return updateDriverVehicleRequest(user._id, vehicle, resp);
+      },
       validationFn: () => patchVehicleValidation(req.body),
-      handlerParams: [{ driverId: req.user.id, updates: req.body }],
-      successMessage: 'Vehicle updated',
+      handlerParams: [req.user, req.file, req.body],
+      successMessage: 'Vehicle update request sent successfully',
     },
     req,
     res,

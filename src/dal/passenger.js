@@ -9,8 +9,11 @@ export const findPassenger = (filter, project = {}, options = {}) =>
 export const findPassengerDetails = (filter) =>
   PassengerModel.findOne(filter).populate('userId');
 
-export const findPassengerByUserId = (userId) =>
-  PassengerModel.findOne({ userId }).lean();
+export const findPassengerByUserId = (userId, options = {}) => {
+  let query = PassengerModel.findOne({ userId });
+  if (options.session) query = query.session(options.session);
+  return query.lean();
+};
 
 export const createPassengerProfile = (userId, uniqueId) =>
   new PassengerModel({

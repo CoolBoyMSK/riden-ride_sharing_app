@@ -2,10 +2,14 @@ import mongoose from 'mongoose';
 import DriverModel from '../models/Driver.js';
 import UserModel from '../models/User.js';
 import UpdateRequestModel from '../models/updateRequest.js';
+import DestinationModel from '../models/Destination.js';
 import { DOCUMENT_TYPES } from '../enums/driver.js';
 
-export const findDriverByUserId = (userId) =>
-  DriverModel.findOne({ userId }).lean();
+export const findDriverByUserId = (userId, { session } = {}) => {
+  let query = DriverModel.findOne({ userId });
+  if (session) query = query.session(session);
+  return query.lean();
+};
 
 export const createDriverProfile = (userId, uniqueId) =>
   new DriverModel({
@@ -17,11 +21,14 @@ export const createDriverProfile = (userId, uniqueId) =>
     payoutDetails: { bankAccount: '', ifscCode: '' },
   }).save();
 
-export const updateDriverByUserId = (id, update, options = {}) =>
-  DriverModel.findOneAndUpdate({ userId: id }, update, {
+export const updateDriverByUserId = (id, update, options = {}) => {
+  let query = DriverModel.findOneAndUpdate({ userId: id }, update, {
     new: true,
     ...options,
-  }).lean();
+  });
+  if (options.session) query = query.session(options.session);
+  return query.lean();
+};
 
 export const countDrivers = () => DriverModel.countDocuments();
 
@@ -205,8 +212,10 @@ export const updateDriverDocumentRecord = (driverId, docType, imageUrl) =>
     { new: true, select: `documents.${docType}` },
   ).lean();
 
-export const findVehicleByUserId = (userId) =>
-  DriverModel.findOne({ userId }, 'vehicle').lean();
+export const findVehicleByUserId = async (userId, options = {}) =>
+  DriverModel.findOne({ userId }, 'vehicle', {
+    ...options,
+  }).lean();
 
 export const upsertVehicle = (userId, vehicle) =>
   DriverModel.findOneAndUpdate(
@@ -433,6 +442,7 @@ export const findDriverUpdateRequests = async (
               _id: 1,
               status: 1,
               request: 1,
+              vehicleRequest: 1,
               createdAt: 1,
               updatedAt: 1,
               'user._id': 1,
@@ -461,52 +471,69 @@ export const findDriverUpdateRequests = async (
 };
 
 export const updateDriverRequest = async (requestId, status, options = {}) => {
+  const finalStatus = status === 'approved' ? 'approved' : 'rejected';
+
   const request = await UpdateRequestModel.findOneAndUpdate(
     { _id: requestId },
-    { status },
+    { status: finalStatus },
     { new: true, ...options },
   ).lean();
 
   if (!request) throw new Error('Update request not found');
 
-  if (status === 'approved') {
-    let fieldToUpdate = request.request?.field;
-    let newValue = request.request?.new;
+  // 2️⃣ If rejected, return the rejected request
+  if (finalStatus !== 'approved') return request;
 
-    if (!fieldToUpdate || newValue === undefined) {
-      throw new Error('Invalid request: missing field or new value');
-    }
+  // 3️⃣ Handle Vehicle Update Requests
+  if (request.vehicleRequest) {
+    const newVehicle = request.vehicleRequest.new;
+    if (!newVehicle) throw new Error('Invalid request: missing vehicle data');
 
-    if (DOCUMENT_TYPES.includes(request.request?.field)) {
-      const updatedUser = await updateDriverByUserId(
-        request.userId,
-        {
-          $set: {
-            [`documents.${fieldToUpdate}.imageUrl`]: newValue,
-          },
-        },
-        options,
-      );
+    const updatedDriver = await DriverModel.findOneAndUpdate(
+      { userId: request.userId },
+      { $set: { vehicle: newVehicle } },
+      { new: true, ...options },
+    ).lean();
 
-      return updatedUser;
-    }
-
-    const updateObj = { [fieldToUpdate]: newValue };
-
-    const updatedUser = await UserModel.findOneAndUpdate(
-      { _id: request.userId },
-      updateObj,
-      { new: true, session },
-    )
-      .select('name email phoneNumber roles gender profileImg')
-      .lean();
-
-    if (!updatedUser) throw new Error('User not found');
-
-    return updatedUser;
-  } else {
-    return request;
+    if (!updatedDriver) throw new Error('Driver not found');
+    return updatedDriver;
   }
+
+  // 4️⃣ Handle Other Requests (Documents or User Fields)
+  const fieldToUpdate = request.request?.field;
+  const newValue = request.request?.new;
+
+  if (!fieldToUpdate || newValue === undefined) {
+    throw new Error('Invalid request: missing field or new value');
+  }
+
+  // 📄 Update driver documents if field is a DOCUMENT_TYPE
+  if (DOCUMENT_TYPES.includes(fieldToUpdate)) {
+    const updatedDriver = await updateDriverByUserId(
+      request.userId,
+      {
+        $set: {
+          [`documents.${fieldToUpdate}.imageUrl`]: newValue,
+        },
+      },
+      options,
+    );
+
+    if (!updatedDriver) throw new Error('Driver not found');
+    return updatedDriver;
+  }
+
+  // 👤 Otherwise, update a field on the User model
+  const updatedUser = await UserModel.findOneAndUpdate(
+    { _id: request.userId },
+    { [fieldToUpdate]: newValue },
+    { new: true, ...options },
+  )
+    .select('name email phoneNumber roles gender profileImg')
+    .lean();
+
+  if (!updatedUser) throw new Error('User not found');
+  return updatedUser;
 };
 
 export const updateDriverLegalAgreement = async (
@@ -526,3 +553,45 @@ export const updateDriverLegalAgreement = async (
     return null;
   }
 };
+
+export const vehicleUpdateRequest = async (userId, vehicle, options = {}) => {
+  const oldVehicleRecord = await findVehicleByUserId(userId, options);
+  if (!oldVehicleRecord) {
+    return false;
+  }
+  const doc = new UpdateRequestModel({
+    userId,
+    vehicleRequest: { new: vehicle, old: oldVehicleRecord.vehicle },
+  });
+  await doc.save(options);
+  return doc;
+};
+
+export const createDestination = async (
+  driverId,
+  location,
+  title,
+  address,
+  options = {},
+) => {
+  const destination = new DestinationModel({
+    driverId,
+    location,
+    title,
+    address,
+  });
+  await destination.save({ session: options.session }); // <- bind session here
+  return destination;
+};
+
+export const findAllDestination = async (driverId) =>
+  DestinationModel.find({ driverId }).lean();
+
+export const findDestinationById = async (id, driverId) =>
+  DestinationModel.findOne({ _id: id, driverId }).lean();
+
+export const updateDestinationById = async (id, payload, options = {}) =>
+  DestinationModel.findByIdAndUpdate(id, payload, { new: true, ...options });
+
+export const deleteDestinationById = async (id, driverId, options = {}) =>
+  DestinationModel.findOneAndDelete({ _id: id, driverId }, { ...options });

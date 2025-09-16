@@ -111,6 +111,14 @@ const driverSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    isDestination: {
+      type: Boolean,
+      default: false,
+    },
+    destinationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Destination',
+    },
   },
   {
     timestamps: true,

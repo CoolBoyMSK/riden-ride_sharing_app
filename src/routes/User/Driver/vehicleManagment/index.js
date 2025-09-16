@@ -2,8 +2,8 @@ import express from 'express';
 import { registerRoute } from '../../../../utils/registerRoute.js';
 import {
   addOrReplaceVehicle,
-  editVehicle,
   viewVehicle,
+  updateDriverVehicleRequestController,
 } from '../../../../controllers/User/Drivers/VehicleManagement/index.js';
 import { uploadSingle } from '../../../../middlewares/upload.js';
 
@@ -16,7 +16,8 @@ registerRoute({
   get_method: viewVehicle,
   post_middlewares: [uploadSingle],
   post_method: addOrReplaceVehicle,
-  patch_method: editVehicle,
+  patch_middlewares: [uploadSingle],
+  patch_method: updateDriverVehicleRequestController,
 });
 
 export default router;
