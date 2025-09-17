@@ -5,6 +5,7 @@ import {
   fetchDestinationById,
   editDestination,
   deleteDestination,
+  toggleDestination,
 } from '../../../../services/User/driver/destination/index.js';
 
 export const addDestinationController = (req, res) =>
@@ -57,6 +58,17 @@ export const deleteDestinationController = (req, res) =>
       handler: deleteDestination,
       handlerParams: [req.user, req.params],
       successMessage: 'Destination deleted successfully',
+    },
+    req,
+    res,
+  );
+
+export const toggleDestinationController = (req, res) =>
+  handleResponse(
+    {
+      handler: toggleDestination,
+      handlerParams: [req.user],
+      successMessage: 'Destination toggled successfully',
     },
     req,
     res,

@@ -115,9 +115,9 @@ const driverSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-    destinationId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Destination',
+    isRestricted: {
+      type: Boolean,
+      default: false,
     },
   },
   {

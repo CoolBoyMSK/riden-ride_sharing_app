@@ -6,6 +6,7 @@ import {
   fetchDestinationByIdController,
   editDestinationController,
   deleteDestinationController,
+  toggleDestinationController,
 } from '../../../../controllers/User/Drivers/destination/index.js';
 
 const router = express.Router();
@@ -43,6 +44,13 @@ registerRoute({
   route: '/delete/:id',
   driver_auth_enable: true,
   delete_method: deleteDestinationController,
+});
+
+registerRoute({
+  router,
+  route: '/toggle',
+  driver_auth_enable: true,
+  patch_method: toggleDestinationController,
 });
 
 export default router;

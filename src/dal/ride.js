@@ -1,8 +1,12 @@
 import RideModel from '../models/Ride.js';
 import DriverLocationModel from '../models/DriverLocation.js';
+import DriverModel from '../models/Driver.js';
 import { generateUniqueId } from '../utils/auth.js';
 import redisClient from '../config/redisConfig.js';
 import env from '../config/envConfig.js';
+import { RESTRICTED_AREA } from '../enums/restrictedArea.js';
+import ParkingQueue from '../models/ParkingQueue.js';
+import mongoose from 'mongoose';
 
 // Ride Operations
 export const createRide = async (rideData) => {
@@ -125,7 +129,7 @@ export const findActiveRideByDriver = async (driverId) => {
 export const findPendingRides = async (
   carType,
   location,
-  radius = 5000,
+  radius = 10000,
   { excludeIds = [], projection = null, limit = 0, session = null } = {},
 ) => {
   const query = {
@@ -331,7 +335,6 @@ export const getDriverLocation = async (driverId) => {
   return data ? JSON.parse(data) : null;
 };
 
-// Periodic flush of location to DB (call from a scheduled job)
 export const persistDriverLocationToDB = async (driverId, { session } = {}) => {
   const data = await getDriverLocation(driverId);
   if (!data) return null;
@@ -348,19 +351,389 @@ export const persistDriverLocationToDB = async (driverId, { session } = {}) => {
 };
 
 export const findNearbyRideRequests = async (
-  driverDestinationCoords,
+  driverDestinationCoords, // [lng, lat]
+  driverCurrentCoords, // [lng, lat]
   radiusKm = 5,
+  limit = 10,
 ) => {
-  const radiusInRadians = radiusKm / 6378.1;
+  const radiusMeters = radiusKm * 1000;
 
-  const rideRequests = await RideModel.find({
-    dropoff: {
-      $geoWithin: {
-        $centerSphere: [driverDestinationCoords, radiusInRadians],
+  const rides = await RideModel.aggregate([
+    // Step 1: GeoNear to sort by pickup distance from driver
+    {
+      $geoNear: {
+        near: { type: 'Point', coordinates: driverCurrentCoords },
+        key: 'pickupLocation.coordinates', // must have 2dsphere index
+        distanceField: 'distanceFromDriver',
+        query: { status: 'REQUESTED' }, // only requested rides
+        spherical: true,
       },
     },
-    status: 'requested',
+
+    // Step 2: Filter rides whose dropoff is within radiusKm of driverDestination
+    {
+      $match: {
+        'dropoffLocation.coordinates': {
+          $geoWithin: {
+            $centerSphere: [driverDestinationCoords, radiusKm / 6378.1], // radius in radians
+          },
+        },
+      },
+    },
+
+    // Step 3: Limit results for performance
+    { $limit: limit },
+  ]);
+
+  return rides;
+};
+
+export const haversineDistance = (coord1, coord2) => {
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const R = 6371; // Earth radius in km
+
+  const dLat = toRad(coord2.latitude - coord1.latitude);
+  const dLon = toRad(coord2.longitude - coord1.longitude);
+
+  const lat1Rad = toRad(coord1.latitude);
+  const lat2Rad = toRad(coord2.latitude);
+
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1Rad) * Math.cos(lat2Rad) * Math.sin(dLon / 2) ** 2;
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c;
+};
+
+export const isDriverInParkingLot = (driverCoords, parkingRadiusKm = 1) => {
+  for (const area of RESTRICTED_AREA) {
+    for (const lot of area.parkingLots) {
+      const distance = haversineDistance(driverCoords, lot.coordinates);
+      if (distance <= parkingRadiusKm) return true;
+    }
+  }
+  return false;
+};
+
+export const isRideInRestrictedArea = (rideCoords, restrictedRadiusKm = 10) => {
+  for (const area of RESTRICTED_AREA) {
+    const distance = haversineDistance(rideCoords, area.airportCoordinates);
+    if (distance <= restrictedRadiusKm) return true;
+  }
+  return false;
+};
+
+export const filterRidesForDriver = (
+  rides,
+  driverCoords,
+  restrictedRadiusKm = 10,
+  parkingRadiusKm = 1,
+) => {
+  if (!Array.isArray(rides)) return [];
+
+  const driverInParking = isDriverInParkingLot(driverCoords, parkingRadiusKm);
+  return rides.filter((ride) => {
+    if (!ride.pickupLocation || !Array.isArray(ride.pickupLocation.coordinates))
+      return false;
+
+    const [lng, lat] = ride.pickupLocation.coordinates;
+    const rideCoords = { latitude: lat, longitude: lng };
+
+    if (driverInParking) return true;
+
+    return !isRideInRestrictedArea(rideCoords, restrictedRadiusKm);
+  });
+};
+
+export const findNearestParkingForPickup = (userCoords, radiusKm = 10) => {
+  // Normalize coordinates
+  if (Array.isArray(userCoords) && userCoords.length === 2) {
+    userCoords = {
+      latitude: Number(userCoords[1]),
+      longitude: Number(userCoords[0]),
+    };
+  }
+
+  // Validate coordinates
+  if (
+    !userCoords ||
+    typeof userCoords.latitude !== 'number' ||
+    typeof userCoords.longitude !== 'number'
+  ) {
+    throw new Error('Invalid user coordinates.');
+  }
+
+  let nearest = null;
+
+  for (const airport of RESTRICTED_AREA) {
+    for (const lot of airport.parkingLots) {
+      const distance = haversineDistance(userCoords, lot.coordinates);
+
+      if (distance <= radiusKm) {
+        if (!nearest || distance < nearest.distanceKm) {
+          nearest = {
+            airportName: airport.name,
+            parkingLotName: lot.name,
+            parkingLotId: lot.id,
+            coordinates: lot.coordinates,
+            distanceKm: Number(distance.toFixed(3)),
+          };
+        }
+      }
+    }
+  }
+
+  if (!nearest) return null;
+
+  const { latitude, longitude } = nearest.coordinates;
+
+  return {
+    ...nearest,
+    googleMapsUrl: `https://www.google.com/maps/dir/?api=1&origin=${userCoords.latitude},${userCoords.longitude}&destination=${latitude},${longitude}&travelmode=driving`,
+    appleMapsUrl: `http://maps.apple.com/?saddr=${userCoords.latitude},${userCoords.longitude}&daddr=${latitude},${longitude}`,
+  };
+};
+
+export const addDriverToQueue = async (parkingLotId, driverId) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    // Atomically add driverId only if not already in the array
+    const updated = await ParkingQueue.findOneAndUpdate(
+      { parkingLotId },
+      { $addToSet: { driverIds: driverId } }, // $addToSet ensures no duplicates
+      { new: true, session },
+    );
+
+    if (!updated) {
+      throw new Error(`Parking lot with ID ${parkingLotId} not found.`);
+    }
+
+    await session.commitTransaction();
+    return {
+      message: `Driver successfully added to parking lot queue ${parkingLotId} (or already present).`,
+      driverIds: updated.driverIds,
+    };
+  } catch (err) {
+    await session.abortTransaction();
+    throw new Error(`Failed to add driver to queue: ${err.message}`);
+  } finally {
+    session.endSession();
+  }
+};
+
+export const removeDriverFromQueue = async (driverId, session = null) => {
+  const useSession = session || (await mongoose.startSession());
+  if (!session) useSession.startTransaction();
+
+  try {
+    const driverObjectId =
+      typeof driverId === 'string'
+        ? mongoose.Types.ObjectId(driverId)
+        : driverId;
+
+    // Remove driver from all queues
+    const result = await ParkingQueue.updateMany(
+      {}, // empty filter → all documents
+      { $pull: { driverIds: driverObjectId } },
+      { session: useSession },
+    );
+
+    if (!session) await useSession.commitTransaction();
+    console.log('Driver removed from queues:', result.modifiedCount);
+    return result;
+  } catch (err) {
+    if (!session) await useSession.abortTransaction();
+    throw new Error(`Failed to remove driver from queues: ${err.message}`);
+  } finally {
+    if (!session) useSession.endSession();
+  }
+};
+
+const OFFER_TIMEOUT_MS = 180000; // 1 minute per driver (can be adjusted)
+
+/**
+ * Offer a ride to drivers in a parking-lot queue
+ * @param {Object} ride - Ride document
+ * @param {SocketIO.Server} io - Socket.IO server
+ * @param {Set} declinedDrivers - Set of driver IDs who declined
+ */
+export const offerRideToParkingQueue = async (
+  ride,
+  io,
+  declinedDrivers = new Set(),
+) => {
+  if (!ride) return;
+
+  const parkingLot = findNearestParkingForPickup(
+    ride.pickupLocation.coordinates,
+  );
+  if (!parkingLot) return;
+
+  const queue = await ParkingQueue.findOne({
+    parkingLotId: parkingLot.parkingLotId,
+  });
+  if (!queue || queue.driverIds.length === 0) return; // No driver available
+
+  // Find the first driver in queue who hasn't declined yet
+  const driverId = queue.driverIds.find(
+    (id) => !declinedDrivers.has(id.toString()),
+  );
+  if (!driverId) return; // All drivers declined
+
+  const driver = await DriverModel.findById(driverId);
+  if (!driver) return;
+
+  // Emit ride offer to driver
+  io.to(`user:${driver.userId}`).emit('response', {
+    success: true,
+    ride,
+    message: 'Airport ride offer',
   });
 
-  return rideRequests;
+  // Define response handler
+  const responseHandler = async ({ driverResponse }) => {
+    io.off(`ride:response:${ride._id}:${driverId}`, responseHandler); // remove listener first
+    try {
+      await handleDriverResponse(
+        ride._id,
+        driverId,
+        driverResponse,
+        io,
+        declinedDrivers,
+      );
+    } catch (err) {
+      console.error('Error in driver response handler:', err);
+    }
+  };
+
+  // Listen for driver response
+  io.on(`ride:response:${ride._id}:${driverId}`, responseHandler);
+
+  // Timeout handling: if driver does not respond in time, rotate queue
+  setTimeout(async () => {
+    io.off(`ride:response:${ride._id}:${driverId}`, responseHandler);
+
+    const updatedRide = await RideModel.findById(ride._id);
+    if (updatedRide && updatedRide.status === 'REQUESTED') {
+      declinedDrivers.add(driverId.toString());
+      await rotateQueue(parkingLot.parkingLotId, driverId);
+      offerRideToParkingQueue(ride, io, declinedDrivers);
+    }
+  }, OFFER_TIMEOUT_MS);
+};
+
+/**
+ * Rotate a driver to the end of the queue
+ * @param {String|ObjectId} parkingLotId
+ * @param {String|ObjectId} driverId
+ */
+async function rotateQueue(parkingLotId, driverId) {
+  if (!driverId || !parkingLotId) return;
+
+  const driver = await DriverModel.findById(driverId);
+  console.log('driver');
+  console.log(driver);
+
+  await ParkingQueue.findOneAndUpdate(
+    { parkingLotId },
+    { $pull: { driverIds: driver._id } },
+  );
+
+  await ParkingQueue.findOneAndUpdate(
+    { parkingLotId },
+    { $push: { driverIds: driver._id } },
+  );
+}
+
+/**
+ * Handle driver response to a ride offer
+ * @param {String|ObjectId} rideId
+ * @param {String|ObjectId} driverId
+ * @param {String} driverResponse - 'accepted' | 'declined'
+ * @param {SocketIO.Server} io
+ * @param {Set} declinedDrivers
+ */
+export const handleDriverResponse = async (
+  rideId,
+  driverId,
+  driverResponse,
+  io,
+  socket,
+  objectType,
+  declinedDrivers = new Set(),
+) => {
+  if (!rideId || !driverId) return;
+
+  const ride = await RideModel.findById(rideId);
+  if (!ride || ride.status !== 'REQUESTED') return; // Already assigned
+
+  const parkingLot = findNearestParkingForPickup(
+    ride.pickupLocation.coordinates,
+  );
+  if (!parkingLot) return;
+
+  const driver = await DriverModel.findById(driverId);
+  const objectDriverId = driver._id;
+
+  if (driverResponse === 'accepted') {
+    // Update ride, driver, and location atomically
+    const updatedRide = await RideModel.findByIdAndUpdate(
+      rideId,
+      { status: 'DRIVER_ASSIGNED', driverId, driverAssignedAt: new Date() },
+      { new: true },
+    );
+
+    await Promise.all([
+      DriverModel.findByIdAndUpdate(driverId, { status: 'on_ride' }),
+      DriverLocationModel.findOneAndUpdate(
+        { driverId },
+        { isAvailable: false, currentRideId: rideId, lastUpdated: new Date() },
+      ),
+      ParkingQueue.findOneAndUpdate(
+        { parkingLotId: parkingLot.parkingLotId },
+        { $pull: { driverIds: objectDriverId } },
+      ),
+    ]);
+
+    socket.join(`ride:${updatedRide._id}`);
+    socket.emit('response', {
+      rideId,
+      message: 'Successfully joined ride room',
+    });
+
+    // Notify driver
+    socket.emit('response', {
+      success: true,
+      objectType,
+      ride: updatedRide,
+      message: 'Ride successfully assigned to you',
+    });
+
+    // Notify passenger
+    io.to(`user:${ride.passengerId}`).emit('response', {
+      rideId: updatedRide.rideId,
+      status: 'DRIVER_ASSIGNED',
+      data: {
+        ride: updatedRide,
+        driver,
+      },
+    });
+  } else {
+    // Declined → rotate queue and offer to next driver
+    declinedDrivers.add(driverId.toString());
+    await rotateQueue(parkingLot.parkingLotId, driverId);
+    offerRideToParkingQueue(ride, io, declinedDrivers);
+
+    // Notify driver
+    socket.emit('response', {
+      success: true,
+      objectType,
+      rideId,
+      message: 'You declined the ride',
+    });
+  }
 };

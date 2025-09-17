@@ -6,6 +6,7 @@ import {
   findDestinationById,
   updateDestinationById,
   deleteDestinationById,
+  updateDriverByUserId,
 } from '../../../../dal/driver.js';
 
 export const addDestination = async (
@@ -205,6 +206,40 @@ export const deleteDestination = async (user, { id }, resp) => {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
     resp.error_message = 'Something went wrong while deleting destination';
+    return resp;
+  }
+};
+
+export const toggleDestination = async (user, resp) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const updated = await updateDriverByUserId(
+      user._id,
+      [{ $set: { isDestination: { $not: "$isDestination" } } }],
+      { session },
+    );
+    if (!updated) {
+      await session.abortTransaction();
+      session.endSession();
+
+      resp.error = true;
+      resp.error_message = 'Failed to toggle destination';
+      return resp;
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    resp.data = updated;
+    return resp;
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = 'Something went wrong while toggling destination';
     return resp;
   }
 };

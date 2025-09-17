@@ -9,10 +9,17 @@ import {
   updateRideById,
   findRideById,
   saveDriverLocation,
-  getDriverLocation,
   persistDriverLocationToDB,
   updateDriverAvailability,
   findNearbyRideRequests,
+  findNearestParkingForPickup,
+  filterRidesForDriver,
+  addDriverToQueue,
+  removeDriverFromQueue,
+  isDriverInParkingLot,
+  isRideInRestrictedArea,
+  offerRideToParkingQueue,
+  handleDriverResponse,
 } from '../dal/ride.js';
 import {
   findDriverByUserId,
@@ -68,11 +75,12 @@ export const initSocket = (server) => {
       const objectType = 'find-ride';
       const session = await mongoose.startSession();
       try {
-        await session.startTransaction();
+        session.startTransaction();
 
         const driver = await findDriverByUserId(userId, { session });
         if (
           !driver ||
+          // driver.isRestricted ||
           driver.isBlocked ||
           driver.isSuspended ||
           driver.backgroundCheckStatus !== 'approved' ||
@@ -102,6 +110,22 @@ export const initSocket = (server) => {
           });
         }
 
+        const [lng, lat] = driverLocation.location.coordinates;
+        const driverCoords = { latitude: lat, longitude: lng };
+
+        const driverInParkingLot = isDriverInParkingLot(driverCoords);
+        let restrictedRides = [];
+        if (driverInParkingLot) {
+          restrictedRides = await findPendingRides(
+            driver.vehicle.type,
+            driverLocation.location.coordinates,
+            10000,
+            { limit: 5, session },
+          );
+
+          restrictedRides.forEach((ride) => offerRideToParkingQueue(ride, io));
+        }
+
         const availableRides = await findPendingRides(
           driver.vehicle.type,
           driverLocation.location.coordinates,
@@ -109,33 +133,78 @@ export const initSocket = (server) => {
           { limit: 10, session },
         );
 
-        // Commit transaction since all reads succeeded
         await session.commitTransaction();
         session.endSession();
 
-        if (!availableRides.length) {
-          return socket.emit('response', {
-            success: true,
-            objectType,
-            rides: [],
-            message: 'No available rides found nearby',
-          });
-        }
+        // Exclude restricted rides already offered
+        const restrictedRideIds = restrictedRides.map((r) => r._id.toString());
+        const filteredRides = filterRidesForDriver(
+          availableRides.filter(
+            (r) => !restrictedRideIds.includes(r._id.toString()),
+          ),
+          driverCoords,
+          10,
+          1,
+        );
 
         socket.emit('response', {
           success: true,
           objectType,
-          rides: availableRides,
-          message: `${availableRides.length} available rides found`,
+          rides: filteredRides,
+          message: `${filteredRides.length} available rides found`,
         });
       } catch (error) {
         await session.abortTransaction();
         session.endSession();
+
         console.error(`SOCKET ERROR: ${error}`);
         return socket.emit('error', {
           success: false,
           objectType,
           code: error.code || 'SOCKET_ERROR',
+          message: `SOCKET ERROR: ${error.message}`,
+        });
+      }
+    });
+
+    socket.on('ride:response', async ({ rideId, driverResponse }) => {
+      const objectType = 'airport-parking-offer-response';
+      try {
+        console.log(
+          `Response from driver ${userId} for ride ${rideId}: ${driverResponse}`,
+        );
+
+        const driver = await findDriverByUserId(userId);
+        if (
+          !driver ||
+          driver.isRestricted ||
+          driver.isBlocked ||
+          driver.isSuspended ||
+          driver.backgroundCheckStatus !== 'approved' ||
+          driver.status !== 'online'
+        ) {
+          return socket.emit('response', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Forbidden: Driver not eligible',
+          });
+        }
+
+        await handleDriverResponse(
+          rideId,
+          driver,
+          driverResponse,
+          io,
+          socket,
+          objectType,
+        );
+      } catch (error) {
+        console.error(`SOCKET ERROR: ${error}`);
+        socket.emit('error', {
+          success: false,
+          objectType,
+          code: `${error.code || 'SOCKET_ERROR'}`,
           message: `SOCKET ERROR: ${error.message}`,
         });
       }
@@ -150,6 +219,7 @@ export const initSocket = (server) => {
           const driver = await findDriverByUserId(userId, { session });
           if (
             !driver ||
+            driver.isRestricted ||
             driver.isBlocked ||
             driver.isSuspended ||
             driver.backgroundCheckStatus !== 'approved' ||
@@ -231,6 +301,7 @@ export const initSocket = (server) => {
           const driver = await findDriverByUserId(userId, { session });
           if (
             !driver ||
+            driver.isRestricted ||
             driver.isBlocked ||
             driver.isSuspended ||
             driver.backgroundCheckStatus !== 'approved' ||
@@ -325,7 +396,7 @@ export const initSocket = (server) => {
           }
 
           socket.join(`ride:${updatedRide._id}`);
-          socket.emit('ride:joined', {
+          socket.emit('joined', {
             rideId,
             message: 'Successfully joined ride room',
           });
@@ -339,7 +410,7 @@ export const initSocket = (server) => {
           });
 
           // Notify passenger of driver assignment
-          io.to(`user:${ride.passengerId}`).emit('ride:status_update', {
+          io.to(`user:${ride.passengerId}`).emit('status_update', {
             rideId: updatedRide.rideId,
             status: 'DRIVER_ASSIGNED',
             data: {
@@ -370,6 +441,7 @@ export const initSocket = (server) => {
           const driver = await findDriverByUserId(userId, { session });
           if (
             !driver ||
+            driver.isRestricted ||
             driver.isBlocked ||
             driver.isSuspended ||
             driver.backgroundCheckStatus !== 'approved' ||
@@ -536,7 +608,7 @@ export const initSocket = (server) => {
           });
 
           // Notify passenger of ride cancellation
-          io.to(`user:${ride.passengerId}`).emit('ride:status_update', {
+          io.to(`user:${ride.passengerId}`).emit('status_update', {
             rideId: updatedRide.rideId,
             status: 'CANCELLED_BY_DRIVER',
             data: {
@@ -553,7 +625,7 @@ export const initSocket = (server) => {
           const clients = await io.in(`ride:${ride._id}`).fetchSockets();
           clients.forEach((s) => s.leave(`ride:${ride._id}`));
 
-          socket.emit('ride:left', {
+          socket.emit('response', {
             rideId,
             message: 'You have left the ride room after cancellation.',
           });
@@ -580,6 +652,7 @@ export const initSocket = (server) => {
         const driver = await findDriverByUserId(userId);
         if (
           !driver ||
+          driver.isRestricted ||
           driver.isBlocked ||
           driver.isSuspended ||
           driver.backgroundCheckStatus !== 'approved' ||
@@ -660,7 +733,7 @@ export const initSocket = (server) => {
         });
 
         // Notify passenger of driver arriving
-        io.to(`user:${ride.passengerId}`).emit('ride:status_update', {
+        io.to(`user:${ride.passengerId}`).emit('status_update', {
           rideId: updatedRide.rideId,
           status: 'DRIVER_ARRIVING',
           data: {
@@ -690,6 +763,7 @@ export const initSocket = (server) => {
         const driver = await findDriverByUserId(userId);
         if (
           !driver ||
+          driver.isRestricted ||
           driver.isBlocked ||
           driver.isSuspended ||
           driver.backgroundCheckStatus !== 'approved' ||
@@ -771,7 +845,7 @@ export const initSocket = (server) => {
         });
 
         // Notify passenger of driver arrival
-        io.to(`user:${ride.passengerId}`).emit('ride:status_update', {
+        io.to(`user:${ride.passengerId}`).emit('status_update', {
           rideId: updatedRide.rideId,
           status: 'DRIVER_ARRIVED',
           data: {
@@ -801,6 +875,7 @@ export const initSocket = (server) => {
         const driver = await findDriverByUserId(userId);
         if (
           !driver ||
+          driver.isRestricted ||
           driver.isBlocked ||
           driver.isSuspended ||
           driver.backgroundCheckStatus !== 'approved' ||
@@ -881,7 +956,7 @@ export const initSocket = (server) => {
         });
 
         // Notify passenger of ride start
-        io.to(`user:${ride.passengerId}`).emit('ride:status_update', {
+        io.to(`user:${ride.passengerId}`).emit('status_update', {
           rideId: updatedRide.rideId,
           status: 'RIDE_STARTED',
           data: {
@@ -1037,7 +1112,7 @@ export const initSocket = (server) => {
         });
 
         // Notify passenger of ride completion
-        io.to(`user:${ride.passengerId}`).emit('ride:status_update', {
+        io.to(`user:${ride.passengerId}`).emit('status_update', {
           rideId: updatedRide.rideId,
           status: 'RIDE_COMPLETED',
           data: {
@@ -1184,7 +1259,7 @@ export const initSocket = (server) => {
           });
 
           socket.leave(`ride:${ride._id}`);
-          socket.emit('ride:left', {
+          socket.emit('response', {
             rideId,
             message: 'Successfully left ride room',
           });
@@ -1281,6 +1356,59 @@ export const initSocket = (server) => {
           session = await mongoose.startSession();
           session.startTransaction();
 
+          const [lng, lat] = location.coordinates;
+          const coordsObj = { latitude: lat, longitude: lng };
+
+          const isRestricted = isRideInRestrictedArea(coordsObj); // returns boolean
+          const isParkingLot = isDriverInParkingLot(coordsObj);
+
+          console.log(`${isRestricted} - ${isParkingLot}`);
+
+          if (isRestricted && !isParkingLot) {
+            await updateDriverByUserId(userId, { isRestricted }, { session });
+            const parkingLot = findNearestParkingForPickup(coordsObj);
+
+            io.to(`user:${userId}`).emit('response', {
+              success: true,
+              objectType,
+              code: 'RESTRICTED_AREA',
+              message:
+                "You are inside the restricted area, and you can't pick ride in this area, reach to nearby parking lot in order to be able to pick rides",
+              data: parkingLot,
+            });
+
+            if (parkingLot?.parkingLotId) {
+              await removeDriverFromQueue(driver._id, session);
+            }
+          } else if (isRestricted && isParkingLot) {
+            const parkingLot = findNearestParkingForPickup(coordsObj);
+            if (parkingLot?.parkingLotId) {
+              await addDriverToQueue(parkingLot.parkingLotId, driver._id);
+            }
+
+            await updateDriverByUserId(
+              userId,
+              { isRestricted: false },
+              { session },
+            );
+
+            io.to(`user:${userId}`).emit('response', {
+              success: true,
+              objectType,
+              code: 'SAFE_AREA',
+              message:
+                'You are within the premises of safe aree, You can pickUp rides now',
+            });
+          } else {
+            await removeDriverFromQueue(driver._id, session);
+
+            await updateDriverByUserId(
+              userId,
+              { isRestricted: false },
+              { session },
+            );
+          }
+
           await saveDriverLocation(driver._id, {
             lng: location.coordinates[0],
             lat: location.coordinates[1],
@@ -1331,11 +1459,14 @@ export const initSocket = (server) => {
 
     socket.on('ride:find_destination_rides', async () => {
       const objectType = 'find-destination-rides';
+      const MAX_RIDES = 10;
+
       try {
         const driver = await findDriverByUserId(userId);
+
         if (
           !driver ||
-          !driver.isDestination ||
+          driver.isRestricted ||
           driver.isBlocked ||
           driver.isSuspended ||
           driver.backgroundCheckStatus !== 'approved' ||
@@ -1349,8 +1480,12 @@ export const initSocket = (server) => {
           });
         }
 
-        const destination = await findAllDestination(driver._id);
-        if (!destination || !destination.length()) {
+        const [destination, driverLocation] = await Promise.all([
+          findAllDestination(driver._id),
+          findDriverLocation(driver._id),
+        ]);
+
+        if (!destination) {
           return socket.emit('response', {
             success: false,
             objectType,
@@ -1359,16 +1494,50 @@ export const initSocket = (server) => {
           });
         }
 
-        const coordinates = destination[0].location.coordinates;
-        const rides = await findNearbyRideRequests(coordinates);
+        if (!driverLocation) {
+          return socket.emit('response', {
+            success: false,
+            objectType,
+            code: 'LOCATION_UNAVAILABLE',
+            message: "Driver's location is not available",
+          });
+        }
 
+        const destCoords = destination.location.coordinates;
+        const driverCoords = driverLocation.location.coordinates;
+        const rides = await findNearbyRideRequests(
+          destCoords,
+          driverCoords,
+          5,
+          MAX_RIDES,
+        );
+
+        if (!rides || rides.length === 0) {
+          return socket.emit('response', {
+            success: true,
+            objectType,
+            data: {
+              total: 0,
+              rides: [],
+            },
+            message: 'No nearby rides found',
+          });
+        }
+
+        // 4️⃣ Prepare response safely
+        const responseData = {
+          total: rides.length,
+        };
+
+        if (driver.isDestination) {
+          responseData.rides = rides;
+        }
+
+        // 5️⃣ Emit final response
         socket.emit('response', {
           success: true,
           objectType,
-          data: {
-            total: rides.length(),
-            rides,
-          },
+          data: responseData,
           message: 'Rides fetched successfully',
         });
       } catch (error) {
@@ -1485,7 +1654,7 @@ export const initSocket = (server) => {
 
         // Join ride room
         socket.join(`ride:${ride._id}`);
-        socket.emit('ride:joined', {
+        socket.emit('joined', {
           rideId,
           message: 'Successfully joined ride room',
         });
@@ -1669,7 +1838,7 @@ export const initSocket = (server) => {
         session.endSession();
 
         // Notify driver of ride cancellation
-        io.to(`user:${ride.driverId}`).emit('ride:status_update', {
+        io.to(`user:${ride.driverId}`).emit('status_update', {
           rideId: updatedRide.rideId,
           status: 'CANCELLED_BY_PASSENGER',
           data: { ride: updatedRide, passenger },
@@ -1691,7 +1860,7 @@ export const initSocket = (server) => {
         const clients = await io.in(`ride:${ride._id}`).fetchSockets();
         clients.forEach((s) => s.leave(`ride:${ride._id}`));
 
-        socket.emit('ride:left', {
+        socket.emit('response', {
           rideId,
           message: 'You have left the ride room after cancellation.',
         });
@@ -1835,7 +2004,7 @@ export const initSocket = (server) => {
           });
 
           socket.leave(`ride:${ride._id}`);
-          socket.emit('ride:left', {
+          socket.emit('response', {
             rideId,
             message: 'Successfully left ride room',
           });
@@ -1874,13 +2043,13 @@ export const initSocket = (server) => {
         }
 
         socket.join(`ride:${rideId}`);
-        socket.emit('ride:joined', {
+        socket.emit('response', {
           rideId,
           message: 'Successfully joined ride room',
         });
 
         // Notify other participants that user joined
-        socket.to(`ride:${rideId}`).emit('ride:user_joined', {
+        socket.to(`ride:${rideId}`).emit('response', {
           userId,
           rideId,
           timestamp: new Date(),
@@ -1981,10 +2150,10 @@ export const initSocket = (server) => {
     });
 
     // Event: Ride status updates
-    socket.on('ride:status_update', ({ rideId, status, data }) => {
+    socket.on('status_update', ({ rideId, status, data }) => {
       if (!rideId || !status) return;
 
-      io.to(`ride:${rideId}`).emit('ride:status_update', {
+      io.to(`ride:${rideId}`).emit('status_update', {
         rideId,
         status,
         data,
