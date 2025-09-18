@@ -3,72 +3,76 @@ import mongoose from 'mongoose';
 const chatMessageSchema = new mongoose.Schema(
   {
     rideId: {
-      type: String,
+      type: mongoose.Schema.Types.ObjectId,
       required: true,
       index: true,
-      ref: 'Ride'
+      ref: 'Ride',
     },
     senderId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       required: true,
-      index: true
+      index: true,
     },
     text: {
       type: String,
       trim: true,
       required: true,
-      maxlength: 1000
+      maxlength: 1000,
     },
     messageType: {
       type: String,
       enum: ['text', 'system', 'location', 'image'],
-      default: 'text'
+      default: 'text',
     },
-    attachments: [{
-      type: {
-        type: String,
-        enum: ['image', 'document', 'location']
+    attachments: [
+      {
+        type: {
+          type: String,
+          enum: ['image', 'document', 'location'],
+        },
+        url: String,
+        filename: String,
+        size: Number,
       },
-      url: String,
-      filename: String,
-      size: Number
-    }],
+    ],
     deliveredAt: {
       type: Date,
-      default: null
+      default: null,
     },
     readAt: {
       type: Date,
-      default: null
+      default: null,
     },
-    readBy: [{
-      userId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User'
+    readBy: [
+      {
+        userId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+        },
+        readAt: {
+          type: Date,
+          default: Date.now,
+        },
       },
-      readAt: {
-        type: Date,
-        default: Date.now
-      }
-    }],
+    ],
     isDeleted: {
       type: Boolean,
-      default: false
+      default: false,
     },
     editedAt: {
       type: Date,
-      default: null
+      default: null,
     },
     replyTo: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'ChatMessage',
-      default: null
-    }
+      default: null,
+    },
   },
   {
-    timestamps: true
-  }
+    timestamps: true,
+  },
 );
 
 // Indexes for better performance
@@ -84,7 +88,7 @@ chatMessageSchema.virtual('sender', {
   ref: 'User',
   localField: 'senderId',
   foreignField: '_id',
-  justOne: true
+  justOne: true,
 });
 
 // Ensure virtual fields are serialized
@@ -92,7 +96,7 @@ chatMessageSchema.set('toJSON', { virtuals: true });
 chatMessageSchema.set('toObject', { virtuals: true });
 
 // Pre-save middleware
-chatMessageSchema.pre('save', function(next) {
+chatMessageSchema.pre('save', function (next) {
   // Auto-set deliveredAt when message is created
   if (this.isNew && !this.deliveredAt) {
     this.deliveredAt = new Date();
@@ -101,8 +105,8 @@ chatMessageSchema.pre('save', function(next) {
 });
 
 // Instance methods
-chatMessageSchema.methods.markAsRead = function(userId) {
-  if (!this.readBy.some(r => r.userId.toString() === userId.toString())) {
+chatMessageSchema.methods.markAsRead = function (userId) {
+  if (!this.readBy.some((r) => r.userId.toString() === userId.toString())) {
     this.readBy.push({ userId, readAt: new Date() });
   }
   if (!this.readAt) {
@@ -111,18 +115,22 @@ chatMessageSchema.methods.markAsRead = function(userId) {
   return this.save();
 };
 
-chatMessageSchema.methods.softDelete = function() {
+chatMessageSchema.methods.softDelete = function () {
   this.isDeleted = true;
   return this.save();
 };
 
 // Static methods
-chatMessageSchema.statics.getRecentMessages = function(rideId, limit = 50, before = null) {
+chatMessageSchema.statics.getRecentMessages = function (
+  rideId,
+  limit = 50,
+  before = null,
+) {
   const query = { rideId, isDeleted: false };
   if (before) {
     query.createdAt = { $lt: new Date(before) };
   }
-  
+
   return this.find(query)
     .populate('senderId', 'name profileImg')
     .sort({ createdAt: -1 })
@@ -130,14 +138,17 @@ chatMessageSchema.statics.getRecentMessages = function(rideId, limit = 50, befor
     .lean();
 };
 
-chatMessageSchema.statics.markRideMessagesAsDelivered = function(rideId, userId) {
+chatMessageSchema.statics.markRideMessagesAsDelivered = function (
+  rideId,
+  userId,
+) {
   return this.updateMany(
-    { 
-      rideId, 
+    {
+      rideId,
       senderId: { $ne: userId },
-      deliveredAt: null 
+      deliveredAt: null,
     },
-    { $set: { deliveredAt: new Date() } }
+    { $set: { deliveredAt: new Date() } },
   );
 };
 

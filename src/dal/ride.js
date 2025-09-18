@@ -7,6 +7,7 @@ import env from '../config/envConfig.js';
 import { RESTRICTED_AREA } from '../enums/restrictedArea.js';
 import ParkingQueue from '../models/ParkingQueue.js';
 import mongoose from 'mongoose';
+import { tryCatch } from 'bullmq';
 
 // Ride Operations
 export const createRide = async (rideData) => {
@@ -566,64 +567,68 @@ export const offerRideToParkingQueue = async (
   io,
   declinedDrivers = new Set(),
 ) => {
-  if (!ride) return;
+  try {
+    if (!ride) return;
 
-  const parkingLot = findNearestParkingForPickup(
-    ride.pickupLocation.coordinates,
-  );
-  if (!parkingLot) return;
+    const parkingLot = findNearestParkingForPickup(
+      ride.pickupLocation.coordinates,
+    );
+    if (!parkingLot) return;
 
-  const queue = await ParkingQueue.findOne({
-    parkingLotId: parkingLot.parkingLotId,
-  });
-  if (!queue || queue.driverIds.length === 0) return; // No driver available
+    const queue = await ParkingQueue.findOne({
+      parkingLotId: parkingLot.parkingLotId,
+    });
+    if (!queue || queue.driverIds.length === 0) return; // No driver available
 
-  // Find the first driver in queue who hasn't declined yet
-  const driverId = queue.driverIds.find(
-    (id) => !declinedDrivers.has(id.toString()),
-  );
-  if (!driverId) return; // All drivers declined
+    // Find the first driver in queue who hasn't declined yet
+    const driverId = queue.driverIds.find(
+      (id) => !declinedDrivers.has(id.toString()),
+    );
+    if (!driverId) return; // All drivers declined
 
-  const driver = await DriverModel.findById(driverId);
-  if (!driver) return;
+    const driver = await DriverModel.findById(driverId);
+    if (!driver) return;
 
-  // Emit ride offer to driver
-  io.to(`user:${driver.userId}`).emit('response', {
-    success: true,
-    ride,
-    message: 'Airport ride offer',
-  });
+    // Emit ride offer to driver
+    io.to(`user:${driver.userId}`).emit('ride:response', {
+      success: true,
+      ride,
+      message: 'Airport ride offer',
+    });
 
-  // Define response handler
-  const responseHandler = async ({ driverResponse }) => {
-    io.off(`ride:response:${ride._id}:${driverId}`, responseHandler); // remove listener first
-    try {
-      await handleDriverResponse(
-        ride._id,
-        driverId,
-        driverResponse,
-        io,
-        declinedDrivers,
-      );
-    } catch (err) {
-      console.error('Error in driver response handler:', err);
-    }
-  };
+    // Define response handler
+    const responseHandler = async ({ driverResponse }) => {
+      io.off(`ride:response:${ride._id}:${driverId}`, responseHandler); // remove listener first
+      try {
+        await handleDriverResponse(
+          ride._id,
+          driverId,
+          driverResponse,
+          io,
+          declinedDrivers,
+        );
+      } catch (err) {
+        console.error('Error in driver response handler:', err);
+      }
+    };
 
-  // Listen for driver response
-  io.on(`ride:response:${ride._id}:${driverId}`, responseHandler);
+    // Listen for driver response
+    io.on(`ride:response:${ride._id}:${driverId}`, responseHandler);
 
-  // Timeout handling: if driver does not respond in time, rotate queue
-  setTimeout(async () => {
-    io.off(`ride:response:${ride._id}:${driverId}`, responseHandler);
+    // Timeout handling: if driver does not respond in time, rotate queue
+    setTimeout(async () => {
+      io.off(`ride:response:${ride._id}:${driverId}`, responseHandler);
 
-    const updatedRide = await RideModel.findById(ride._id);
-    if (updatedRide && updatedRide.status === 'REQUESTED') {
-      declinedDrivers.add(driverId.toString());
-      await rotateQueue(parkingLot.parkingLotId, driverId);
-      offerRideToParkingQueue(ride, io, declinedDrivers);
-    }
-  }, OFFER_TIMEOUT_MS);
+      const updatedRide = await RideModel.findById(ride._id);
+      if (updatedRide && updatedRide.status === 'REQUESTED') {
+        declinedDrivers.add(driverId.toString());
+        await rotateQueue(parkingLot.parkingLotId, driverId);
+        offerRideToParkingQueue(ride, io, declinedDrivers);
+      }
+    }, OFFER_TIMEOUT_MS);
+  } catch (error) {
+    return error;
+  }
 };
 
 /**
@@ -666,74 +671,84 @@ export const handleDriverResponse = async (
   objectType,
   declinedDrivers = new Set(),
 ) => {
-  if (!rideId || !driverId) return;
+  try {
+    if (!rideId || !driverId) return;
 
-  const ride = await RideModel.findById(rideId);
-  if (!ride || ride.status !== 'REQUESTED') return; // Already assigned
+    const ride = await RideModel.findById(rideId);
+    if (!ride || ride.status !== 'REQUESTED') return; // Already assigned
 
-  const parkingLot = findNearestParkingForPickup(
-    ride.pickupLocation.coordinates,
-  );
-  if (!parkingLot) return;
-
-  const driver = await DriverModel.findById(driverId);
-  const objectDriverId = driver._id;
-
-  if (driverResponse === 'accepted') {
-    // Update ride, driver, and location atomically
-    const updatedRide = await RideModel.findByIdAndUpdate(
-      rideId,
-      { status: 'DRIVER_ASSIGNED', driverId, driverAssignedAt: new Date() },
-      { new: true },
+    const parkingLot = findNearestParkingForPickup(
+      ride.pickupLocation.coordinates,
     );
+    if (!parkingLot) return;
 
-    await Promise.all([
-      DriverModel.findByIdAndUpdate(driverId, { status: 'on_ride' }),
-      DriverLocationModel.findOneAndUpdate(
-        { driverId },
-        { isAvailable: false, currentRideId: rideId, lastUpdated: new Date() },
-      ),
-      ParkingQueue.findOneAndUpdate(
-        { parkingLotId: parkingLot.parkingLotId },
-        { $pull: { driverIds: objectDriverId } },
-      ),
-    ]);
+    const driver = await DriverModel.findById(driverId);
+    if (!driver) return;
 
-    socket.join(`ride:${updatedRide._id}`);
-    socket.emit('response', {
-      rideId,
-      message: 'Successfully joined ride room',
-    });
+    const objectDriverId = driver._id;
 
-    // Notify driver
-    socket.emit('response', {
-      success: true,
-      objectType,
-      ride: updatedRide,
-      message: 'Ride successfully assigned to you',
-    });
+    if (driverResponse === 'accepted') {
+      // Update ride, driver, and location atomically
+      const updatedRide = await RideModel.findByIdAndUpdate(
+        rideId,
+        { status: 'DRIVER_ASSIGNED', driverId, driverAssignedAt: new Date() },
+        { new: true },
+      );
 
-    // Notify passenger
-    io.to(`user:${ride.passengerId}`).emit('response', {
-      rideId: updatedRide.rideId,
-      status: 'DRIVER_ASSIGNED',
-      data: {
+      await Promise.all([
+        DriverModel.findByIdAndUpdate(driverId, { status: 'on_ride' }),
+        DriverLocationModel.findOneAndUpdate(
+          { driverId },
+          {
+            isAvailable: false,
+            currentRideId: rideId,
+            lastUpdated: new Date(),
+          },
+        ),
+        ParkingQueue.findOneAndUpdate(
+          { parkingLotId: parkingLot.parkingLotId },
+          { $pull: { driverIds: objectDriverId } },
+        ),
+      ]);
+
+      socket.join(`ride:${updatedRide._id}`);
+      socket.emit('ride:response', {
+        rideId,
+        message: 'Successfully joined ride room',
+      });
+
+      // Notify driver
+      socket.emit('ride:response', {
+        success: true,
+        objectType,
         ride: updatedRide,
-        driver,
-      },
-    });
-  } else {
-    // Declined → rotate queue and offer to next driver
-    declinedDrivers.add(driverId.toString());
-    await rotateQueue(parkingLot.parkingLotId, driverId);
-    offerRideToParkingQueue(ride, io, declinedDrivers);
+        message: 'Ride successfully assigned to you',
+      });
 
-    // Notify driver
-    socket.emit('response', {
-      success: true,
-      objectType,
-      rideId,
-      message: 'You declined the ride',
-    });
+      // Notify passenger
+      io.to(`user:${ride.passengerId}`).emit('ride:response', {
+        rideId: updatedRide.rideId,
+        status: 'DRIVER_ASSIGNED',
+        data: {
+          ride: updatedRide,
+          driver,
+        },
+      });
+    } else {
+      // Declined → rotate queue and offer to next driver
+      declinedDrivers.add(driverId.toString());
+      await rotateQueue(parkingLot.parkingLotId, driverId);
+      offerRideToParkingQueue(ride, io, declinedDrivers);
+
+      // Notify driver
+      socket.emit('ride:response', {
+        success: true,
+        objectType,
+        rideId,
+        message: 'You declined the ride',
+      });
+    }
+  } catch (error) {
+    return error;
   }
 };
