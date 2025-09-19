@@ -26,8 +26,8 @@ export const findRideById = async (rideId, { session } = {}) => {
 
 export const findRideByRideId = async (rideId, { session = null } = {}) => {
   let query = RideModel.findOne({ rideId })
-    .populate('passengerId', 'userId isActive isBlocked')
-    .populate('driverId', 'userId vehicle backgroundCheckStatus isBlocked');
+    .populate('passengerId')
+    .populate('driverId');
   if (session) query = query.session(session);
   return await query.lean();
 };
@@ -63,7 +63,7 @@ export const findRidesByPassenger = async (passengerId, options = {}) => {
   }
 
   return await RideModel.find(query)
-    .populate('driverId', 'userId vehicle')
+    .populate('driverId')
     .sort({ requestedAt: -1 })
     .skip(skip)
     .limit(limit)
@@ -81,7 +81,7 @@ export const findRidesByDriver = async (driverId, options = {}) => {
   }
 
   return await RideModel.find(query)
-    .populate('passengerId', 'userId')
+    .populate('passengerId')
     .sort({ requestedAt: -1 })
     .skip(skip)
     .limit(limit)
@@ -103,7 +103,7 @@ export const findActiveRideByPassenger = async (passengerId) => {
       ],
     },
   })
-    .populate('driverId', 'userId vehicle')
+    .populate('driverId')
     .lean();
 };
 
@@ -121,7 +121,7 @@ export const findActiveRideByDriver = async (driverId) => {
       ],
     },
   })
-    .populate('passengerId', 'userId')
+    .populate('passengerId')
     .lean();
 };
 
@@ -142,18 +142,23 @@ export const findPendingRides = async (
       },
     },
   };
+
+  console.log('Query');
+  console.log(query);
+
   if (excludeIds.length) {
     query._id = { $nin: excludeIds };
   }
 
-  let q = RideModel.find(query, projection)
+  let q = await RideModel.find(query)
     .limit(limit)
-    .populate('passengerId', 'userId')
+    .populate('passengerId')
     .sort({ requestedAt: 1 });
 
-  if (session) q = q.session(session);
+  console.log('DB Return');
+  console.log(q);
 
-  return await q.lean();
+  return q;
 };
 
 // Driver Location Operations
@@ -192,7 +197,7 @@ export const findDriverLocation = async (driverId, { session = null } = {}) => {
 export const findAvailableDriversNearby = async (
   pickupLocation,
   carType,
-  radius = 5000,
+  radius = 10000,
 ) => {
   return await DriverLocationModel.find({
     status: 'ONLINE',
