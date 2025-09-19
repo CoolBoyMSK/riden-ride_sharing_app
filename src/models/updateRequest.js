@@ -19,8 +19,8 @@ const requestSchema = new mongoose.Schema(
     },
     old: {
       type: String,
-      required: true,
       trim: true,
+      default: null,
     },
     new: {
       type: String,

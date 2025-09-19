@@ -3,9 +3,9 @@ import mongoose from 'mongoose';
 const userOtpSchema = new mongoose.Schema(
   {
     target: {
-      type: String, 
+      type: String,
       required: true,
-      unique: true, 
+      unique: true,
     },
     otp: {
       type: String,
@@ -16,10 +16,16 @@ const userOtpSchema = new mongoose.Schema(
       enum: ['email', 'phone'],
       required: true,
     },
+    replaceWith: {
+      type: String,
+      trim: true,
+      unique: true,
+      sparse: true,
+    },
     expiresAt: {
       type: Date,
-      default: () => new Date(Date.now() + 2 * 60 * 1000), 
-      index: { expires: 0 }, 
+      default: () => new Date(Date.now() + 2 * 60 * 1000),
+      index: { expires: 0 },
     },
   },
   {

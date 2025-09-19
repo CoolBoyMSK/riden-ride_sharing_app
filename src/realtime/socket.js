@@ -1,7 +1,11 @@
 import { Server } from 'socket.io';
 import env from '../config/envConfig.js';
 import { verifyAccessToken } from '../utils/auth.js';
-import { createMessage, markMessageRead } from '../dal/chat.js';
+import {
+  createMessage,
+  markMessageRead,
+  getMessagesByRide,
+} from '../dal/chat.js';
 import {
   findRideByRideId,
   findDriverLocation,
@@ -2024,6 +2028,91 @@ export const initSocket = (server) => {
     );
 
     // chat Events
+    socket.on('chat:get', async ({ rideId }) => {
+      const objectType = 'get-messages';
+      try {
+        const ride = await findRideById(rideId);
+        if (
+          !ride ||
+          ![
+            'DRIVER_ASSIGNED',
+            'DRIVER_ARRIVING',
+            'DRIVER_ARRIVED',
+            'RIDE_STARTED',
+            'RIDE_IN_PROGRESS',
+            'RIDE_COMPLETED',
+          ].includes(ride.status)
+        ) {
+          return socket.emit('chat:get', {
+            success: false,
+            objectType,
+            code: 'INVALID_CHAT',
+            message: 'This chat is not eligible',
+          });
+        }
+
+        let receiver;
+        if (['driver'].includes(socket.user.roles)) {
+          receiver = await findDriverByUserId(userId);
+          if (
+            !receiver ||
+            receiver.isBlocked ||
+            receiver.isSuspended ||
+            receiver.backgroundCheckStatus !== 'approved' ||
+            !['on_ride'].includes(receiver.status) ||
+            ride.driverId.toString() !== receiver._id.toString()
+          ) {
+            return socket.emit('chat:get', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Driver not eligible',
+            });
+          }
+        } else if (['passenger'].includes(socket.user.roles)) {
+          receiver = await findPassengerByUserId(userId);
+          if (
+            !receiver ||
+            receiver.isBlocked ||
+            receiver.isSuspended ||
+            ride.passengerId.toString() !== receiver._id.toString()
+          ) {
+            return socket.emit('chat:get', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Passenger not eligible',
+            });
+          }
+        }
+
+        const messages = await getMessagesByRide(ride._id);
+        if (!messages) {
+          return socket.emit('chat:get', {
+            success: false,
+            objectType,
+            code: 'FETCH_FAILED',
+            message: 'Failed to fetch messages',
+          });
+        }
+
+        socket.emit('chat:get', {
+          success: false,
+          objectType,
+          data: messages,
+          message: 'Failed to fetch messages',
+        });
+      } catch (error) {
+        console.error(`SOCKET ERROR: ${error}`);
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: `${error.code || 'SOCKET_ERROR'}`,
+          message: `SOCKET ERROR: ${error.message}`,
+        });
+      }
+    });
+
     socket.on(
       'chat:send',
       async ({ rideId, text, messageType = 'text', attachments }) => {
@@ -2063,19 +2152,19 @@ export const initSocket = (server) => {
           }
 
           if (!rideId) {
-            socket.emit('response', {
+            socket.emit('chat:send', {
               success: false,
               message: 'Ride Id is required',
             });
           } else if (!text || text.trim().length === 0) {
-            socket.emit('response', {
+            socket.emit('chat:send', {
               success: false,
               message: 'Empty message is not allowed',
             });
           } else if (
             !['text', 'system', 'location', 'image'].includes(messageType)
           ) {
-            socket.emit('response', {
+            socket.emit('chat:send', {
               success: false,
               message: 'Invalid message type',
             });
@@ -2091,13 +2180,13 @@ export const initSocket = (server) => {
           });
 
           if (newMsg) {
-            io.to('ride:{rideId}').emit('response', {
+            io.to('ride:${rideId}').emit('chat:send', {
               success: true,
               data: newMsg,
               message: `${sender.name} send you a message`,
             });
           } else {
-            socket.emit('response', {
+            socket.emit('chat:send', {
               success: false,
               message: 'Failed to send message',
             });
@@ -2113,6 +2202,57 @@ export const initSocket = (server) => {
         }
       },
     );
+
+    socket.on('chat:read', async ({ rideId, messageId }) => {
+      const objectType = 'read-message';
+      try {
+        let reader;
+        if (['driver'].includes(socket.user.roles)) {
+          reader = await findDriverByUserId(userId);
+
+          if (
+            !driver ||
+            driver.isBlocked ||
+            driver.isSuspended ||
+            driver.backgroundCheckStatus !== 'approved' ||
+            !['online', 'on_ride'].includes(driver.status)
+          ) {
+            return socket.emit('response', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Driver not eligible',
+            });
+          }
+        } else if (['passenger'].includes(socket.user.roles)) {
+          reader = await findPassengerByUserId(userId);
+
+          if (!reader || reader.isBlocked || reader.isSuspended) {
+            await session.abortTransaction();
+            session.endSession();
+            return socket.emit('response', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Passenger not eligible',
+            });
+          }
+        }
+
+        const messages = await getMessagesByRide(rideId);
+        if (!messages)
+          if (reader._id === 123) {
+          }
+      } catch (error) {
+        console.error(`SOCKET ERROR: ${error}`);
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: `${error.code || 'SOCKET_ERROR'}`,
+          message: `SOCKET ERROR: ${error.message}`,
+        });
+      }
+    });
 
     // Event: Join ride room for real-time communication
     socket.on('ride:join', async ({ rideId }) => {

@@ -27,3 +27,34 @@ export const sendEmailVerificationOtp = async (toEmail, code, username) => {
     html,
   });
 };
+
+const emailUpdateVerificationTplPath = path.join(
+  process.cwd(),
+  'src',
+  'templates',
+  'emails',
+  'user',
+  'html',
+  'emailUpdateVerification.html',
+);
+
+const emailUpdateVerificationTplSource = fs.readFileSync(
+  emailUpdateVerificationTplPath,
+  'utf-8',
+);
+const emailUpdateVerificationTpl = handlebars.compile(
+  emailUpdateVerificationTplSource,
+);
+
+export const sendEmailUpdateVerificationOtp = async (
+  toEmail,
+  code,
+  username,
+) => {
+  const html = emailUpdateVerificationTpl({ code, username });
+  await sendEmail({
+    to: toEmail,
+    subject: 'Email Update Verification OTP',
+    html,
+  });
+};

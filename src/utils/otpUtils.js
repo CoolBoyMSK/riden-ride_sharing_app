@@ -93,6 +93,7 @@ let client = getTwilioClient();
 // };
 
 // Phone Number verification Otp Services
+
 export const sendOtp = async (phoneNumber) => {
   try {
     console.log(`🔔 Sending OTP to ${phoneNumber}...`);

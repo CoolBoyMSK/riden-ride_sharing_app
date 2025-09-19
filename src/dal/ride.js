@@ -7,7 +7,6 @@ import env from '../config/envConfig.js';
 import { RESTRICTED_AREA } from '../enums/restrictedArea.js';
 import ParkingQueue from '../models/ParkingQueue.js';
 import mongoose from 'mongoose';
-import { tryCatch } from 'bullmq';
 
 // Ride Operations
 export const createRide = async (rideData) => {

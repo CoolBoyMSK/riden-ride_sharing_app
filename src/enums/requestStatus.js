@@ -7,4 +7,5 @@ export const REQUESTED_FIELD = [
   'commercialDrivingRecord',
   'vehicleOwnerCertificateAndInsurance',
   'vehicleInspection',
+  'profileImg',
 ];
