@@ -78,10 +78,10 @@ export const initSocket = (server) => {
       try {
         session.startTransaction();
 
-        const driver = await findDriverByUserId(userId, { session });
+        const driver = await findDriverByUserId(userId);
         if (
           !driver ||
-          // driver.isRestricted ||
+          driver.isRestricted ||
           driver.isBlocked ||
           driver.isSuspended ||
           driver.backgroundCheckStatus !== 'approved' ||
@@ -134,6 +134,9 @@ export const initSocket = (server) => {
           { limit: 10, session },
         );
 
+        console.log('availableRides');
+        console.log(availableRides);
+
         await session.commitTransaction();
         session.endSession();
 
@@ -147,6 +150,9 @@ export const initSocket = (server) => {
           10,
           1,
         );
+
+        console.log('filteredRides');
+        console.log(filteredRides);
 
         socket.emit('ride:find', {
           success: true,
@@ -1418,6 +1424,8 @@ export const initSocket = (server) => {
             heading,
           });
 
+          console.log(location.coordinates);
+
           if (driver.currentRideId) {
             io.to(`ride:${driver.currentRideId}`).emit(
               'ride:driver_update_location',
@@ -1551,6 +1559,139 @@ export const initSocket = (server) => {
           success: false,
           objectType,
           code: error.code || 'SOCKET_ERROR',
+          message: `SOCKET ERROR: ${error.message}`,
+        });
+      }
+    });
+
+    socket.on('ride:driver_join_ride', async ({ rideId }) => {
+      const objectType = 'driver-join-ride';
+      let session;
+      try {
+        // Start transaction
+        session = await mongoose.startSession();
+        session.startTransaction();
+
+        const driver = await findDriverByUserId(userId, { session });
+        if (
+          !driver ||
+          driver.isRestricted ||
+          driver.isBlocked ||
+          driver.isSuspended ||
+          driver.backgroundCheckStatus !== 'approved' ||
+          !['on_ride'].includes(driver.status)
+        ) {
+          return socket.emit('ride:driver_join_ride', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Forbidden: Driver not eligible',
+          });
+        }
+
+        const ride = await findRideByRideId(rideId, { session });
+        const driverId = ride?.driverId?._id;
+        if (!ride) {
+          await session.abortTransaction();
+          session.endSession();
+          return socket.emit('ride:driver_join_ride', {
+            success: false,
+            objectType,
+            code: 'NOT_FOUND',
+            message: 'Ride not found',
+          });
+        } else if (driverId.toString() !== passenger._id.toString()) {
+          await session.abortTransaction();
+          session.endSession();
+          return socket.emit('ride:driver_join_ride', {
+            success: false,
+            objectType,
+            code: 'NOT_OWNED',
+            message: 'Cannot join a ride not booked by you',
+          });
+        } else if (ride.status === 'CANCELLED_BY_PASSENGER') {
+          await session.abortTransaction();
+          session.endSession();
+          return socket.emit('ride:driver_join_ride', {
+            success: false,
+            objectType,
+            code: 'ALREADY_CANCELLED',
+            message: 'Ride already cancelled by you',
+          });
+        } else if (ride.status === 'CANCELLED_BY_DRIVER') {
+          await session.abortTransaction();
+          session.endSession();
+          return socket.emit('ride:driver_join_ride', {
+            success: false,
+            objectType,
+            code: 'CANCELLED_BY_DRIVER',
+            message: 'Ride already cancelled by the driver',
+          });
+        } else if (ride.status === 'CANCELLED_BY_SYSTEM') {
+          await session.abortTransaction();
+          session.endSession();
+          return socket.emit('ride:driver_join_ride', {
+            success: false,
+            objectType,
+            code: 'ALREADY_CANCELLED',
+            message: 'Ride already cancelled by system',
+          });
+        } else if (ride.status === 'RIDE_COMPLETED') {
+          await session.abortTransaction();
+          session.endSession();
+          return socket.emit('ride:driver_join_ride', {
+            success: false,
+            objectType,
+            code: 'RIDE_COMPLETED',
+            message: 'Cannot join a completed ride',
+          });
+        } else if (!ride.driverId) {
+          await session.abortTransaction();
+          session.endSession();
+          return socket.emit('ride:driver_join_ride', {
+            success: false,
+            objectType,
+            code: 'NO_DRIVER_FOUND',
+            message: 'Cannot join ride. No driver found',
+          });
+        } else if (ride.status === 'REQUESTED') {
+          await session.abortTransaction();
+          session.endSession();
+          return socket.emit('ride:driver_join_ride', {
+            success: false,
+            objectType,
+            code: 'DRIVER_NOT_ASSIGNED',
+            message: 'Cannot join ride. Driver not assigned yet',
+          });
+        }
+
+        // Commit transaction after successful checks
+        await session.commitTransaction();
+        session.endSession();
+
+        // Join ride room
+        socket.join(`ride:${ride._id}`);
+        socket.emit('ride:driver_join_ride', {
+          rideId,
+          message: 'Successfully joined ride room',
+        });
+
+        socket.emit('ride:driver_join_ride', {
+          success: true,
+          objectType,
+          ride,
+          message: 'Successfully joined ride room',
+        });
+      } catch (error) {
+        if (session) {
+          await session.abortTransaction();
+          session.endSession();
+        }
+        console.error(`SOCKET ERROR: ${error}`);
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: `${error.code || 'SOCKET_ERROR'}`,
           message: `SOCKET ERROR: ${error.message}`,
         });
       }
