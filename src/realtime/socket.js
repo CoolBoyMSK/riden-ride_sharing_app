@@ -1600,7 +1600,7 @@ export const initSocket = (server) => {
             code: 'NOT_FOUND',
             message: 'Ride not found',
           });
-        } else if (driverId.toString() !== passenger._id.toString()) {
+        } else if (driverId.toString() !== driver._id.toString()) {
           await session.abortTransaction();
           session.endSession();
           return socket.emit('ride:driver_join_ride', {
