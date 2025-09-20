@@ -3,8 +3,11 @@ import {
   addPaymentMethodController,
   setDefaultPaymentMethodController,
   getPaymentMethodsController,
+  getPaymentMethodByIdController,
   updatePaymentMethodController,
   deletePaymentMethodController,
+  topUpInAppWalletController,
+  getInAppWalletController,
 } from '../../../controllers/User/Passengers/paymentManagementController.js';
 import { registerRoute } from '../../../utils/registerRoute.js';
 
@@ -12,7 +15,7 @@ const router = express.Router();
 
 registerRoute({
   router,
-  route: '/',
+  route: '/get',
   passenger_auth_enable: true,
   get_method: getPaymentMethodsController,
 });
@@ -26,23 +29,44 @@ registerRoute({
 
 registerRoute({
   router,
-  route: '/set-default',
+  route: '/get/:paymentMethodId',
+  passenger_auth_enable: true,
+  get_method: getPaymentMethodByIdController,
+});
+
+registerRoute({
+  router,
+  route: '/fund/:paymentMethodId',
+  passenger_auth_enable: true,
+  put_method: topUpInAppWalletController,
+});
+
+registerRoute({
+  router,
+  route: '/set/:paymentMethodId',
   passenger_auth_enable: true,
   put_method: setDefaultPaymentMethodController,
 });
 
 registerRoute({
   router,
-  route: '/edit',
+  route: '/edit/:paymentMethodId',
   passenger_auth_enable: true,
   put_method: updatePaymentMethodController,
 });
 
 registerRoute({
   router,
-  route: '/delete',
+  route: '/delete/:paymentMethodId',
   passenger_auth_enable: true,
   delete_method: deletePaymentMethodController,
+});
+
+registerRoute({
+  router,
+  route: '/wallet',
+  passenger_auth_enable: true,
+  get_method: getInAppWalletController,
 });
 
 export default router;

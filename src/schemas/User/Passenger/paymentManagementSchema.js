@@ -1,73 +1,73 @@
 import Joi from 'joi';
 
 const paymentMethodIdSchema = Joi.string()
-  .regex(/^[0-9a-fA-F]{24}$/)
+  .pattern(/^pm_[a-zA-Z0-9]+$/)
   .required()
   .messages({
     'string.base': 'Payment Method ID must be a string',
     'string.empty': 'Payment Method ID is required',
     'any.required': 'Payment Method ID is required',
-    'string.pattern.base': 'Invalid Payment Method ID format',
+    'string.pattern.base': 'Invalid Stripe Payment Method ID format',
   });
 
+// Card validation schema
 const cardSchema = Joi.object({
-  cardNumber: Joi.string().creditCard().required().messages({
-    'string.base': 'Card number must be a string',
-    'string.creditCard': 'Invalid card number format',
+  number: Joi.string().creditCard().required().messages({
+    'string.creditCard': 'Card number must be valid',
     'any.required': 'Card number is required',
   }),
-
-  holderName: Joi.string().min(4).max(50).required().messages({
-    'string.base': 'Holder name must be a string',
-    'string.min': 'Holder name must be at least 4 characters long',
-    'string.max': 'Holder name cannot exceed 50 characters',
-    'any.required': 'Holder name is required',
+  exp_month: Joi.number().integer().min(1).max(12).required().messages({
+    'any.required': 'Expiration month is required',
+    'number.base': 'Expiration month must be a number',
   }),
-
-  BankName: Joi.string().min(3).max(100).required().messages({
-    'string.base': 'Bank name must be a string',
-    'string.min': 'Bank name must be at least 3 characters long',
-    'string.max': 'Bank name cannot exceed 100 characters',
-    'any.required': 'Bank name is required',
-  }),
-
-  cvv: Joi.string()
+  exp_year: Joi.number()
+    .integer()
+    .min(new Date().getFullYear())
+    .max(new Date().getFullYear() + 15) // up to 15 years in future
+    .required()
+    .messages({
+      'any.required': 'Expiration year is required',
+      'number.base': 'Expiration year must be a number',
+    }),
+  cvc: Joi.string()
     .pattern(/^\d{3,4}$/)
     .required()
     .messages({
-      'string.pattern.base': 'CVV must be 3 or 4 digits',
-      'any.required': 'CVV is required',
-    }),
-
-  expiryMonth: Joi.number().integer().min(1).max(12).required().messages({
-    'number.base': 'Expiry month must be a number',
-    'number.min': 'Expiry month must be at least 1',
-    'number.max': 'Expiry month cannot be more than 12',
-    'any.required': 'Expiry month is required',
-  }),
-
-  expiryYear: Joi.number()
-    .integer()
-    .min(new Date().getFullYear())
-    .required()
-    .messages({
-      'number.base': 'Expiry year must be a number',
-      'number.min': 'Expiry year cannot be in the past',
-      'any.required': 'Expiry year is required',
+      'string.pattern.base': 'CVC must be 3 or 4 digits',
+      'any.required': 'CVC is required',
     }),
 });
 
+// Billing details validation schema
+const billingDetailsSchema = Joi.object({
+  name: Joi.string().min(2).max(100).required().messages({
+    'any.required': 'Billing name is required',
+    'string.min': 'Name must be at least 2 characters',
+  }),
+  email: Joi.string().email().required().messages({
+    'any.required': 'Billing email is required',
+    'string.email': 'Must be a valid email address',
+  }),
+});
+
+// Final schema
 export const addPaymentMethodSchema = Joi.object({
-  type: Joi.string().valid('CARD').default('CARD').required().messages({
-    'any.only': "Type must be 'CARD'",
+  type: Joi.string().valid('card').default('card').required().messages({
+    'any.only': "Type must be 'card'",
     'any.required': 'Payment method type is required',
   }),
 
   isDefault: Joi.boolean().default(false),
 
   card: Joi.when('type', {
-    is: 'CARD',
+    is: 'card',
     then: cardSchema.required(),
+    otherwise: Joi.forbidden(),
+  }),
+
+  billing_details: Joi.when('type', {
+    is: 'card',
+    then: billingDetailsSchema.required(),
     otherwise: Joi.forbidden(),
   }),
 });
@@ -76,7 +76,41 @@ export const setDefaultPaymentSchema = Joi.object({
   paymentMethodId: paymentMethodIdSchema,
 });
 
+const addressSchema = Joi.object({
+  line1: Joi.string().max(200).optional(),
+  city: Joi.string().max(100).optional(),
+  state: Joi.string().max(100).optional(),
+  postal_code: Joi.string().max(20).optional(),
+  country: Joi.string().length(2).optional(), // 2-letter country code
+}).optional();
+
+// Billing details schema (all optional)
+const updatebillingDetailsSchema = Joi.object({
+  name: Joi.string().min(2).max(100).optional(),
+  email: Joi.string().email().optional(),
+  address: addressSchema,
+}).optional();
+
+// Metadata schema (all optional, keys are flexible)
+const metadataSchema = Joi.object()
+  .pattern(
+    Joi.string(),
+    Joi.string().allow('', null), // allow empty string or null values
+  )
+  .optional();
+
+// Final schema for updating card details
+export const updateCardDetailsSchema = Joi.object({
+  billing_details: updatebillingDetailsSchema,
+  metadata: metadataSchema,
+})
+  .or('billing_details', 'metadata') // Require at least one if you want to enforce non-empty, otherwise remove this
+  .messages({
+    'object.missing':
+      'At least one of billing_details or metadata must be provided',
+  });
+
 export const updatePaymentMethodSchema = Joi.object({
   paymentMethodId: paymentMethodIdSchema,
-  card: cardSchema.required(),
+  card: updateCardDetailsSchema,
 });

@@ -189,6 +189,7 @@ export const bookRide = async (userId, rideData) => {
     };
 
     const newRide = await createRide(ridePayload);
+    console.log(newRide)
 
     // Try to find and assign a driver
     // const driverAssignment = await findAndAssignDriver(

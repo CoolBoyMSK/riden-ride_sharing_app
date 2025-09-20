@@ -24,7 +24,7 @@ export const validateSetDefaultPaymentMethod = async (body) => {
   if (error) throw error;
 };
 
-export const validateUpdatePaymentMethodMethod = async (body) => {
+export const validateUpdatePaymentMethodId = async (body) => {
   const { error } = updatePaymentMethodSchema.validate(body, {
     abortEarly: false,
     allowUnknown: false,

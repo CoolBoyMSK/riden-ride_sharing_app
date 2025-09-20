@@ -16,11 +16,18 @@ import {
 import {
   createPassengerProfile,
   findPassengerByUserId,
+  updatePassenger,
 } from '../../../dal/passenger.js';
 import {
   createDriverProfile,
   findDriverByUserId,
+  updateDriverByUserId,
 } from '../../../dal/driver.js';
+import {
+  createPassengerStripeCustomer,
+  createDriverStripeAccount,
+  createWallet,
+} from '../../../dal/stripe.js';
 // import { otpQueue } from '../../../queues/otpQueue.js';
 import { verifyOtp, sendOtp } from '../../../utils/otpUtils.js';
 
@@ -60,11 +67,20 @@ export const signupUser = async (
       driverProfile = await createDriverProfile(user._id, uniqueId);
     }
 
+    const stripeAccountId = await createDriverStripeAccount(driverProfile);
+    if (!stripeAccountId) {
+      resp.error = true;
+      resp.error_message = 'Failed to create stripe Account Id';
+      return resp;
+    }
+
     const userObj = user.toObject();
     delete userObj.password;
     resp.data = userObj;
     return resp;
-  } else if (type && type.includes('passenger')) {
+  }
+
+  if (type && type.includes('passenger')) {
     if (await findUserByEmail(email)) {
       resp.error = true;
       resp.error_message = 'Email already in use';
@@ -94,6 +110,21 @@ export const signupUser = async (
       passengerProfile = await createPassengerProfile(user._id, uniqueId);
     }
 
+    const stripeCustomerId =
+      await createPassengerStripeCustomer(passengerProfile);
+    if (!stripeCustomerId) {
+      resp.error = true;
+      resp.error_message = 'Failed to create stripe customer account';
+      return resp;
+    }
+
+    const wallet = await createWallet(passengerProfile._id);
+    if (!wallet) {
+      resp.error = true;
+      resp.error_message = 'Failed to create In-App wallet';
+      return resp;
+    }
+
     const userObj = user.toObject();
     delete userObj.password;
     resp.data = userObj;
@@ -116,6 +147,7 @@ export const loginUser = async (
 
       if (email) {
         user = await findUserByEmail(email);
+
         if (user && !user.isEmailVerified) {
           // const code = 12345;
           // await sendEmailVerificationOtp(email, code, user.name);
@@ -156,6 +188,13 @@ export const loginUser = async (
         passenger = await createPassengerProfile(userId);
       }
 
+      const success = await updatePassenger({ userId }, { isActive: true });
+      if (!success) {
+        resp.error = true;
+        resp.error_message = 'Failed to activate passenger';
+        return resp;
+      }
+
       // ✅ If phone already verified → issue tokens
       const payload = { id: userId, roles: user.roles };
       resp.data = {
@@ -169,47 +208,158 @@ export const loginUser = async (
 
     // --- Driver Flow ---
     if (role === 'driver') {
-      if (!phoneNumber) {
+      if (!phoneNumber && !email) {
         resp.error = true;
-        resp.error_message = 'Phone number required for driver login';
+        resp.error_message =
+          'Phone number or email is required for driver login';
         return resp;
       }
 
-      let user = await findUserByPhone(phoneNumber);
-      if (user && user.isPhoneVerified) {
-        // For Production
-        // const sent = await sendOtp(phoneNumber);
-        // resp.data = { otpSent: true, flow: 'login' };
-        // For Production
-
-        // For Testing
-        const payload = { id: user._id, roles: user.roles };
-        resp.data = {
-          user: user,
-          accessToken: generateAccessToken(payload),
-          refreshToken: generateRefreshToken(payload),
-          flow: 'login',
-        };
-        // For Testing
-
-        return resp;
-      } else {
-        if (!user) {
-          user = await createUser({
-            phoneNumber,
-            roles: ['driver'],
-            status: 'pending',
-            // For Production
-            // isPhoneVerified: false,
-            // For Production
-
-            // For Testing
-            isPhoneVerified: true,
-            // For Testing
+      if (phoneNumber) {
+        let user = await findUserByPhone(phoneNumber);
+        if (user && user.isPhoneVerified) {
+          // For Production
+          // const sent = await sendOtp(phoneNumber);
+          // resp.data = { otpSent: true, flow: 'login' };
+          // For Production
+          const success = await updateDriverByUserId(user._id, {
+            isActive: true,
           });
-          const uniqueId = generateUniqueId(user.roles[0], user._id);
+          if (!success) {
+            resp.error = true;
+            resp.error_message = 'Failed to activate passenger';
+            return resp;
+          }
+          // For Testing
+          const payload = { id: user._id, roles: user.roles };
+          resp.data = {
+            user: user,
+            accessToken: generateAccessToken(payload),
+            refreshToken: generateRefreshToken(payload),
+            flow: 'login',
+          };
+          // For Testing
 
-          await createDriverProfile(user._id, uniqueId);
+          return resp;
+        } else {
+          if (!user) {
+            user = await createUser({
+              phoneNumber,
+              roles: ['driver'],
+              status: 'pending',
+              // For Production
+              // isPhoneVerified: false,
+              // For Production
+
+              // For Testing
+              isPhoneVerified: true,
+              // For Testing
+            });
+            const uniqueId = generateUniqueId(user.roles[0], user._id);
+
+            await createDriverProfile(user._id, uniqueId);
+
+            // For Testing
+            const payload = { id: user._id, roles: user.roles };
+            resp.data = {
+              user: user,
+              accessToken: generateAccessToken(payload),
+              refreshToken: generateRefreshToken(payload),
+              flow: 'login',
+            };
+            return resp;
+            // For Testing
+          }
+
+          // For Production
+          // const sent = await sendOtp(phoneNumber);
+          // if (!sent.success) {
+          //   resp.error = true;
+          //   resp.error_message = 'Failed to send otp';
+          //   return resp;
+          // }
+          // resp.data = { otpSent: true, flow: 'register' };
+          // For Production
+
+          // For Testing
+          const payload = { id: user._id, roles: user.roles };
+          resp.data = {
+            user: user,
+            accessToken: generateAccessToken(payload),
+            refreshToken: generateRefreshToken(payload),
+            flow: 'driver phone login',
+          };
+          // For Testing
+
+          return resp;
+        }
+      }
+
+      if (email) {
+        let user = await findUserByEmail(email);
+        if (user && user.isPhoneVerified) {
+          // For Production
+          // const sent = await sendOtp(phoneNumber);
+          // resp.data = { otpSent: true, flow: 'login' };
+          // For Production
+          const success = await updateDriverByUserId(user._id, {
+            isActive: true,
+          });
+          if (!success) {
+            resp.error = true;
+            resp.error_message = 'Failed to activate passenger';
+            return resp;
+          }
+          // For Testing
+          const payload = { id: user._id, roles: user.roles };
+          resp.data = {
+            user: user,
+            accessToken: generateAccessToken(payload),
+            refreshToken: generateRefreshToken(payload),
+            flow: 'login',
+          };
+          // For Testing
+
+          return resp;
+        } else {
+          if (!user) {
+            user = await createUser({
+              email,
+              roles: ['driver'],
+              status: 'pending',
+              // For Production
+              // isPhoneVerified: false,
+              // For Production
+
+              // For Testing
+              isPhoneVerified: true,
+              // For Testing
+            });
+            const uniqueId = generateUniqueId(user.roles[0], user._id);
+
+            await createDriverProfile(user._id, uniqueId);
+
+            // For Testing
+            const payload = { id: user._id, roles: user.roles };
+            resp.data = {
+              user: user,
+              accessToken: generateAccessToken(payload),
+              refreshToken: generateRefreshToken(payload),
+              flow: 'driver email login',
+            };
+            return resp;
+            // For Testing
+          }
+
+          // For Production
+          // const sent = await sendOtp(phoneNumber);
+          // if (!sent.success) {
+          //   resp.error = true;
+          //   resp.error_message = 'Failed to send otp';
+          //   return resp;
+          // }
+          // resp.data = { otpSent: true, flow: 'register' };
+          // For Production
 
           // For Testing
           const payload = { id: user._id, roles: user.roles };
@@ -219,31 +369,10 @@ export const loginUser = async (
             refreshToken: generateRefreshToken(payload),
             flow: 'login',
           };
-          return resp;
           // For Testing
+
+          return resp;
         }
-
-        // For Production
-        // const sent = await sendOtp(phoneNumber);
-        // if (!sent.success) {
-        //   resp.error = true;
-        //   resp.error_message = 'Failed to send otp';
-        //   return resp;
-        // }
-        // resp.data = { otpSent: true, flow: 'register' };
-        // For Production
-
-        // For Testing
-        const payload = { id: user._id, roles: user.roles };
-        resp.data = {
-          user: user,
-          accessToken: generateAccessToken(payload),
-          refreshToken: generateRefreshToken(payload),
-          flow: 'login',
-        };
-        // For Testing
-
-        return resp;
       }
     }
 

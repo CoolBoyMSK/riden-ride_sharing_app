@@ -35,16 +35,11 @@ export const validateSignup = (body) => {
 
 // --- Login ---
 const loginSchema = Joi.object({
-  // Either email OR phoneNumber is required for passenger
   email: Joi.string().email().optional(),
   phoneNumber: Joi.string()
     .pattern(/^[0-9+\- ]{7,20}$/)
     .optional(),
-
-  // Password is only required for passengers
   password: Joi.string().min(8).max(128).optional(),
-
-  // Role must be either passenger or driver
   role: Joi.string().valid('passenger', 'driver').required(),
 }).custom((value, helpers) => {
   // Passenger flow: needs email/phone + password
@@ -56,11 +51,11 @@ const loginSchema = Joi.object({
     }
   }
 
-  // Driver flow: only needs phone number
+  // Driver flow: needs email or phone (password optional)
   if (value.role === 'driver') {
-    if (!value.phoneNumber) {
+    if (!value.email && !value.phoneNumber) {
       return helpers.error('any.invalid', {
-        message: 'Driver login requires phoneNumber',
+        message: 'Driver login requires email or phoneNumber',
       });
     }
   }

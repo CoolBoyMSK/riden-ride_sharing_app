@@ -4,6 +4,7 @@ import UserModel from '../models/User.js';
 import UpdateRequestModel from '../models/updateRequest.js';
 import DestinationModel from '../models/Destination.js';
 import { DOCUMENT_TYPES } from '../enums/driver.js';
+import Driver from '../models/Driver.js';
 
 export const findDriverByUserId = (userId, { session } = {}) => {
   let query = DriverModel.findOne({ userId });
@@ -595,3 +596,6 @@ export const updateDestinationById = async (id, payload, options = {}) =>
 
 export const deleteDestinationById = async (id, driverId, options = {}) =>
   DestinationModel.findOneAndDelete({ _id: id, driverId }, { ...options });
+
+export const updateDriverById = async (id, update, options = {}) =>
+  DriverModel.findByIdAndUpdate(id, update, { new: true, ...options });

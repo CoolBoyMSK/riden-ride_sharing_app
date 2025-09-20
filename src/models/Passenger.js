@@ -1,62 +1,62 @@
 import mongoose from 'mongoose';
 
-const cardPaymentSchema = new mongoose.Schema(
-  {
-    cardNumber: {
-      type: String,
-      trim: true,
-    },
-    holderName: {
-      type: String,
-      minLength: 4,
-      maxLength: 4,
-      require: true,
-    },
-    BankName: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-    cvv: {
-      type: String,
-      minLenght: 3,
-      maxLength: 4,
-      required: true,
-    },
-    expiryMonth: {
-      type: Number,
-      min: 1,
-      max: 12,
-      required: true,
-    },
-    expiryYear: {
-      type: Number,
-      min: new Date().getFullYear(),
-    },
-  },
-  { _id: false },
-);
+// const cardPaymentSchema = new mongoose.Schema(
+//   {
+//     cardNumber: {
+//       type: String,
+//       trim: true,
+//     },
+//     holderName: {
+//       type: String,
+//       minLength: 4,
+//       maxLength: 4,
+//       require: true,
+//     },
+//     BankName: {
+//       type: String,
+//       required: true,
+//       trim: true,
+//     },
+//     cvv: {
+//       type: String,
+//       minLenght: 3,
+//       maxLength: 4,
+//       required: true,
+//     },
+//     expiryMonth: {
+//       type: Number,
+//       min: 1,
+//       max: 12,
+//       required: true,
+//     },
+//     expiryYear: {
+//       type: Number,
+//       min: new Date().getFullYear(),
+//     },
+//   },
+//   { _id: false },
+// );
 
-const paymentMethodSchema = new mongoose.Schema(
-  {
-    type: {
-      type: String,
-      enum: ['CARD'],
-      default: 'CARD',
-    },
-    isDefault: {
-      type: Boolean,
-      default: false,
-    },
-    card: {
-      type: cardPaymentSchema,
-      required: () => {
-        return this.type === 'CARD';
-      },
-    },
-  },
-  { _id: true, timestamps: true },
-);
+// const paymentMethodSchema = new mongoose.Schema(
+//   {
+//     type: {
+//       type: String,
+//       enum: ['CARD'],
+//       default: 'CARD',
+//     },
+//     isDefault: {
+//       type: Boolean,
+//       default: false,
+//     },
+//     card: {
+//       type: cardPaymentSchema,
+//       required: () => {
+//         return this.type === 'CARD';
+//       },
+//     },
+//   },
+//   { _id: true, timestamps: true },
+// );
 
 const addressSchema = new mongoose.Schema(
   {
@@ -119,8 +119,17 @@ const passengerSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-    paymentMethods: [paymentMethodSchema],
+    paymentMethodIds: [
+      {
+        type: String,
+        unique: true,
+      },
+    ],
     addresses: [addressSchema],
+    stripeCustomerId: {
+      type: String,
+      unique: true,
+    },
   },
   {
     timestamps: true,

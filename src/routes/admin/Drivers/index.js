@@ -11,6 +11,7 @@ import {
   unblockDriverController,
   getAllUpdateRequestsController,
   toggleUpdateRequestController,
+  approveRequestedDriverController,
 } from '../../../controllers/Admin/Drivers/index.js';
 
 const router = express.Router();
@@ -87,6 +88,14 @@ registerRoute({
   get_method: getAllUpdateRequestsController,
   put_permission: 'driver_management',
   put_method: toggleUpdateRequestController,
+});
+
+registerRoute({
+  router,
+  route: '/approve/:id',
+  admin_auth_enable: true,
+  put_permission: 'driver_management',
+  put_method: approveRequestedDriverController,
 });
 
 export default router;

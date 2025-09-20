@@ -105,6 +105,6 @@ export const registerRoute = ({
       ),
     );
   }
-  
+
   router.all(route, ...auth, WRONG_HTTP_METHOD);
 };

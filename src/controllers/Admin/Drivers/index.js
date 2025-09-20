@@ -9,6 +9,7 @@ import {
   unblockDriver,
   getAllUpdateRequests,
   toggleUpdateRequest,
+  approveRequestedDriver,
 } from '../../../services/Admin/Drivers/index.js';
 import { handleResponse } from '../../../utils/handleRespone.js';
 import {
@@ -134,6 +135,17 @@ export const toggleUpdateRequestController = (req, res) =>
       validationFn: () => validateToggleUpdateRequest(req.query),
       handlerParams: [req.query],
       successMessage: 'Driver request updated successfully',
+    },
+    req,
+    res,
+  );
+
+export const approveRequestedDriverController = (req, res) =>
+  handleResponse(
+    {
+      handler: approveRequestedDriver,
+      handlerParams: [req.params],
+      successMessage: 'Driver approved successfully',
     },
     req,
     res,

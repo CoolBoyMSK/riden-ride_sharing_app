@@ -10,6 +10,7 @@ import {
   updateDocumentStatus,
   findDriverUpdateRequests,
   updateDriverRequest,
+  updateDriverById,
 } from '../../../dal/driver.js';
 
 export const getAllDrivers = async (
@@ -23,7 +24,7 @@ export const getAllDrivers = async (
       search,
       fromDate,
       toDate,
-      isApproved,
+      isApproved: isApproved === 'true' ? true : false,
     });
     if (!items) {
       resp.error = true;
@@ -139,7 +140,9 @@ export const updateDriverDocumentStatus = async (
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const updated = await updateDocumentStatus(id, docType, status, session);
+    const updated = await updateDocumentStatus(id, docType, status, {
+      session,
+    });
     if (!updated) {
       await session.abortTransaction();
       session.endSession();
@@ -242,7 +245,7 @@ export const toggleUpdateRequest = async ({ status, id }, resp) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const updated = await updateDriverRequest(id, status, session);
+    const updated = await updateDriverRequest(id, status, { session });
 
     if (!updated) {
       await session.abortTransaction();
@@ -266,6 +269,40 @@ export const toggleUpdateRequest = async ({ status, id }, resp) => {
     resp.error = true;
     resp.error_message =
       'Something went wrong while toggling the update request';
+    return resp;
+  }
+};
+
+export const approveRequestedDriver = async ({ id }, resp) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const success = await updateDriverById(
+      id,
+      { isApproved: true },
+      { session },
+    );
+    if (!success) {
+      await session.abortTransaction();
+      session.endSession();
+
+      resp.error = true;
+      resp.error_message = 'failed to approve driver';
+      return resp;
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = 'Something went wrong while approving driver';
     return resp;
   }
 };

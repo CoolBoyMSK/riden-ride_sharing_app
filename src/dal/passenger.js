@@ -1,4 +1,3 @@
-import { LegacyContentListInstance } from 'twilio/lib/rest/content/v1/legacyContent.js';
 import PassengerModel from '../models/Passenger.js';
 import UserModel from '../models/User.js';
 import UpdateRequestModel from '../models/updateRequest.js';

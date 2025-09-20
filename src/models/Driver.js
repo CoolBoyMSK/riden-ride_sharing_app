@@ -70,7 +70,7 @@ const driverSchema = new mongoose.Schema(
     backgroundCheckStatus: {
       type: String,
       enum: ['pending', 'approved', 'rejected'],
-      default: 'pending',
+      default: 'approved',
     },
     payoutDetails: {
       bankAccount: { type: String, trim: true },
@@ -118,6 +118,10 @@ const driverSchema = new mongoose.Schema(
     isRestricted: {
       type: Boolean,
       default: false,
+    },
+    stripeAccountId: {
+      type: String,
+      unique: true,
     },
   },
   {

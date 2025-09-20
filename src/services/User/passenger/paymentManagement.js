@@ -1,72 +1,50 @@
+import { findPassengerByUserId } from '../../../dal/passenger.js';
 import {
-  findPassenger,
-  updatePassenger,
-  findPassengerByUserId,
-} from '../../../dal/passenger.js';
+  addPassengerPaymentMethod,
+  setDefaultCard,
+  getPassengerCards,
+  deletePassengerCard,
+  updatePassengerCard,
+  getCardDetails,
+  addFundsToWallet,
+  getWallet,
+} from '../../../dal/stripe.js';
 import mongoose from 'mongoose';
 
 export const addPaymentMethod = async (
   user,
-  { type, isDefault, card },
+  { type, card, billing_details },
   resp,
 ) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
   try {
-    const normalizedCardNumber = card.cardNumber.replace(/\s+/g, '');
-    const existingPassenger = await findPassenger(
-      {
-        userId: user.id,
-        'paymentMethods.card.cardNumber': normalizedCardNumber,
-      },
-      { 'paymentMethods.$': 1 },
-      { session },
-    );
-
-    if (existingPassenger) {
-      resp.error = true;
-      resp.error_message = 'This card is already added';
-      return resp;
-    }
-
-    if (isDefault) {
-      await updatePassenger(
-        { userId: user.id, 'paymentMethods.isDefault': true },
-        { $set: { 'paymentMethods.$[elem].isDefault': false } },
-        {
-          arrayFilters: [{ 'elem.isDefault': true }],
-          multi: true,
-          session,
-        },
-      );
-    }
-
-    const payload = { type, isDefault, card };
-
-    const passenger = await updatePassenger(
-      { userId: user.id },
-      { $push: { paymentMethods: payload } },
-      { new: true, session },
-    );
-
+    const passenger = await findPassengerByUserId(user._id);
     if (!passenger) {
       resp.error = true;
-      resp.error_message = 'Failed to Update the passenger';
+      resp.error_message = 'Failed to Fetch passenger';
       return resp;
     }
 
-    await session.commitTransaction();
-    session.endSession();
+    const payload = {
+      type,
+      card,
+      billing_details,
+    };
 
-    resp.data = { paymentMethods: passenger.paymentMethods };
+    const success = await addPassengerPaymentMethod(passenger, payload);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to add payment method';
+      return resp;
+    }
+
+    resp.data = {
+      success: true,
+    };
     return resp;
   } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while adding payment method';
+    resp.error_message = 'Something went wrong while adding stripe card';
     return resp;
   }
 };
@@ -80,30 +58,26 @@ export const setDefaultPaymentMethod = async (
   session.startTransaction();
 
   try {
-    await updatePassenger(
-      { userId: user.id },
-      { $set: { 'paymentMethods.$[].isDefault': false } },
-      { new: true, session },
-    );
-
-    const payload = { $set: { 'paymentMethods.$.isDefault': true } };
-    const passenger = await updatePassenger(
-      { userId: user.id, 'paymentMethods._id': paymentMethodId },
-      payload,
-      { new: true, session },
-    );
-
+    const passenger = await findPassengerByUserId(user._id);
     if (!passenger) {
       resp.error = true;
-      resp.error_message = 'Payment method not found or failed to set default';
+      resp.error_message = 'Failed to Fetch passenger';
       return resp;
     }
 
-    // Commit transaction
-    await session.commitTransaction();
-    session.endSession();
+    const success = await setDefaultCard(
+      passenger.stripeCustomerId,
+      paymentMethodId,
+    );
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed set default payment method';
+      return resp;
+    }
 
-    resp.data = { paymentMethods: passenger.paymentMethods };
+    resp.data = {
+      success: true,
+    };
     return resp;
   } catch (error) {
     await session.abortTransaction();
@@ -119,18 +93,50 @@ export const setDefaultPaymentMethod = async (
 
 export const getPaymentMethods = async (user, resp) => {
   try {
-    const passenger = await findPassengerByUserId(user.id);
-
+    const passenger = await findPassengerByUserId(user._id);
     if (!passenger) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch passenger';
+      return resp;
+    }
+
+    const success = await getPassengerCards(passenger);
+    if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to fetch payment methods';
       return resp;
     }
 
-    resp.data = { paymentMethods: passenger.paymentMethods };
+    resp.data = success;
     return resp;
   } catch (error) {
-    conosle.error(`API ERROR: ${error}`);
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = 'Something went wrong while fetching Payment methods';
+    return resp;
+  }
+};
+
+export const getPaymentMethodById = async (user, { paymentMethodId }, resp) => {
+  try {
+    const passenger = await findPassengerByUserId(user._id);
+    if (!passenger) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch passenger';
+      return resp;
+    }
+
+    const success = await getCardDetails(paymentMethodId);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch payment method';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
     resp.error = true;
     resp.error_message = 'Something went wrong while fetching Payment methods';
     return resp;
@@ -139,28 +145,31 @@ export const getPaymentMethods = async (user, resp) => {
 
 export const updatePaymentMethod = async (
   user,
-  { card, paymentMethodId },
+  { paymentMethodId },
+  payload,
   resp,
 ) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const passenger = await updatePassenger(
-      { userId: user.id, 'paymentMethods._id': paymentMethodId },
-      { $set: { 'paymentMethods.$.card': card } },
-      { session },
-    );
-
+    const passenger = await findPassengerByUserId(user._id);
     if (!passenger) {
       resp.error = true;
-      resp.error_message = 'Failed to update Payment Method';
+      resp.error_message = 'Failed to fetch passenger';
+      return resp;
+    }
+
+    const success = await updatePassengerCard(paymentMethodId, payload);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch passenger';
       return resp;
     }
 
     await session.commitTransaction();
     session.endSession();
 
-    resp.data = { paymentMethods: passenger.paymentMethods };
+    resp.data = { success: true };
     return resp;
   } catch (error) {
     await session.abortTransaction();
@@ -177,39 +186,26 @@ export const deletePaymentMethod = async (user, { paymentMethodId }, resp) => {
   session.startTransaction();
 
   try {
-    const passenger = await findPassenger(
-      { userId: user.id, 'paymentMethods._id': paymentMethodId },
-      { 'paymentMethods.$': 1 },
-      { session },
-    );
-
+    const passenger = await findPassengerByUserId(user._id);
     if (!passenger) {
       resp.error = true;
-      resp.error_message = 'Payment method not found';
+      resp.error_message = 'Failed to fetch passenger';
       return resp;
     }
 
-    const methodToDelete = passenger.paymentMethods[0];
-    const isDefault = methodToDelete?.isDefault;
-
-    let updatedPassenger = await updatePassenger(
-      { userId: user.id },
-      { $pull: { paymentMethods: { _id: paymentMethodId } } },
-      { session },
-    );
-
-    if (isDefault) {
-      updatedPassenger = await updatePassenger(
-        { userId: user.id, 'paymentMethods.0': { $exists: true } },
-        { $set: { 'paymentMethods.0.isDefault': true } },
-        { new: true, session },
-      );
+    const success = await deletePassengerCard(passenger._id, paymentMethodId);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to delete payment method';
+      return resp;
     }
 
     await session.commitTransaction();
     session.endSession();
 
-    resp.data = { paymentMethods: passenger.paymentMethods };
+    resp.data = {
+      success: true,
+    };
     return resp;
   } catch (error) {
     await session.abortTransaction();
@@ -219,6 +215,66 @@ export const deletePaymentMethod = async (user, { paymentMethodId }, resp) => {
     resp.error = true;
     resp.error_message =
       'Something went wrong while deleting the payment method';
+    return resp;
+  }
+};
+
+export const topUpInAppWallet = async (
+  user,
+  { paymentMethodId },
+  { amount },
+  resp,
+) => {
+  try {
+    const passenger = await findPassengerByUserId(user._id);
+    if (!passenger) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch passenger';
+      return resp;
+    }
+
+    const success = await addFundsToWallet(passenger, amount, paymentMethodId);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to top-up in-app wallet';
+      return resp;
+    }
+
+    resp.data = {
+      success: success.status === 'succeeded' ? true : false,
+    };
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message =
+      'Something went wrong while adding funds to in-app wallet';
+    return resp;
+  }
+};
+
+export const getInAppWallet = async (user, resp) => {
+  try {
+    const passenger = await findPassengerByUserId(user._id);
+    if (!passenger) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch passenger';
+      return resp;
+    }
+
+    const success = await getWallet(passenger._id);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch wallet';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = 'Something went wrong while fetching wallet';
     return resp;
   }
 };
