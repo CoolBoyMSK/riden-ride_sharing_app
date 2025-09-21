@@ -5,6 +5,7 @@ import promoCodeRouter from './promo_codes/index.js';
 import passengersRouter from './Passengers/index.js';
 import driverRouter from './Drivers/index.js';
 import fareRouter from './FareManagement/index.js';
+import bookingRouter from './Booking/index.js';
 
 const adminRouter = express.Router();
 
@@ -14,5 +15,6 @@ adminRouter.use('/promo-code', promoCodeRouter);
 adminRouter.use('/passengers', passengersRouter);
 adminRouter.use('/drivers', driverRouter);
 adminRouter.use('/fare-management', fareRouter);
+adminRouter.use('/bookings', bookingRouter);
 
 export default adminRouter;

@@ -168,3 +168,20 @@ export const setDefaultPayoutMethod = async (user, { id }, resp) => {
     return resp;
   }
 };
+
+export const sendInstantPayoutRequest = async (user, resp) => {
+  try {
+    const driver = await findDriverByUserId(user._id);
+    if (!driver) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch driver';
+      return resp;
+    }
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message =
+      'Something went wrong while setting default payout method';
+    return resp;
+  }
+};

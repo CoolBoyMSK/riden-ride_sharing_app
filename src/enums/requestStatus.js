@@ -9,3 +9,4 @@ export const REQUESTED_FIELD = [
   'vehicleInspection',
   'profileImg',
 ];
+export const PAYOUT_TYPES = ["INSTANT", "UPCOMING"]

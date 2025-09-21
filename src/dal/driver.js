@@ -595,3 +595,6 @@ export const deleteDestinationById = async (id, driverId, options = {}) =>
 
 export const updateDriverById = async (id, update, options = {}) =>
   DriverModel.findByIdAndUpdate(id, update, { new: true, ...options });
+
+export const sendInstantPayoutRequest = async (driverId) =>
+  PayoutRequest.create();
