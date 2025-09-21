@@ -18,9 +18,6 @@ export const createPassengerProfile = (userId, uniqueId) =>
   new PassengerModel({
     userId,
     uniqueId,
-    isActive: false,
-    isBlocked: false,
-    paymentMethods: [],
   }).save();
 
 export const countPassengers = () => PassengerModel.countDocuments();

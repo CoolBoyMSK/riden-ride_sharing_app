@@ -1,7 +1,7 @@
 import { findPassengerByUserId } from '../../../dal/passenger.js';
 import {
   addPassengerPaymentMethod,
-  setDefaultCard,
+  setDefaultPassengerCard,
   getPassengerCards,
   deletePassengerCard,
   updatePassengerCard,
@@ -65,7 +65,7 @@ export const setDefaultPaymentMethod = async (
       return resp;
     }
 
-    const success = await setDefaultCard(
+    const success = await setDefaultPassengerCard(
       passenger.stripeCustomerId,
       paymentMethodId,
     );
@@ -193,7 +193,7 @@ export const deletePaymentMethod = async (user, { paymentMethodId }, resp) => {
       return resp;
     }
 
-    const success = await deletePassengerCard(passenger._id, paymentMethodId);
+    const success = await deletePassengerCard(passenger, paymentMethodId);
     if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to delete payment method';

@@ -4,7 +4,6 @@ import UserModel from '../models/User.js';
 import UpdateRequestModel from '../models/updateRequest.js';
 import DestinationModel from '../models/Destination.js';
 import { DOCUMENT_TYPES } from '../enums/driver.js';
-import Driver from '../models/Driver.js';
 
 export const findDriverByUserId = (userId, { session } = {}) => {
   let query = DriverModel.findOne({ userId });
@@ -16,10 +15,7 @@ export const createDriverProfile = (userId, uniqueId) =>
   new DriverModel({
     userId,
     uniqueId,
-    licenseDocs: { frontUrl: '', backUrl: '' },
     vehicle: { make: '', model: '', plateNumber: '', color: '' },
-    backgroundCheckStatus: 'pending',
-    payoutDetails: { bankAccount: '', ifscCode: '' },
   }).save();
 
 export const updateDriverByUserId = (id, update, options = {}) => {

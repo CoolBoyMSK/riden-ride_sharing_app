@@ -67,7 +67,10 @@ export const signupUser = async (
       driverProfile = await createDriverProfile(user._id, uniqueId);
     }
 
-    const stripeAccountId = await createDriverStripeAccount(driverProfile);
+    const stripeAccountId = await createDriverStripeAccount(
+      user,
+      driverProfile,
+    );
     if (!stripeAccountId) {
       resp.error = true;
       resp.error_message = 'Failed to create stripe Account Id';
@@ -81,12 +84,6 @@ export const signupUser = async (
   }
 
   if (type && type.includes('passenger')) {
-    if (await findUserByEmail(email)) {
-      resp.error = true;
-      resp.error_message = 'Email already in use';
-      return resp;
-    }
-
     if (await findUserByPhone(phoneNumber)) {
       resp.error = true;
       resp.error_message = 'Phone number already in use';
@@ -110,8 +107,10 @@ export const signupUser = async (
       passengerProfile = await createPassengerProfile(user._id, uniqueId);
     }
 
-    const stripeCustomerId =
-      await createPassengerStripeCustomer(passengerProfile);
+    const stripeCustomerId = await createPassengerStripeCustomer(
+      user,
+      passengerProfile,
+    );
     if (!stripeCustomerId) {
       resp.error = true;
       resp.error_message = 'Failed to create stripe customer account';
@@ -129,11 +128,11 @@ export const signupUser = async (
     delete userObj.password;
     resp.data = userObj;
     return resp;
-  } else {
-    resp.error = true;
-    resp.error_message = 'Invalid User role';
-    return resp;
   }
+
+  resp.error = true;
+  resp.error_message = 'Invalid User role';
+  return resp;
 };
 
 export const loginUser = async (

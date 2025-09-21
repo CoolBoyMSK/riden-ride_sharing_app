@@ -130,6 +130,9 @@ const passengerSchema = new mongoose.Schema(
       type: String,
       unique: true,
     },
+    defaultCardId: {
+      type: String,
+    },
   },
   {
     timestamps: true,

@@ -2,6 +2,7 @@ import Stripe from 'stripe';
 import env from '../config/envConfig.js';
 const stripe = new Stripe(env.STRIPE_SECRET_KEY);
 import PassengerModel from '../models/Passenger.js';
+import DriverModel from '../models/Driver.js';
 import WalletModel from '../models/Wallet.js';
 import TransactionModel from '../models/Transaction.js';
 
@@ -87,11 +88,31 @@ const createWalletTransaction = async (
     receiptUrl,
   });
 
+export const getDefaultCard = async (stripeCustomerId) =>
+  PassengerModel.findOne({ stripeCustomerId }).select('defaultCardId').lean();
+
+export const setDefaultCard = async (stripeCustomerId, defaultCardId) =>
+  PassengerModel.findOneAndUpdate(
+    { stripeCustomerId },
+    { defaultCardId },
+    { new: true },
+  );
+
+export const getDefaultAccount = async (stripeAccountId) =>
+  DriverModel.findOne({ stripeAccountId }).select('defaultAccountId').lean();
+
+export const setDefaultAccount = async (stripeAccountId, defaultAccountId) =>
+  DriverModel.findOneAndUpdate(
+    { stripeAccountId },
+    { defaultAccountId },
+    { new: true },
+  );
+
 // Passenger Flow
-export const createPassengerStripeCustomer = async (passenger) => {
+export const createPassengerStripeCustomer = async (user, passenger) => {
   const customer = await stripe.customers.create({
-    name: passenger.name,
-    email: passenger.email,
+    name: user.name,
+    email: user.email,
   });
 
   passenger.stripeCustomerId = customer.id;
@@ -103,8 +124,6 @@ export const addPassengerPaymentMethod = async (
   passenger,
   paymentMethodData,
 ) => {
-  console.log(paymentMethodData);
-  // 1. Create PaymentMethod
   const paymentMethod = await stripe.paymentMethods.create({
     type: paymentMethodData.type,
     card: { token: 'tok_amex' }, // tok_mastercard, tok_amex, tok_visa
@@ -114,17 +133,19 @@ export const addPassengerPaymentMethod = async (
     },
   });
 
-  // 2. Attach PaymentMethod to Customer
   await stripe.paymentMethods.attach(paymentMethod.id, {
     customer: passenger.stripeCustomerId,
   });
 
-  // 3. Optionally set as default
-  await stripe.customers.update(passenger.stripeCustomerId, {
-    invoice_settings: { default_payment_method: paymentMethod.id },
-  });
+  const card = await getDefaultCard(passenger.stripeCustomerId);
+  if (!card.defaultCardId) {
+    await stripe.customers.update(passenger.stripeCustomerId, {
+      invoice_settings: { default_payment_method: paymentMethod.id },
+    });
 
-  // 4. Save in DB for reference
+    await setDefaultCard(passenger.stripeCustomerId, paymentMethod.id);
+  }
+
   await savePassengerPaymentMethod(passenger._id, paymentMethod.id);
 
   return paymentMethod.id;
@@ -144,12 +165,17 @@ export const getCardDetails = async (paymentMethodId) => {
   return paymentMethod;
 };
 
-export const deletePassengerCard = async (passengerId, paymentMethodId) => {
-  // Detach the payment method from the customer
+export const deletePassengerCard = async (passenger, paymentMethodId) => {
   const detachedPaymentMethod =
     await stripe.paymentMethods.detach(paymentMethodId);
 
-  await updatePassengerPaymentMethod(passengerId, paymentMethodId);
+  await updatePassengerPaymentMethod(passenger._id, paymentMethodId);
+
+  const card = await getDefaultCard(passenger.stripeCustomerId);
+  if (card.defaultCardId === paymentMethodId) {
+    await setDefaultCard(passenger.stripeCustomerId, null);
+  }
+
   return detachedPaymentMethod;
 };
 
@@ -169,18 +195,14 @@ export const updatePassengerCard = async (paymentMethodId, updates) => {
   return updatedPaymentMethod;
 };
 
-export const setDefaultCard = async (customerId, paymentMethodId) => {
-  // 1️⃣ Attach payment method if not already attached
-  // await stripe.paymentMethods.attach(paymentMethodId, {
-  //   customer: customerId,
-  // });
-
-  // 2️⃣ Set as default payment method
+export const setDefaultPassengerCard = async (customerId, paymentMethodId) => {
   const updatedCustomer = await stripe.customers.update(customerId, {
     invoice_settings: {
       default_payment_method: paymentMethodId,
     },
   });
+
+  await setDefaultCard(customerId, paymentMethodId);
 
   return updatedCustomer;
 };
@@ -274,39 +296,35 @@ export const passengerPaysDriver = async (
 };
 
 // Driver Flow
-export const createDriverStripeAccount = async (driver) => {
+export const createDriverStripeAccount = async (user, driver) => {
   const account = await stripe.accounts.create({
-    type: 'express', // express or custom account
+    type: 'express',
     country: 'US',
-    email: driver.email,
+    email: user.email,
     business_type: 'individual',
   });
 
-  driver.stripeAccountId = account.id;
-  await driver.save();
+  await DriverModel.findByIdAndUpdate(driver._id, {
+    stripeAccountId: account.id,
+  });
+
   return account.id;
 };
 
-export const addDriverBankAccount = async (driver, bankAccountData) => {
+export const addDriverExternalAccount = async (driver, bankAccountData) => {
   const bankAccount = await stripe.accounts.createExternalAccount(
     driver.stripeAccountId,
     {
-      external_account: bankAccountData, // token or object
+      external_account: bankAccountData,
     },
   );
 
+  const account = await getDefaultAccount(driver.stripeAccountId);
+  if (!account.defaultAccountId) {
+    await setDefaultAccount(driver.stripeAccountId, bankAccount.id);
+  }
   return bankAccount;
 };
-
-// {
-//   object: 'bank_account',
-//   country: 'US',
-//   currency: 'usd',
-//   routing_number: '110000000',
-//   account_number: '000123456789',
-//   account_holder_name: 'Jenny Rosen',
-//   account_holder_type: 'individual',
-// };
 
 export const getAllExternalAccounts = async (stripeAccountId) => {
   const externalAccounts =
@@ -346,6 +364,11 @@ export const deleteExternalAccount = async (
     stripeAccountId,
     externalAccountId,
   );
+
+  const account = await getDefaultAccount(stripeAccountId);
+  if (account.defaultAccountId === externalAccountId) {
+    await setDefaultAccount(stripeAccountId, null);
+  }
   return deletedAccount;
 };
 
@@ -358,6 +381,8 @@ export const setDefaultExternalAccount = async (
     externalAccountId,
     { default_for_currency: true },
   );
+
+  await setDefaultAccount(stripeAccountId, externalAccountId);
   return updatedAccount;
 };
 

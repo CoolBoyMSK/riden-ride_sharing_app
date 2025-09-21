@@ -55,6 +55,7 @@ const driverSchema = new mongoose.Schema(
       type: String,
       enum: DRIVER_STATUS,
       default: 'offline',
+      index: true,
     },
     vehicle: {
       type: { type: String, enum: CAR_TYPES },
@@ -79,6 +80,7 @@ const driverSchema = new mongoose.Schema(
     isBlocked: {
       type: Boolean,
       default: false,
+      index: true,
     },
     isDeleted: {
       type: Boolean,
@@ -87,10 +89,12 @@ const driverSchema = new mongoose.Schema(
     isApproved: {
       type: Boolean,
       default: false,
+      index: true,
     },
     isSuspended: {
       type: Boolean,
       default: false,
+      index: true,
     },
     suspensions: {
       type: [suspensionSchema],
@@ -118,10 +122,16 @@ const driverSchema = new mongoose.Schema(
     isRestricted: {
       type: Boolean,
       default: false,
+      index: true,
     },
     stripeAccountId: {
       type: String,
       unique: true,
+      index: true,
+    },
+    defaultAccountId: {
+      type: String,
+      index: true,
     },
   },
   {
