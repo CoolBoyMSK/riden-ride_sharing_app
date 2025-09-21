@@ -167,6 +167,13 @@ const rideSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    walletId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Wallet',
+      required: function () {
+        return this.paymentMethod === 'WALLET';
+      },
+    },
 
     // Distance & Time
     estimatedDistance: {
@@ -250,6 +257,12 @@ const rideSchema = new mongoose.Schema(
         trim: true,
         maxlength: 500,
       },
+    },
+
+    chatRoomId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ChatRoom',
+      unique: true,
     },
 
     // Metadata

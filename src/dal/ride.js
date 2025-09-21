@@ -1,6 +1,7 @@
 import RideModel from '../models/Ride.js';
 import DriverLocationModel from '../models/DriverLocation.js';
 import DriverModel from '../models/Driver.js';
+import ChatRoomModel from '../models/ChatRoom.js';
 import { generateUniqueId } from '../utils/auth.js';
 import redisClient from '../config/redisConfig.js';
 import env from '../config/envConfig.js';
@@ -12,7 +13,16 @@ import mongoose from 'mongoose';
 export const createRide = async (rideData) => {
   const ride = new RideModel(rideData);
   ride.rideId = generateUniqueId('ride', ride._id);
+
+  const room = await ChatRoomModel.create({
+    passengerId: ride.passengerId,
+    rideId: ride._id,
+    type: 'RIDE',
+  });
+
+  ride.chatRoomId = room._id;
   await ride.save();
+
   return ride;
 };
 
@@ -558,14 +568,8 @@ export const removeDriverFromQueue = async (driverId, session = null) => {
   }
 };
 
-const OFFER_TIMEOUT_MS = 180000; // 1 minute per driver (can be adjusted)
+const OFFER_TIMEOUT_MS = 180000;
 
-/**
- * Offer a ride to drivers in a parking-lot queue
- * @param {Object} ride - Ride document
- * @param {SocketIO.Server} io - Socket.IO server
- * @param {Set} declinedDrivers - Set of driver IDs who declined
- */
 export const offerRideToParkingQueue = async (
   ride,
   io,
@@ -635,11 +639,6 @@ export const offerRideToParkingQueue = async (
   }
 };
 
-/**
- * Rotate a driver to the end of the queue
- * @param {String|ObjectId} parkingLotId
- * @param {String|ObjectId} driverId
- */
 async function rotateQueue(parkingLotId, driverId) {
   if (!driverId || !parkingLotId) return;
 
@@ -658,14 +657,6 @@ async function rotateQueue(parkingLotId, driverId) {
   );
 }
 
-/**
- * Handle driver response to a ride offer
- * @param {String|ObjectId} rideId
- * @param {String|ObjectId} driverId
- * @param {String} driverResponse - 'accepted' | 'declined'
- * @param {SocketIO.Server} io
- * @param {Set} declinedDrivers
- */
 export const handleDriverResponse = async (
   rideId,
   driverId,
