@@ -38,7 +38,6 @@ import {
 } from '../dal/driver.js';
 import { findPassengerByUserId } from '../dal/passenger.js';
 import mongoose from 'mongoose';
-import { SyncGrant } from 'twilio/lib/jwt/AccessToken.js';
 
 let ioInstance = null;
 

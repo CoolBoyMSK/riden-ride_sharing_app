@@ -25,7 +25,7 @@ import { validatePromoCode } from '../../dal/promo_code.js';
 import { createResponseObject } from '../../utils/responseFactory.js';
 import {
   getMessagesByRide,
-  markAllMessagesRead,
+  markAllRideMessagesAsRead,
   getChatStats,
   getUnreadMessageCount,
 } from '../../dal/chat.js';
@@ -656,7 +656,7 @@ export const markMessagesReadController = async (req, res) => {
       });
     }
 
-    const result = await markAllMessagesRead(rideId, userId);
+    const result = await markAllRideMessagesAsRead(rideId, userId);
 
     // Emit read receipt to other participants
     try {
