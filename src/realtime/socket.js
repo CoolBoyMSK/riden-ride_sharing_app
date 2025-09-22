@@ -116,21 +116,11 @@ export const initSocket = (server) => {
 
         const ride = await findActiveRide(user._id, socket.user.roles[0]);
         if (ride) {
-          socket.join(`ride:${ride._id}`, {
-            success: true,
-            objectType,
-            message: `You successfully re-joined the ride`,
-          });
+          socket.join(`ride:${ride._id}`);
           io.to(`ride.${ride._id}`).emit('ride:active', {
             success: true,
             objectType,
             message: `${socket.user.roles[0]} re-joined the ride successfully`,
-          });
-          socket.emit('ride:active', {
-            success: true,
-            objectType,
-            data: ride,
-            message: 'Active ride fetched successfully',
           });
         }
       } catch (error) {
@@ -481,7 +471,7 @@ export const initSocket = (server) => {
             success: true,
             objectType,
             data: updatedRide,
-            message: `Ride successfully assigned to ${updatedRide.driverId.userId.name}`,
+            message: `Ride successfully assigned to ${updatedRide.driverId?.userId?.name}`,
           });
         });
       } catch (error) {
@@ -983,7 +973,7 @@ export const initSocket = (server) => {
         await session.commitTransaction();
         session.endSession();
 
-        // Notify passenger of ride start
+        socket.join(`ride:${updatedRide._id}`);
         io.to(`ride:${ride._id}`).emit('ride:driver_start_ride', {
           success: true,
           objectType,
@@ -1129,7 +1119,7 @@ export const initSocket = (server) => {
         await session.commitTransaction();
         session.endSession();
 
-        // Notify passenger of ride completion
+        socket.join(`ride:${updatedRide._id}`);
         io.to(`ride:${ride._id}`).emit('ride:driver_complete_ride', {
           success: true,
           objectType,
@@ -1257,7 +1247,8 @@ export const initSocket = (server) => {
           session.endSession();
 
           // Notify passenger of new rating
-          io.to(`user:${ride.passengerId}`).emit('ride:driver_rate_passenger', {
+          socket.join(`ride:${updatedRide._id}`);
+          io.to(`ride:${ride._id}`).emit('ride:driver_rate_passenger', {
             success: true,
             objectType,
             data: updatedRide,
@@ -1359,20 +1350,14 @@ export const initSocket = (server) => {
             isAvailable = false;
           }
 
-          // Start transaction
-          session = await mongoose.startSession();
-          session.startTransaction();
-
           const [lng, lat] = location.coordinates;
           const coordsObj = { latitude: lat, longitude: lng };
 
           const isRestricted = isRideInRestrictedArea(coordsObj); // returns boolean
           const isParkingLot = isDriverInParkingLot(coordsObj);
 
-          console.log(`${isRestricted} - ${isParkingLot}`);
-
           if (isRestricted && !isParkingLot) {
-            await updateDriverByUserId(userId, { isRestricted }, { session });
+            await updateDriverByUserId(userId, { isRestricted });
             const parkingLot = findNearestParkingForPickup(coordsObj);
 
             io.to(`user:${userId}`).emit('ride:driver_update_location', {
@@ -1385,7 +1370,7 @@ export const initSocket = (server) => {
             });
 
             if (parkingLot?.parkingLotId) {
-              await removeDriverFromQueue(driver._id, session);
+              await removeDriverFromQueue(driver._id);
             }
           } else if (isRestricted && isParkingLot) {
             const parkingLot = findNearestParkingForPickup(coordsObj);
@@ -1393,30 +1378,22 @@ export const initSocket = (server) => {
               await addDriverToQueue(parkingLot.parkingLotId, driver._id);
             }
 
-            await updateDriverByUserId(
-              userId,
-              { isRestricted: false },
-              { session },
-            );
+            await updateDriverByUserId(userId, { isRestricted: false });
 
             io.to(`user:${userId}`).emit('ride:driver_update_location', {
               success: true,
               objectType,
               code: 'SAFE_AREA',
               message:
-                'You are within the premises of safe aree, You can pickUp rides now',
+                'You are within the premises of safe aree, You can pick-up rides now',
             });
           } else {
-            await removeDriverFromQueue(driver._id, session);
+            await removeDriverFromQueue(driver._id);
 
-            await updateDriverByUserId(
-              userId,
-              { isRestricted: false },
-              { session },
-            );
+            await updateDriverByUserId(userId, { isRestricted: false });
           }
 
-          const DriverLocation = await saveDriverLocation(driver._id, {
+          const driverLocation = await saveDriverLocation(driver._id, {
             lng: location.coordinates[0],
             lat: location.coordinates[1],
             isAvailable,
@@ -1424,13 +1401,13 @@ export const initSocket = (server) => {
             heading,
           });
 
-          if (DriverLocation.currentRideId) {
-            io.to(`ride:${DriverLocation.currentRideId}`).emit(
+          if (driverLocation.currentRideId) {
+            io.to(`ride:${driverLocation.currentRideId}`).emit(
               'ride:driver_update_location',
               {
                 success: true,
                 objectType,
-                data: driver.location.coordinates,
+                data: driverLocation.location,
                 message: 'Location updated successfully',
               },
             );
@@ -1443,20 +1420,13 @@ export const initSocket = (server) => {
             ),
           );
 
-          await session.commitTransaction();
-          session.endSession();
-
           socket.emit('ride:driver_update_location', {
             success: true,
             objectType,
-            data: driver.location.coordinates,
+            data: driverLocation.location,
             message: 'Location updated successfully',
           });
         } catch (error) {
-          if (session) {
-            await session.abortTransaction();
-            session.endSession();
-          }
           console.error(`SOCKET ERROR (driver:${userId}):`, error);
           socket.emit('error', {
             success: false,
@@ -2112,7 +2082,7 @@ export const initSocket = (server) => {
           await session.commitTransaction();
           session.endSession();
 
-          // Notify driver of new rating
+          socket.join(`ride:${updatedRide._id}`);
           io.to(`ride:${ride._id}`).emit('ride:passenger_rate_driver', {
             success: true,
             objectType,

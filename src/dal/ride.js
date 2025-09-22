@@ -172,7 +172,17 @@ export const findPendingRides = async (
 
   let q = await RideModel.find(query)
     .limit(limit)
-    .populate('passengerId driverId chatRoomId')
+    .populate([
+      {
+        path: 'driverId',
+        populate: { path: 'userId' }, // populate driverId.userId
+      },
+      {
+        path: 'passengerId',
+        populate: { path: 'userId' }, // populate passengerId.userId
+      },
+      { path: 'chatRoomId' }, // simple top-level ref
+    ])
     .sort({ requestedAt: 1 });
 
   console.log('DB Return');
@@ -770,7 +780,7 @@ export const findActiveRide = async (id, role) => {
       passengerId: id,
     };
 
-  const ride = RideModel.find({
+  const ride = RideModel.findOne({
     ...query,
     status: {
       $nin: [
@@ -782,7 +792,17 @@ export const findActiveRide = async (id, role) => {
     },
     paymentStatus: { $nin: ['PROCESSING', 'COMPLETED'] },
   })
-    .populate()
+    .populate([
+      {
+        path: 'driverId',
+        populate: { path: 'userId' }, // populate driverId.userId
+      },
+      {
+        path: 'passengerId',
+        populate: { path: 'userId' }, // populate passengerId.userId
+      },
+      { path: 'chatRoomId' }, // simple top-level ref
+    ])
     .lean();
 
   return ride;
