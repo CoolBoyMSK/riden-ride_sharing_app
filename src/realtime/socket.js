@@ -30,6 +30,7 @@ import {
   isRideInRestrictedArea,
   offerRideToParkingQueue,
   handleDriverResponse,
+  findActiveRide,
 } from '../dal/ride.js';
 import {
   findDriverByUserId,
@@ -76,6 +77,72 @@ export const initSocket = (server) => {
 
     // Join user's personal room for direct notifications
     socket.join(`user:${userId}`);
+
+    socket.on('ride:active', async () => {
+      const objectType = 'active-ride';
+      try {
+        let user;
+        if (['driver'].includes(socket.user.roles[0])) {
+          user = await findDriverByUserId(userId);
+
+          if (
+            !user ||
+            user.isBlocked ||
+            user.isSuspended ||
+            user.backgroundCheckStatus !== 'approved' ||
+            !['online', 'on_ride'].includes(user.status)
+          ) {
+            return socket.emit('ride:active', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Driver not eligible',
+            });
+          }
+        } else if (['passenger'].includes(socket.user.roles[0])) {
+          user = await findPassengerByUserId(userId);
+
+          if (!user || user.isBlocked || user.isSuspended) {
+            return socket.emit('ride:active', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Passenger not eligible',
+            });
+          }
+        }
+
+        console.log(user);
+
+        const ride = await findActiveRide(user._id, socket.user.roles[0]);
+        if (ride) {
+          socket.join(`ride:${ride._id}`, {
+            success: true,
+            objectType,
+            message: `You successfully re-joined the ride`,
+          });
+          io.to(`ride.${ride._id}`).emit('ride:active', {
+            success: true,
+            objectType,
+            message: `${socket.user.roles[0]} re-joined the ride successfully`,
+          });
+          socket.emit('ride:active', {
+            success: true,
+            objectType,
+            data: ride,
+            message: 'Active ride fetched successfully',
+          });
+        }
+      } catch (error) {
+        console.error(`SOCKET ERROR: ${error}`);
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: error.code || 'SOCKET_ERROR',
+          message: `SOCKET ERROR: ${error.message}`,
+        });
+      }
+    });
 
     // Driver Events
     socket.on('ride:find', async () => {

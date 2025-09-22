@@ -747,3 +747,33 @@ export const handleDriverResponse = async (
     return error;
   }
 };
+
+export const findActiveRide = async (id, role) => {
+  let query;
+  if (role === 'driver')
+    query = {
+      driverId: id,
+    };
+
+  if (role === 'passenger')
+    query = {
+      passengerId: id,
+    };
+
+  const ride = RideModel.find({
+    ...query,
+    status: {
+      $nin: [
+        'RIDE_COMPLETED',
+        'CANCELLED_BY_PASSENGER',
+        'CANCELLED_BY_DRIVER',
+        'CANCELLED_BY_SYSTEM',
+      ],
+    },
+    paymentStatus: { $nin: ['PROCESSING', 'COMPLETED'] },
+  })
+    .populate()
+    .lean();
+
+  return ride;
+};
