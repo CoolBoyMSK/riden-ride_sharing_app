@@ -127,7 +127,7 @@ export const initSocket = (server) => {
         console.error(`SOCKET ERROR: ${error}`);
         return socket.emit('error', {
           success: false,
-          objectType,``
+          objectType,
           code: error.code || 'SOCKET_ERROR',
           message: `SOCKET ERROR: ${error.message}`,
         });
