@@ -355,7 +355,7 @@ export const initSocket = (server) => {
           socket.emit('ride:decline_ride', {
             success: true,
             objectType,
-            rides: replacementRides,
+            data: replacementRides,
             message: 'Ride declined successfully',
           });
         });
@@ -476,26 +476,12 @@ export const initSocket = (server) => {
           }
 
           socket.join(`ride:${updatedRide._id}`);
-          socket.emit('ride:accept_ride', {
-            rideId,
-            objectType,
-            message: 'Successfully joined ride room',
-          });
 
-          // Notify driver of successful assignment
-          socket.emit('ride:accept_ride', {
+          io.to(`ride:${ride._id}`).emit('ride:accept_ride', {
             success: true,
             objectType,
-            ride: updatedRide,
-            message: 'Ride successfully assigned to you',
-          });
-
-          // Notify passenger of driver assignment
-          io.to(`user:${ride.passengerId}`).emit('ride:accept_ride', {
-            success: true,
-            objectType,
-            ride: updatedRide,
-            message: 'Ride successfully assigned to you',
+            data: updatedRide,
+            message: `Ride successfully assigned to ${updatedRide.driverId.userId.name}`,
           });
         });
       } catch (error) {
@@ -678,20 +664,12 @@ export const initSocket = (server) => {
             });
           }
 
-          // Notify driver of successful cancellation
-          socket.emit('ride:driver_cancel_ride', {
-            success: true,
-            objectType,
-            ride: updatedRide,
-            message: 'Ride cancelled successfully',
-          });
-
           // Notify passenger of ride cancellation
-          io.to(`user:${ride.passengerId}`).emit('status_update', {
+          io.to(`ride:${ride._id}`).emit('ride:driver_cancel_ride', {
             success: true,
             objectType,
-            ride: updatedRide,
-            message: 'Ride cancelled successfully',
+            data: updatedRide,
+            message: 'Ride cancelled by driver',
           });
 
           const rooms = Array.from(socket.rooms);
@@ -703,7 +681,8 @@ export const initSocket = (server) => {
           clients.forEach((s) => s.leave(`ride:${ride._id}`));
 
           socket.emit('ride:driver_cancel_ride', {
-            rideId,
+            success: true,
+            objectType,
             message: 'You have left the ride room after cancellation.',
           });
         });
@@ -802,10 +781,10 @@ export const initSocket = (server) => {
         session.endSession();
 
         // Notify passenger of driver arriving
-        io.to(`user:${ride.passengerId}`).emit('ride:driver_arriving', {
+        io.to(`ride:${ride._id}`).emit('ride:driver_arriving', {
           success: true,
           objectType,
-          ride: updatedRide,
+          data: updatedRide,
           message: 'Ride status updated to DRIVER_ARRIVING',
         });
       } catch (error) {
@@ -904,10 +883,10 @@ export const initSocket = (server) => {
         session.endSession();
 
         // Notify passenger of driver arrival
-        io.to(`user:${ride.passengerId}`).emit('ride:driver_arrived', {
+        io.to(`ride:${ride._id}`).emit('ride:driver_arrived', {
           success: true,
           objectType,
-          ride: updatedRide,
+          data: updatedRide,
           message: 'Ride status updated to DRIVER_ARRIVED',
         });
       } catch (error) {
@@ -1005,10 +984,10 @@ export const initSocket = (server) => {
         session.endSession();
 
         // Notify passenger of ride start
-        io.to(`user:${ride.passengerId}`).emit('ride:driver_start_ride', {
+        io.to(`ride:${ride._id}`).emit('ride:driver_start_ride', {
           success: true,
           objectType,
-          ride: updatedRide,
+          data: updatedRide,
           message: 'Ride status updated to RIDE_STARTED',
         });
       } catch (error) {
@@ -1151,10 +1130,10 @@ export const initSocket = (server) => {
         session.endSession();
 
         // Notify passenger of ride completion
-        io.to(`user:${ride.passengerId}`).emit('ride:driver_complete_ride', {
+        io.to(`ride:${ride._id}`).emit('ride:driver_complete_ride', {
           success: true,
           objectType,
-          ride: updatedRide,
+          data: updatedRide,
           message: 'Ride status updated to RIDE_COMPLETED',
         });
       } catch (error) {
@@ -1281,7 +1260,7 @@ export const initSocket = (server) => {
           io.to(`user:${ride.passengerId}`).emit('ride:driver_rate_passenger', {
             success: true,
             objectType,
-            ride: updatedRide,
+            data: updatedRide,
             message: 'Passenger rated successfully',
           });
 
@@ -1289,7 +1268,7 @@ export const initSocket = (server) => {
           socket.emit('ride:driver_rate_passenger', {
             success: true,
             objectType,
-            message: 'Successfully left ride room',
+            message: 'You have left the ride room after cancellation.',
           });
         } catch (error) {
           if (session) {
@@ -1437,7 +1416,7 @@ export const initSocket = (server) => {
             );
           }
 
-          await saveDriverLocation(driver._id, {
+          const DriverLocation = await saveDriverLocation(driver._id, {
             lng: location.coordinates[0],
             lat: location.coordinates[1],
             isAvailable,
@@ -1445,8 +1424,8 @@ export const initSocket = (server) => {
             heading,
           });
 
-          if (driver.currentRideId) {
-            io.to(`ride:${driver.currentRideId}`).emit(
+          if (DriverLocation.currentRideId) {
+            io.to(`ride:${DriverLocation.currentRideId}`).emit(
               'ride:driver_update_location',
               {
                 success: true,
@@ -1690,15 +1669,10 @@ export const initSocket = (server) => {
 
         // Join ride room
         socket.join(`ride:${ride._id}`);
-        socket.emit('ride:driver_join_ride', {
-          rideId,
-          message: 'Successfully joined ride room',
-        });
-
-        socket.emit('ride:driver_join_ride', {
+        io.to(`ride:${ride._id}`).emit('ride:driver_join_ride', {
           success: true,
           objectType,
-          ride,
+          data: ride,
           message: 'Successfully joined ride room',
         });
       } catch (error) {
@@ -1822,7 +1796,7 @@ export const initSocket = (server) => {
         io.to(`ride:${ride._id}`).emit('ride:passenger_join_ride', {
           success: true,
           objectType,
-          ride,
+          data: ride,
           message: 'Successfully joined ride room',
         });
       } catch (error) {
@@ -1997,6 +1971,13 @@ export const initSocket = (server) => {
         await session.commitTransaction();
         session.endSession();
 
+        io.to(`ride:${ride._id}`).emit('ride:passenger_cancel_ride', {
+          success: true,
+          objectType,
+          data: updatedRide,
+          message: 'Ride successfully cancelled by passenger',
+        });
+
         const rooms = Array.from(socket.rooms);
         if (rooms.includes(`ride:${ride._id}`)) {
           socket.leave(`ride:${ride._id}`);
@@ -2005,12 +1986,10 @@ export const initSocket = (server) => {
         const clients = await io.in(`ride:${ride._id}`).fetchSockets();
         clients.forEach((s) => s.leave(`ride:${ride._id}`));
 
-        // Notify driver of ride cancellation
-        io.to(`user:${ride.driverId}`).emit('ride:passenger_cancel_ride', {
+        socket.emit('ride:passenger_cancel_ride', {
           success: true,
           objectType,
-          data: updatedRide,
-          message: 'Ride cancelled successfully',
+          message: 'You have left the ride room after cancellation.',
         });
       } catch (error) {
         if (session) {
@@ -2145,7 +2124,6 @@ export const initSocket = (server) => {
           socket.emit('ride:passenger_rate_driver', {
             success: true,
             objectType,
-            data: updatedRide,
             message: 'You successfully left ride room',
           });
         } catch (error) {
