@@ -51,7 +51,17 @@ export const updateRideById = async (
     rideId,
     { ...updateData, updatedAt: new Date() },
     { new: true, session },
-  );
+  ).populate([
+    {
+      path: 'driverId',
+      populate: { path: 'userId' }, // populate driverId.userId
+    },
+    {
+      path: 'passengerId',
+      populate: { path: 'userId' }, // populate passengerId.userId
+    },
+    { path: 'chatRoomId' }, // simple top-level ref
+  ]);
 };
 
 export const updateRideByRideId = async (rideId, updateData) => {
@@ -162,7 +172,7 @@ export const findPendingRides = async (
 
   let q = await RideModel.find(query)
     .limit(limit)
-    .populate('passengerId')
+    .populate('passengerId driverId chatRoomId')
     .sort({ requestedAt: 1 });
 
   console.log('DB Return');

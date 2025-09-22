@@ -478,6 +478,7 @@ export const initSocket = (server) => {
           socket.join(`ride:${updatedRide._id}`);
           socket.emit('ride:accept_ride', {
             rideId,
+            objectType,
             message: 'Successfully joined ride room',
           });
 
@@ -491,12 +492,10 @@ export const initSocket = (server) => {
 
           // Notify passenger of driver assignment
           io.to(`user:${ride.passengerId}`).emit('ride:accept_ride', {
-            rideId: updatedRide.rideId,
-            status: 'DRIVER_ASSIGNED',
-            data: {
-              ride: updatedRide,
-              driver,
-            },
+            success: true,
+            objectType,
+            ride: updatedRide,
+            message: 'Ride successfully assigned to you',
           });
         });
       } catch (error) {
@@ -689,12 +688,10 @@ export const initSocket = (server) => {
 
           // Notify passenger of ride cancellation
           io.to(`user:${ride.passengerId}`).emit('status_update', {
-            rideId: updatedRide.rideId,
-            status: 'CANCELLED_BY_DRIVER',
-            data: {
-              ride: updatedRide,
-              driver,
-            },
+            success: true,
+            objectType,
+            ride: updatedRide,
+            message: 'Ride cancelled successfully',
           });
 
           const rooms = Array.from(socket.rooms);
@@ -804,22 +801,12 @@ export const initSocket = (server) => {
         await session.commitTransaction();
         session.endSession();
 
-        // Notify driver of successful update
-        socket.emit('ride:driver_arriving', {
+        // Notify passenger of driver arriving
+        io.to(`user:${ride.passengerId}`).emit('ride:driver_arriving', {
           success: true,
           objectType,
           ride: updatedRide,
           message: 'Ride status updated to DRIVER_ARRIVING',
-        });
-
-        // Notify passenger of driver arriving
-        io.to(`user:${ride.passengerId}`).emit('ride:driver_arriving', {
-          rideId: updatedRide.rideId,
-          status: 'DRIVER_ARRIVING',
-          data: {
-            ride: updatedRide,
-            driver,
-          },
         });
       } catch (error) {
         await session.abortTransaction();
@@ -916,22 +903,12 @@ export const initSocket = (server) => {
         await session.commitTransaction();
         session.endSession();
 
-        // Notify driver of successful update
-        socket.emit('ride:driver_arrived', {
+        // Notify passenger of driver arrival
+        io.to(`user:${ride.passengerId}`).emit('ride:driver_arrived', {
           success: true,
           objectType,
           ride: updatedRide,
           message: 'Ride status updated to DRIVER_ARRIVED',
-        });
-
-        // Notify passenger of driver arrival
-        io.to(`user:${ride.passengerId}`).emit('ride:driver_arrived', {
-          rideId: updatedRide.rideId,
-          status: 'DRIVER_ARRIVED',
-          data: {
-            ride: updatedRide,
-            driver,
-          },
         });
       } catch (error) {
         await session.abortTransaction();
@@ -1027,22 +1004,12 @@ export const initSocket = (server) => {
         await session.commitTransaction();
         session.endSession();
 
-        // Notify driver of successful update
-        socket.emit('ride:driver_start_ride', {
+        // Notify passenger of ride start
+        io.to(`user:${ride.passengerId}`).emit('ride:driver_start_ride', {
           success: true,
           objectType,
           ride: updatedRide,
           message: 'Ride status updated to RIDE_STARTED',
-        });
-
-        // Notify passenger of ride start
-        io.to(`user:${ride.passengerId}`).emit('ride:driver_start_ride', {
-          rideId: updatedRide.rideId,
-          status: 'RIDE_STARTED',
-          data: {
-            ride: updatedRide,
-            driver,
-          },
         });
       } catch (error) {
         await session.abortTransaction();
@@ -1183,22 +1150,12 @@ export const initSocket = (server) => {
         await session.commitTransaction();
         session.endSession();
 
-        // Notify driver of successful update
-        socket.emit('ride:driver_complete_ride', {
+        // Notify passenger of ride completion
+        io.to(`user:${ride.passengerId}`).emit('ride:driver_complete_ride', {
           success: true,
           objectType,
           ride: updatedRide,
           message: 'Ride status updated to RIDE_COMPLETED',
-        });
-
-        // Notify passenger of ride completion
-        io.to(`user:${ride.passengerId}`).emit('ride:driver_complete_ride', {
-          rideId: updatedRide.rideId,
-          status: 'RIDE_COMPLETED',
-          data: {
-            ride: updatedRide,
-            driver,
-          },
         });
       } catch (error) {
         await session.abortTransaction();
@@ -1320,27 +1277,18 @@ export const initSocket = (server) => {
           await session.commitTransaction();
           session.endSession();
 
-          // Notify driver of successful rating
-          socket.emit('ride:driver_rate_passenger', {
+          // Notify passenger of new rating
+          io.to(`user:${ride.passengerId}`).emit('ride:driver_rate_passenger', {
             success: true,
             objectType,
             ride: updatedRide,
             message: 'Passenger rated successfully',
           });
 
-          // Notify passenger of new rating
-          io.to(`user:${ride.passengerId}`).emit('ride:driver_rate_passenger', {
-            rideId: updatedRide.rideId,
-            rating: updatedRide.passengerRating,
-            data: {
-              ride: updatedRide,
-              driver,
-            },
-          });
-
           socket.leave(`ride:${ride._id}`);
           socket.emit('ride:driver_rate_passenger', {
-            rideId,
+            success: true,
+            objectType,
             message: 'Successfully left ride room',
           });
         } catch (error) {
@@ -1497,16 +1445,14 @@ export const initSocket = (server) => {
             heading,
           });
 
-          console.log(location.coordinates);
-
           if (driver.currentRideId) {
             io.to(`ride:${driver.currentRideId}`).emit(
               'ride:driver_update_location',
               {
                 success: true,
-                driverId: driver._id,
-                coordinates: location.coordinates,
-                timestamp: Date.now(),
+                objectType,
+                data: driver.location.coordinates,
+                message: 'Location updated successfully',
               },
             );
           }
@@ -1524,7 +1470,7 @@ export const initSocket = (server) => {
           socket.emit('ride:driver_update_location', {
             success: true,
             objectType,
-            code: 'LOCATION_SAVED',
+            data: driver.location.coordinates,
             message: 'Location updated successfully',
           });
         } catch (error) {
@@ -1873,12 +1819,7 @@ export const initSocket = (server) => {
 
         // Join ride room
         socket.join(`ride:${ride._id}`);
-        socket.emit('ride:passenger_join_ride', {
-          rideId,
-          message: 'Successfully joined ride room',
-        });
-
-        socket.emit('ride:passenger_join_ride', {
+        io.to(`ride:${ride._id}`).emit('ride:passenger_join_ride', {
           success: true,
           objectType,
           ride,
@@ -2056,21 +1997,6 @@ export const initSocket = (server) => {
         await session.commitTransaction();
         session.endSession();
 
-        // Notify driver of ride cancellation
-        io.to(`user:${ride.driverId}`).emit('ride:passenger_cancel_ride', {
-          rideId: updatedRide.rideId,
-          status: 'CANCELLED_BY_PASSENGER',
-          data: { ride: updatedRide, passenger },
-        });
-
-        // Notify passenger of successful cancellation
-        socket.emit('ride:passenger_cancel_ride', {
-          success: true,
-          objectType,
-          ride: updatedRide,
-          message: 'Ride cancelled successfully',
-        });
-
         const rooms = Array.from(socket.rooms);
         if (rooms.includes(`ride:${ride._id}`)) {
           socket.leave(`ride:${ride._id}`);
@@ -2079,9 +2005,12 @@ export const initSocket = (server) => {
         const clients = await io.in(`ride:${ride._id}`).fetchSockets();
         clients.forEach((s) => s.leave(`ride:${ride._id}`));
 
-        socket.emit('ride:passenger_cancel_ride', {
-          rideId,
-          message: 'You have left the ride room after cancellation.',
+        // Notify driver of ride cancellation
+        io.to(`user:${ride.driverId}`).emit('ride:passenger_cancel_ride', {
+          success: true,
+          objectType,
+          data: updatedRide,
+          message: 'Ride cancelled successfully',
         });
       } catch (error) {
         if (session) {
@@ -2204,28 +2133,20 @@ export const initSocket = (server) => {
           await session.commitTransaction();
           session.endSession();
 
-          // Notify passenger of successful rating
-          socket.emit('ride:passenger_rate_driver', {
+          // Notify driver of new rating
+          io.to(`ride:${ride._id}`).emit('ride:passenger_rate_driver', {
             success: true,
             objectType,
-            ride: updatedRide,
+            data: updatedRide,
             message: 'Driver rated successfully',
-          });
-
-          // Notify driver of new rating
-          io.to(`user:${ride.driverId}`).emit('ride:passenger_rate_driver', {
-            rideId: updatedRide.rideId,
-            rating: updatedRide.driverRating,
-            data: {
-              ride: updatedRide,
-              passenger,
-            },
           });
 
           socket.leave(`ride:${ride._id}`);
           socket.emit('ride:passenger_rate_driver', {
-            rideId,
-            message: 'Successfully left ride room',
+            success: true,
+            objectType,
+            data: updatedRide,
+            message: 'You successfully left ride room',
           });
         } catch (error) {
           await session.abortTransaction();
