@@ -37,6 +37,7 @@ import {
   updateDriverByUserId,
   findAllDestination,
 } from '../dal/driver.js';
+import { calculateActualFare } from '../services/User/ride/fareCalculationService.js';
 import { findPassengerByUserId } from '../dal/passenger.js';
 import mongoose from 'mongoose';
 
@@ -112,14 +113,13 @@ export const initSocket = (server) => {
           }
         }
 
-        console.log(user);
-
         const ride = await findActiveRide(user._id, socket.user.roles[0]);
         if (ride) {
           socket.join(`ride:${ride._id}`);
-          io.to(`ride.${ride._id}`).emit('ride:active', {
+          io.to(`ride:${ride._id}`).emit('ride:active', {
             success: true,
             objectType,
+            data: ride,
             message: `${socket.user.roles[0]} re-joined the ride successfully`,
           });
         }
@@ -127,7 +127,7 @@ export const initSocket = (server) => {
         console.error(`SOCKET ERROR: ${error}`);
         return socket.emit('error', {
           success: false,
-          objectType,
+          objectType,``
           code: error.code || 'SOCKET_ERROR',
           message: `SOCKET ERROR: ${error.message}`,
         });
@@ -466,7 +466,6 @@ export const initSocket = (server) => {
           }
 
           socket.join(`ride:${updatedRide._id}`);
-
           io.to(`ride:${ride._id}`).emit('ride:accept_ride', {
             success: true,
             objectType,
@@ -655,6 +654,7 @@ export const initSocket = (server) => {
           }
 
           // Notify passenger of ride cancellation
+          socket.join(`ride:${updatedRide._id}`);
           io.to(`ride:${ride._id}`).emit('ride:driver_cancel_ride', {
             success: true,
             objectType,
@@ -770,7 +770,7 @@ export const initSocket = (server) => {
         await session.commitTransaction();
         session.endSession();
 
-        // Notify passenger of driver arriving
+        socket.join(`ride:${updatedRide._id}`);
         io.to(`ride:${ride._id}`).emit('ride:driver_arriving', {
           success: true,
           objectType,
@@ -872,7 +872,7 @@ export const initSocket = (server) => {
         await session.commitTransaction();
         session.endSession();
 
-        // Notify passenger of driver arrival
+        socket.join(`ride:${updatedRide._id}`);
         io.to(`ride:${ride._id}`).emit('ride:driver_arrived', {
           success: true,
           objectType,
@@ -993,151 +993,184 @@ export const initSocket = (server) => {
       }
     });
 
-    socket.on('ride:driver_complete_ride', async ({ rideId }) => {
-      const objectType = 'driver-complete-ride';
-      const session = await mongoose.startSession();
-      try {
-        session.startTransaction();
+    socket.on(
+      'ride:driver_complete_ride',
+      async ({ rideId, actualDistance }) => {
+        const objectType = 'driver-complete-ride';
+        const session = await mongoose.startSession();
+        try {
+          session.startTransaction();
 
-        const driver = await findDriverByUserId(userId);
-        if (
-          !driver ||
-          driver.isBlocked ||
-          driver.isSuspended ||
-          driver.backgroundCheckStatus !== 'approved' ||
-          driver.status !== 'on_ride'
-        ) {
-          await session.abortTransaction();
-          session.endSession();
-          return socket.emit('ride:driver_complete_ride', {
-            success: false,
-            objectType,
-            code: 'FORBIDDEN',
-            message: 'Forbidden: Driver not eligible',
-          });
-        }
+          const driver = await findDriverByUserId(userId);
+          if (
+            !driver ||
+            driver.isBlocked ||
+            driver.isSuspended ||
+            driver.backgroundCheckStatus !== 'approved' ||
+            driver.status !== 'on_ride'
+          ) {
+            await session.abortTransaction();
+            session.endSession();
+            return socket.emit('ride:driver_complete_ride', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Driver not eligible',
+            });
+          }
 
-        const ride = await findRideById(rideId);
-        const driverId = ride?.driverId?._id;
-        if (!ride) {
-          await session.abortTransaction();
-          session.endSession();
-          return socket.emit('ride:driver_complete_ride', {
-            success: false,
-            objectType,
-            code: 'NOT_FOUND',
-            message: 'Ride not found',
-          });
-        } else if (driverId.toString() !== driver._id.toString()) {
-          await session.abortTransaction();
-          session.endSession();
-          return socket.emit('ride:driver_complete_ride', {
-            success: false,
-            objectType,
-            code: 'NOT_ASSIGNED',
-            message: 'Cannot update a ride not assigned to you',
-          });
-        }
+          const ride = await findRideById(rideId);
+          const driverId = ride?.driverId?._id;
+          if (!ride) {
+            await session.abortTransaction();
+            session.endSession();
+            return socket.emit('ride:driver_complete_ride', {
+              success: false,
+              objectType,
+              code: 'NOT_FOUND',
+              message: 'Ride not found',
+            });
+          } else if (driverId.toString() !== driver._id.toString()) {
+            await session.abortTransaction();
+            session.endSession();
+            return socket.emit('ride:driver_complete_ride', {
+              success: false,
+              objectType,
+              code: 'NOT_ASSIGNED',
+              message: 'Cannot update a ride not assigned to you',
+            });
+          }
 
-        if (
-          ride.status !== 'RIDE_STARTED' &&
-          ride.status !== 'RIDE_IN_PROGRESS'
-        ) {
-          await session.abortTransaction();
-          session.endSession();
-          return socket.emit('ride:driver_complete_ride', {
-            success: false,
-            objectType,
-            code: 'INVALID_STATUS',
-            message: `Cannot complete ride. Current status: ${ride.status}`,
-          });
-        }
+          if (
+            ride.status !== 'RIDE_STARTED' &&
+            ride.status !== 'RIDE_IN_PROGRESS'
+          ) {
+            await session.abortTransaction();
+            session.endSession();
+            return socket.emit('ride:driver_complete_ride', {
+              success: false,
+              objectType,
+              code: 'INVALID_STATUS',
+              message: `Cannot complete ride. Current status: ${ride.status}`,
+            });
+          }
 
-        const updatedRide = await updateRideById(
-          ride._id,
-          {
-            status: 'RIDE_COMPLETED',
-            rideCompletedAt: new Date(),
-            paymentStatus: 'COMPLETED',
-          },
-          { session }, // transaction session
-        );
-        if (!updatedRide) {
-          await session.abortTransaction();
-          session.endSession();
-          return socket.emit('ride:driver_complete_ride', {
-            success: false,
-            objectType,
-            code: 'RIDE_UPDATE_FAILED',
-            message: 'Failed to update ride status',
-          });
-        }
+          if (!actualDistance || actualDistance > 0) {
+            await session.abortTransaction();
+            session.endSession();
+            return socket.emit('ride:driver_complete_ride', {
+              success: false,
+              objectType,
+              code: 'INVALID_DISTANCE',
+              message: `Invalid Distance, Distance must be greater than 0 and positive`,
+            });
+          }
 
-        const updateAvailability = await updateDriverAvailability(
-          driver._id,
-          true,
-          null,
-          { session },
-        );
-        if (!updateAvailability) {
-          await session.abortTransaction();
-          session.endSession();
-          return socket.emit('ride:driver_complete_ride', {
-            success: false,
-            objectType,
-            code: 'DRIVER AVAILABILITY_FAILED',
-            message: 'Failed to update driver availability',
-          });
-        }
+          const actualDuration =
+            Date.now() - new Date(ride.driverAssignedAt).getTime();
 
-        const updatedDriver = await updateDriverByUserId(
-          userId,
-          { status: 'online' },
-          { session },
-        );
-        if (!updatedDriver) {
-          // Rollback ride update
-          await updateRideById(
+          const waitingTime =
+            new Date(ride.rideStartedAt).getTime() -
+            new Date(ride.driverArrivedAt).getTime();
+
+          const actualFare = await calculateActualFare(
+            ride.driverId?.vehicle?.type,
+            ride.estimatedDistance,
+            actualDuration,
+            waitingTime,
+            ride.promoCode,
+            ride.rideStartedAt,
+          );
+
+          const updatedRide = await updateRideById(
             ride._id,
             {
-              status: 'RIDE_STARTED',
-              rideCompletedAt: null,
-              paymentStatus: 'PENDING',
+              status: 'RIDE_COMPLETED',
+              rideCompletedAt: new Date(),
+              paymentStatus: 'PROCESSING',
+              actualFare,
+              actualDistance,
+              actualDuration,
             },
+            { session }, // transaction session
+          );
+          if (!updatedRide) {
+            await session.abortTransaction();
+            session.endSession();
+            return socket.emit('ride:driver_complete_ride', {
+              success: false,
+              objectType,
+              code: 'RIDE_UPDATE_FAILED',
+              message: 'Failed to update ride status',
+            });
+          }
+
+          const updateAvailability = await updateDriverAvailability(
+            driver._id,
+            true,
+            null,
             { session },
           );
+          if (!updateAvailability) {
+            await session.abortTransaction();
+            session.endSession();
+            return socket.emit('ride:driver_complete_ride', {
+              success: false,
+              objectType,
+              code: 'DRIVER AVAILABILITY_FAILED',
+              message: 'Failed to update driver availability',
+            });
+          }
+
+          const updatedDriver = await updateDriverByUserId(
+            userId,
+            { status: 'online' },
+            { session },
+          );
+          if (!updatedDriver) {
+            // Rollback ride update
+            await updateRideById(
+              ride._id,
+              {
+                status: 'RIDE_STARTED',
+                rideCompletedAt: null,
+                paymentStatus: 'PENDING',
+              },
+              { session },
+            );
+            await session.abortTransaction();
+            session.endSession();
+            return socket.emit('ride:driver_complete_ride', {
+              success: false,
+              objectType,
+              code: 'DRIVER_UPDATE_FAILED',
+              message: 'Failed to update driver status',
+            });
+          }
+
+          await session.commitTransaction();
+          session.endSession();
+
+          socket.join(`ride:${updatedRide._id}`);
+          io.to(`ride:${ride._id}`).emit('ride:driver_complete_ride', {
+            success: true,
+            objectType,
+            data: updatedRide,
+            message: 'Ride status updated to RIDE_COMPLETED',
+          });
+        } catch (error) {
           await session.abortTransaction();
           session.endSession();
-          return socket.emit('ride:driver_complete_ride', {
+          console.error(`SOCKET ERROR: ${error}`);
+          return socket.emit('error', {
             success: false,
             objectType,
-            code: 'DRIVER_UPDATE_FAILED',
-            message: 'Failed to update driver status',
+            code: `${error.code || 'SOCKET_ERROR'}`,
+            message: `SOCKET ERROR: ${error.message}`,
           });
         }
-
-        await session.commitTransaction();
-        session.endSession();
-
-        socket.join(`ride:${updatedRide._id}`);
-        io.to(`ride:${ride._id}`).emit('ride:driver_complete_ride', {
-          success: true,
-          objectType,
-          data: updatedRide,
-          message: 'Ride status updated to RIDE_COMPLETED',
-        });
-      } catch (error) {
-        await session.abortTransaction();
-        session.endSession();
-        console.error(`SOCKET ERROR: ${error}`);
-        return socket.emit('error', {
-          success: false,
-          objectType,
-          code: `${error.code || 'SOCKET_ERROR'}`,
-          message: `SOCKET ERROR: ${error.message}`,
-        });
-      }
-    });
+      },
+    );
 
     socket.on(
       'ride:driver_rate_passenger',
@@ -2109,6 +2142,51 @@ export const initSocket = (server) => {
         }
       },
     );
+
+    socket.on('ride:tip_driver', async ({ rideId, percent, isApplied }) => {
+      const objectType = 'tip-driver';
+      try {
+        const ride = await findRideById(rideId);
+        const amount = (ride.estimatedFare / percent) * 100;
+        if (!ride) {
+          return socket.emit('ride:tip_driver', {
+            success: false,
+            objectType,
+            code: 'NOT_FOUND',
+            message: 'Ride not found',
+          });
+        } else if (ride.status !== 'RIDE_COMPLETED') {
+          return socket.emit('ride:tip_driver', {
+            success: false,
+            objectType,
+            code: 'INVALID_STATUS',
+            message: `Cannot rate driver. Current ride status: ${ride.status}`,
+          });
+        } else if (ride.tipBreakdown?.isApplied) {
+          return socket.emit('ride:tip_driver', {
+            success: false,
+            objectType,
+            code: 'ALLREADY_PAID',
+            message: `You have already paid $${ride.tipBreakdown?.amount} which is ${ride.tipBreakdown?.percent}% of fare`,
+          });
+        } else if (isApplied !== true || amount <= 0 || percent <= 0) {
+          return socket.emit('ride:tip_driver', {
+            success: false,
+            objectType,
+            code: 'INVALID_AMOUNT',
+            message: `Tip amount and percentage must be greter than 0`,
+          });
+        }
+      } catch (error) {
+        console.error(`SOCKET ERROR: ${error}`);
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: `${error.code || 'SOCKET_ERROR'}`,
+          message: `SOCKET ERROR: ${error.message}`,
+        });
+      }
+    });
 
     // chat Events
     socket.on('ride:get_chat', async ({ rideId }) => {

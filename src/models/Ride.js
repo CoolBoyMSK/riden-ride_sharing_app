@@ -152,6 +152,23 @@ const rideSchema = new mongoose.Schema(
     },
     fareBreakdown: fareBreakdownSchema,
 
+    tipBreakdown: {
+      amount: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      percent: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      isApplied: {
+        type: Boolean,
+        default: false,
+      },
+    },
+
     // Payment
     paymentMethod: {
       type: String,
