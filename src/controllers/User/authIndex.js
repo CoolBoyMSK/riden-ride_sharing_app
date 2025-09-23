@@ -5,6 +5,8 @@ import {
   signupUser,
   otpVerification,
   forgotPassword,
+  passKeyLogInAuthOptions,
+  verifyPasskeyLoginAuth,
 } from '../../services/User/auth/index.js';
 import { handleResponse } from '../../utils/handleRespone.js';
 import {
@@ -80,6 +82,30 @@ export const refreshController = (req, res) =>
       validationFn: null,
       handlerParams: [req.body],
       successMessage: 'Tokens refreshed successfully',
+    },
+    req,
+    res,
+  );
+
+export const passKeyLogInAuthOptionsController = (req, res) =>
+  handleResponse(
+    {
+      handler: passKeyLogInAuthOptions,
+      validationFn: null,
+      handlerParams: [req.body],
+      successMessage: 'Passkey login options created successfully',
+    },
+    req,
+    res,
+  );
+
+export const verifyPasskeyLoginAuthController = (req, res) =>
+  handleResponse(
+    {
+      handler: verifyPasskeyLoginAuth,
+      validationFn: null,
+      handlerParams: [req.body],
+      successMessage: 'Passkey login successfully',
     },
     req,
     res,

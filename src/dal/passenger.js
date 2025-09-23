@@ -5,6 +5,9 @@ import UpdateRequestModel from '../models/updateRequest.js';
 export const findPassenger = (filter, project = {}, options = {}) =>
   PassengerModel.findOne(filter, project, options);
 
+export const findPassengerById = async (id) =>
+  PassengerModel.findById(id).populate('userId').lean();
+
 export const findPassengerDetails = (filter) =>
   PassengerModel.findOne(filter).populate('userId');
 

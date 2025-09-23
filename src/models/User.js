@@ -2,6 +2,48 @@ import mongoose from 'mongoose';
 import { USER_TYPES } from '../enums/userRoles.js';
 import { GENDER_TYPES } from '../enums/genderEnums.js';
 
+const notificationSchema = new mongoose.Schema(
+  {
+    payment: {
+      type: Boolean,
+      default: true,
+    },
+    tip: {
+      type: Boolean,
+      default: true,
+    },
+    cancellation: {
+      type: Boolean,
+      default: true,
+    },
+    call: {
+      type: Boolean,
+      default: true,
+    },
+    chat: {
+      type: Boolean,
+      default: true,
+    },
+  },
+  { _id: false },
+);
+
+const recoveryPhoneSchema = new mongoose.Schema({
+  number: {
+    type: String,
+  },
+});
+
+const passkeySchema = new mongoose.Schema(
+  {
+    credentialID: String,
+    publicKey: String,
+    counter: Number,
+    transports: [String],
+  },
+  { _id: false },
+);
+
 const userSchema = new mongoose.Schema(
   {
     name: {
@@ -18,6 +60,9 @@ const userSchema = new mongoose.Schema(
       type: String,
       unique: true,
       sparse: true,
+    },
+    recoveryPhoneNumbers: {
+      type: [recoveryPhoneSchema],
     },
     password: {
       type: String,
@@ -40,6 +85,7 @@ const userSchema = new mongoose.Schema(
       enum: GENDER_TYPES,
       required: false,
     },
+    passkeys: [passkeySchema],
     isEmailVerified: {
       type: Boolean,
       default: false,
@@ -56,6 +102,11 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    is2FAEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    notifications: notificationSchema,
   },
   {
     timestamps: true,

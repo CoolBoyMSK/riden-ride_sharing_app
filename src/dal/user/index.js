@@ -4,6 +4,11 @@ import fs from 'fs/promises';
 import UserModel from '../../models/User.js';
 import UpdateRequest from '../../models/updateRequest.js';
 import { sendEmailUpdateVerificationOtp } from '../../templates/emails/user/index.js';
+import mongoose from 'mongoose';
+import {
+  generateRegistrationOptions,
+  verifyRegistrationResponse,
+} from '@simplewebauthn/server';
 
 export const findUserByEmail = (email) => UserModel.findOne({ email }).lean();
 
@@ -85,3 +90,146 @@ export async function isSameImage(imgA, imgB) {
     return false; // Treat as "different" on error
   }
 }
+
+export const findRecovertNumbersbyUserId = async (id) =>
+  UserModel.findOne({ _id: id }).select('recoveryPhoneNumbers').lean();
+
+export const addRecoveryNumber = async (userId, number) => {
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    throw new Error('Invalid user ID');
+  }
+
+  const normalizedNumber = number.trim();
+
+  const existingUser = await UserModel.findOne({
+    _id: userId,
+    'recoveryPhoneNumbers.number': normalizedNumber,
+  }).select('_id');
+
+  if (existingUser) {
+    throw new Error('This recovery phone number already exists.');
+  }
+
+  const updatedUser = await UserModel.findByIdAndUpdate(
+    userId,
+    { $addToSet: { recoveryPhoneNumbers: { number: normalizedNumber } } },
+    { new: true, projection: { recoveryPhoneNumbers: 1 } },
+  ).lean();
+
+  if (!updatedUser) {
+    throw new Error('User not found or failed to add recovery number.');
+  }
+
+  return updatedUser;
+};
+
+export const deleteRecoveryNumber = async (userId, recoveryId) => {
+  if (
+    !mongoose.Types.ObjectId.isValid(userId) ||
+    !mongoose.Types.ObjectId.isValid(recoveryId)
+  ) {
+    throw new Error('Invalid user or recovery ID');
+  }
+
+  const updatedUser = await UserModel.findByIdAndUpdate(
+    userId,
+    { $pull: { recoveryPhoneNumbers: { _id: recoveryId } } }, // Match by _id
+    { new: true, projection: { recoveryPhoneNumbers: 1 } },
+  ).lean();
+
+  if (!updatedUser) {
+    throw new Error('Recovery number not found for this user');
+  }
+
+  return updatedUser;
+};
+
+export const updateRecoveryPhoneNumber = async (
+  userId,
+  recoveryId,
+  newNumber,
+) => {
+  if (
+    !mongoose.Types.ObjectId.isValid(userId) ||
+    !mongoose.Types.ObjectId.isValid(recoveryId)
+  ) {
+    throw new Error('Invalid user or recovery ID');
+  }
+
+  const updatedUser = await UserModel.findOneAndUpdate(
+    { _id: userId, 'recoveryPhoneNumbers._id': recoveryId },
+    { $set: { 'recoveryPhoneNumbers.$.number': newNumber.trim() } },
+    { new: true, projection: { recoveryPhoneNumbers: 1 } },
+  ).lean();
+
+  if (!updatedUser) {
+    throw new Error('Recovery number not found for this user');
+  }
+
+  return updatedUser;
+};
+
+// === REGISTER PASSKEY (one-time setup after normal login) ===
+export const getPasskeyRegisterOptions = async (userId) => {
+  const user = await UserModel.findById(userId);
+  if (!user) throw new Error('User not found');
+
+  // ✅ Convert Mongo ObjectId string to a Uint8Array
+  const encoder = new TextEncoder();
+  const userIDBuffer = encoder.encode(user._id.toString());
+
+  const options = generateRegistrationOptions({
+    rpName: 'riden', // Your app name
+    userID: userIDBuffer, // <-- must be a BufferSource now
+    userName: user.email || user.phoneNumber || `user-${user._id}`,
+    attestationType: 'none',
+  });
+
+  // Save the challenge for later verification
+  user.passkeyChallenge = options.challenge;
+  await user.save();
+
+  return options;
+};
+
+export const verifyPasskeyRegistration = async (userId, credential) => {
+  const user = await UserModel.findById(userId);
+  if (!user || !user.passkeyChallenge) throw new Error('Challenge missing');
+
+  const verification = await verifyRegistrationResponse({
+    response: credential,
+    expectedChallenge: user.passkeyChallenge,
+    expectedOrigin: 'https://your-frontend-domain.com',
+    expectedRPID: 'your-domain.com',
+  });
+
+  if (!verification.verified) {
+    throw new Error('Passkey registration failed');
+  }
+
+  // Save the credential info for later login
+  const { credentialPublicKey, credentialID, counter } =
+    verification.registrationInfo;
+
+  user.passkeys = user.passkeys || [];
+  user.passkeys.push({
+    credentialID: Buffer.from(credentialID).toString('base64'),
+    publicKey: Buffer.from(credentialPublicKey).toString('base64'),
+    counter,
+  });
+
+  user.passkeyChallenge = undefined;
+  await user.save();
+
+  return { verified: true };
+};
+
+export const update2FAStatus = async (userId) => {
+  const user = await UserModel.findById(userId);
+  if (!user) throw new Error('User not found');
+
+  user.is2FAEnabled = !user.is2FAEnabled; // toggle boolean
+  await user.save();
+
+  return { is2FAEnabled: user.is2FAEnabled };
+};

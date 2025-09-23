@@ -30,6 +30,10 @@ import {
 } from '../../../dal/stripe.js';
 // import { otpQueue } from '../../../queues/otpQueue.js';
 import { verifyOtp, sendOtp } from '../../../utils/otpUtils.js';
+import {
+  getPasskeyLoginOptions,
+  verifyPasskeyLogin,
+} from '../../../utils/auth.js';
 
 export const signupUser = async (
   users,
@@ -42,13 +46,16 @@ export const signupUser = async (
   }
   const hashed = await hashPassword(password);
 
-  if (await findUserByEmail(email)) {
-    resp.error = true;
-    resp.error_message = 'Email already in use';
-    return resp;
-  }
-
   if (users && users.roles.includes('driver')) {
+    let isEmail = await findUserByEmail(email);
+    if (isEmail) {
+      if (isEmail._id.toString() !== user._id.toString()) {
+        resp.error = true;
+        resp.error_message = 'Email already in use';
+        return resp;
+      }
+    }
+
     user = await updateUserById(
       { _id: user._id },
       {
@@ -84,6 +91,12 @@ export const signupUser = async (
   }
 
   if (type && type.includes('passenger')) {
+    if (await findUserByEmail(email)) {
+      resp.error = true;
+      resp.error_message = 'Email already in use';
+      return resp;
+    }
+
     if (await findUserByPhone(phoneNumber)) {
       resp.error = true;
       resp.error_message = 'Phone number already in use';
@@ -217,10 +230,7 @@ export const loginUser = async (
       if (phoneNumber) {
         let user = await findUserByPhone(phoneNumber);
         if (user && user.isPhoneVerified) {
-          // For Production
-          // const sent = await sendOtp(phoneNumber);
-          // resp.data = { otpSent: true, flow: 'login' };
-          // For Production
+          const payload = { id: user._id, roles: user.roles };
           const success = await updateDriverByUserId(user._id, {
             isActive: true,
           });
@@ -229,13 +239,37 @@ export const loginUser = async (
             resp.error_message = 'Failed to activate passenger';
             return resp;
           }
+
+          if (success.status === 'offline') success.status = 'online';
+          success.save();
+
+          // const match = await comparePasswords(password, user.password);
+          // if (!match) {
+          //   resp.error = true;
+          //   resp.error_message = 'Incorrect password';
+          //   return resp;
+          // }
+
+          if (user.is2FAEnabled) {
+            // For Production
+            // const sent = await sendOtp(phoneNumber);
+            // resp.data = { otpSent: true, flow: 'login' };
+            // For Production
+            resp.data = {
+              user: user,
+              accessToken: generateAccessToken(payload),
+              refreshToken: generateRefreshToken(payload),
+              flow: 'Driver 2FA with Phone Number Login',
+            };
+            return resp;
+          }
+
           // For Testing
-          const payload = { id: user._id, roles: user.roles };
           resp.data = {
             user: user,
             accessToken: generateAccessToken(payload),
             refreshToken: generateRefreshToken(payload),
-            flow: 'login',
+            flow: 'Driver Phone Number login',
           };
           // For Testing
 
@@ -584,4 +618,53 @@ export const refreshTokens = async ({ refreshToken }, resp) => {
     }),
   };
   return resp;
+};
+
+export const passKeyLogInAuthOptions = async ({ type, provider }, resp) => {
+  try {
+    if (type !== 'driver')
+      throw new Error('Only drivers can access this route');
+
+    const success = await getPasskeyLoginOptions(provider);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to passkey login';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message =
+      'Something went wrong while deleting recovery phone number';
+    return resp;
+  }
+};
+
+export const verifyPasskeyLoginAuth = async (
+  { type, provider, response },
+  resp,
+) => {
+  try {
+    if (type !== 'driver')
+      throw new Error('Only drivers can access this route');
+
+    const success = await verifyPasskeyLogin(provider, response);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to verify passkey Login';
+      return resp;
+    }
+
+    resp.data = { ...success, flow: 'passkey-login' };
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message =
+      'Something went wrong while deleting recovery phone number';
+    return resp;
+  }
 };

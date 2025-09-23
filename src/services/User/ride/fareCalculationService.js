@@ -148,13 +148,13 @@ export const calculateActualFare = async (rideData) => {
     // Determine the day based on ride start time
     const rideDate = new Date(rideStartedAt);
     const days = [
-      'sunday',
-      'monday',
-      'tuesday',
-      'wednesday',
-      'thursday',
-      'friday',
-      'saturday',
+      'Sunday',
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
     ];
     const rideDay = days[rideDate.getDay()];
 

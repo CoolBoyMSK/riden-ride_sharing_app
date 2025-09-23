@@ -88,7 +88,7 @@ const driverSchema = new mongoose.Schema(
     },
     isApproved: {
       type: Boolean,
-      default: false,
+      default: true,
       index: true,
     },
     isSuspended: {
@@ -124,6 +124,12 @@ const driverSchema = new mongoose.Schema(
       default: false,
       index: true,
     },
+    payoutMethodIds: [
+      {
+        type: String,
+        unique: true,
+      },
+    ],
     stripeAccountId: {
       type: String,
       unique: true,

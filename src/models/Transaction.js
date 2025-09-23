@@ -10,6 +10,10 @@ const transactionSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Driver',
     },
+    paymentMethodId: {
+      type: String,
+      trim: true,
+    },
     walletId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Wallet',
@@ -21,6 +25,11 @@ const transactionSchema = new mongoose.Schema(
     type: {
       type: String,
       enum: ['CREDIT', 'DEBIT'], // CREDIT = add funds, DEBIT = deduct funds
+      required: true,
+    },
+    category: {
+      type: String,
+      enum: ['TIP', 'PAYOUT', 'TOP-UP', 'RIDE'],
       required: true,
     },
     amount: {

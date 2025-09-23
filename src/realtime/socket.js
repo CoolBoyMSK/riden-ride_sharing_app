@@ -31,14 +31,17 @@ import {
   offerRideToParkingQueue,
   handleDriverResponse,
   findActiveRide,
+  createFeedback,
 } from '../dal/ride.js';
 import {
   findDriverByUserId,
   updateDriverByUserId,
   findAllDestination,
+  findDriverById,
 } from '../dal/driver.js';
 import { calculateActualFare } from '../services/User/ride/fareCalculationService.js';
-import { findPassengerByUserId } from '../dal/passenger.js';
+import { findPassengerByUserId, findPassengerById } from '../dal/passenger.js';
+import { passengerPaysDriver, payDriverFromWallet } from '../dal/stripe.js';
 import mongoose from 'mongoose';
 
 let ioInstance = null;
@@ -1055,7 +1058,7 @@ export const initSocket = (server) => {
             });
           }
 
-          if (!actualDistance || actualDistance > 0) {
+          if (!actualDistance || actualDistance < 0) {
             await session.abortTransaction();
             session.endSession();
             return socket.emit('ride:driver_complete_ride', {
@@ -1073,14 +1076,16 @@ export const initSocket = (server) => {
             new Date(ride.rideStartedAt).getTime() -
             new Date(ride.driverArrivedAt).getTime();
 
-          const actualFare = await calculateActualFare(
-            ride.driverId?.vehicle?.type,
-            ride.estimatedDistance,
+          const carType = ride.driverId?.vehicle?.type;
+
+          const fareResult = await calculateActualFare({
+            carType,
+            actualDistance,
             actualDuration,
             waitingTime,
-            ride.promoCode,
-            ride.rideStartedAt,
-          );
+            promoCode: ride.promoCode,
+            rideStartedAt: ride.rideStartedAt,
+          });
 
           const updatedRide = await updateRideById(
             ride._id,
@@ -1088,7 +1093,7 @@ export const initSocket = (server) => {
               status: 'RIDE_COMPLETED',
               rideCompletedAt: new Date(),
               paymentStatus: 'PROCESSING',
-              actualFare,
+              actualFare: Math.floor(fareResult.actualFare),
               actualDistance,
               actualDuration,
             },
@@ -1254,13 +1259,28 @@ export const initSocket = (server) => {
           session = await mongoose.startSession();
           session.startTransaction();
 
+          const payload = {
+            passengerId: ride.passengerId,
+            driverId: ride.driverId,
+            rideId: ride._id,
+            type: 'by_driver',
+            rating,
+            feedback,
+          };
+          const driverFeedback = await createFeedback(payload);
+          if (!driverFeedback) {
+            return socket.emit('ride:driver_rate_passenger', {
+              success: false,
+              objectType,
+              code: 'IFEEDBACK_FAILED',
+              message: 'Driver failed to send feedback for passenger',
+            });
+          }
+
           const updatedRide = await updateRideById(
             ride._id,
             {
-              passengerRating: {
-                rating,
-                feedback: feedback?.trim() || '',
-              },
+              passengerRating: driverFeedback._id,
             },
             { session }, // pass session to ensure transaction safety
           );
@@ -2090,15 +2110,33 @@ export const initSocket = (server) => {
             });
           }
 
+          const payload = {
+            passengerId: ride.passengerId,
+            driverId: ride.driverId,
+            rideId: ride._id,
+            type: 'by_passenger',
+            rating,
+            feedback,
+          };
+          const passengerFeedback = await createFeedback(payload);
+          if (!passengerFeedback) {
+            await session.abortTransaction();
+            session.endSession();
+
+            return socket.emit('ride:driver_rate_passenger', {
+              success: false,
+              objectType,
+              code: 'IFEEDBACK_FAILED',
+              message: 'Passenger failed to send feedback for driver',
+            });
+          }
+
           const updatedRide = await updateRideById(
             ride._id,
             {
-              driverRating: {
-                rating,
-                feedback: feedback?.trim() || '',
-              },
+              driverRating: passengerFeedback._id,
             },
-            { session }, // Pass the transaction session
+            { session }, // pass session to ensure transaction safety
           );
 
           if (!updatedRide) {
@@ -2147,7 +2185,9 @@ export const initSocket = (server) => {
       const objectType = 'tip-driver';
       try {
         const ride = await findRideById(rideId);
-        const amount = (ride.estimatedFare / percent) * 100;
+        const amount = Math.floor(
+          ((ride.actualFare || ride.estimatedFare) / percent) * 100,
+        );
         if (!ride) {
           return socket.emit('ride:tip_driver', {
             success: false,
@@ -2177,6 +2217,79 @@ export const initSocket = (server) => {
             message: `Tip amount and percentage must be greter than 0`,
           });
         }
+
+        const passenger = await findPassengerById(ride.passengerId._id);
+        const driver = await findDriverById(ride.driverId._id);
+
+        if (!passenger || !driver) {
+          return socket.emit('ride:tip_driver', {
+            success: false,
+            objectType,
+            code: 'NOT_FOUND',
+            message: `Driver or Passenger not found`,
+          });
+        }
+
+        socket.join(`ride:${ride._id}`);
+
+        if (ride.paymentMethod === 'WALLET') {
+          const tip = await payDriverFromWallet(
+            passenger,
+            driver,
+            ride,
+            amount,
+            'TIP',
+          );
+          if (tip.error) {
+            return socket.emit('ride:tip_driver', {
+              success: false,
+              objectType,
+              code: 'PAYMENT_FAILED',
+              message: tip.error,
+            });
+          }
+
+          io.to(`ride:${ride._id}`).emit('ride:tip_driver', {
+            success: true,
+            objectType,
+            data: {
+              ride,
+              payment: tip.payment,
+              transaction: tip.transaction,
+            },
+            message: 'Tip successfully send to driver',
+          });
+        }
+
+        // if (ride.paymentMethod === 'CARD') {
+        //   const tip = await passengerPaysDriver(
+        //     passenger,
+        //     driver,
+        //     ride,
+        //     amount,
+        //     passenger.defaultCardId,
+        //     'TIP',
+        //   );
+        //   if (!tip.payment || !tip.transaction) {
+        //     return socket.emit('ride:tip_driver', {
+        //       success: false,
+        //       objectType,
+        //       code: 'PAYMENT_FAILED',
+        //       message: `Failed to send tip t driver's account`,
+        //     });
+        //   }
+
+        //   io.to(`ride:${ride._id}`).emit('ride:tip_driver', {
+        //     success: true,
+        //     objectType,
+        //     data: {
+        //       ride,
+        //       payment: tip.payment,
+        //       transaction: tip.transaction,
+        //     },
+        //     message: 'Tip successfully send to driver',
+        //   });
+        // }
       } catch (error) {
         console.error(`SOCKET ERROR: ${error}`);
         return socket.emit('error', {

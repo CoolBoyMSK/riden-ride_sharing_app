@@ -7,6 +7,8 @@ import {
   refreshController,
   otpVerificationController,
   forgotPasswordController,
+  passKeyLogInAuthOptionsController,
+  verifyPasskeyLoginAuthController,
 } from '../../../controllers/User/authIndex.js';
 import { verifyFirebaseToken } from '../../../middlewares/firebaseAuth.js';
 import { driverAuthenticate } from '../../../middlewares/driverAuth.js';
@@ -49,6 +51,18 @@ registerRoute({
   router,
   route: '/refresh',
   post_method: refreshController,
+});
+
+registerRoute({
+  router,
+  route: '/passkey/login-options',
+  post_method: passKeyLogInAuthOptionsController,
+});
+
+registerRoute({
+  router,
+  route: '/passkey/login',
+  post_method: verifyPasskeyLoginAuthController,
 });
 
 export default router;

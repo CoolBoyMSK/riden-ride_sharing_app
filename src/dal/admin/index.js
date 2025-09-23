@@ -1,6 +1,7 @@
 import AdminModel from '../../models/Admin.js';
 import UpdateRequest from '../../models/updateRequest.js';
 import Booking from '../../models/Ride.js';
+import Feedback from '../../models/Feedback.js';
 import mongoose from 'mongoose';
 
 export const findAdminByEmail = (email) => AdminModel.findOne({ email });
@@ -407,4 +408,265 @@ export const findBookingById = async (id) => {
   ]);
 
   return booking || null;
+};
+
+const parseDateDMY = (dateStr, endOfDay = false) => {
+  if (!dateStr) return null;
+  const [day, month, year] = dateStr.split('-').map(Number);
+  if (!day || !month || !year) return null;
+  const date = new Date(year, month - 1, day);
+  if (endOfDay) date.setHours(23, 59, 59, 999);
+  return date;
+};
+
+export const findDriverFeedbacks = async ({
+  page = 1,
+  limit = 10,
+  search = '',
+  fromDate,
+  toDate,
+  type = 'by_passenger',
+}) => {
+  const safePage = Math.max(parseInt(page, 10) || 1, 1);
+  const safeLimit = Math.max(parseInt(limit, 10) || 10, 1);
+  const skip = (safePage - 1) * safeLimit;
+
+  // --- Search filter ---
+  const safeSearch = (search || '').trim();
+  const escapedSearch = safeSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const searchMatch =
+    safeSearch.length > 0
+      ? {
+          $or: [
+            { 'driver.uniqueId': { $regex: escapedSearch, $options: 'i' } },
+            { 'driver.user.name': { $regex: escapedSearch, $options: 'i' } },
+          ],
+        }
+      : {};
+
+  // --- Date filter ---
+  const dateFilter = {};
+  const startDate = parseDateDMY(fromDate);
+  const endDate = parseDateDMY(toDate, true);
+
+  if (startDate) dateFilter.$gte = startDate;
+  if (endDate) dateFilter.$lte = endDate;
+
+  // --- Build match filter ---
+  const matchFilter = {
+    type,
+    ...(Object.keys(dateFilter).length ? { createdAt: dateFilter } : {}),
+    ...(Object.keys(searchMatch).length ? searchMatch : {}),
+  };
+
+  // --- Aggregation pipeline ---
+  const [result] = await Feedback.aggregate([
+    // Lookup driver
+    {
+      $lookup: {
+        from: 'drivers',
+        localField: 'driverId',
+        foreignField: '_id',
+        as: 'driver',
+      },
+    },
+    { $unwind: '$driver' },
+
+    // Lookup driver user
+    {
+      $lookup: {
+        from: 'users',
+        localField: 'driver.userId',
+        foreignField: '_id',
+        as: 'driver.user',
+      },
+    },
+    { $unwind: '$driver.user' },
+
+    // Lookup passenger
+    {
+      $lookup: {
+        from: 'passengers',
+        localField: 'passengerId',
+        foreignField: '_id',
+        as: 'passenger',
+      },
+    },
+    { $unwind: '$passenger' },
+
+    // Lookup passenger user
+    {
+      $lookup: {
+        from: 'users',
+        localField: 'passenger.userId',
+        foreignField: '_id',
+        as: 'passenger.user',
+      },
+    },
+    { $unwind: '$passenger.user' },
+
+    // Match filters
+    { $match: matchFilter },
+
+    // Sort newest first
+    { $sort: { createdAt: -1 } },
+
+    // Pagination & projection
+    {
+      $facet: {
+        metadata: [{ $count: 'total' }],
+        data: [
+          { $skip: skip },
+          { $limit: safeLimit },
+          {
+            $project: {
+              _id: 1,
+              rating: 1,
+              feedback: 1,
+              createdAt: 1,
+              rideId: 1,
+              type: 1,
+              'driver._id': 1,
+              'driver.uniqueId': 1,
+              'driver.user._id': 1,
+              'driver.user.name': 1,
+              'driver.user.email': 1,
+              'driver.user.profileImg': 1,
+              'passenger._id': 1,
+              'passenger.uniqueId': 1,
+              'passenger.user._id': 1,
+              'passenger.user.name': 1,
+              'passenger.user.email': 1,
+              'passenger.user.profileImg': 1,
+            },
+          },
+        ],
+      },
+    },
+  ]);
+
+  const total = result?.metadata?.[0]?.total || 0;
+
+  return {
+    data: result?.data || [],
+    total,
+    page: safePage,
+    limit: safeLimit,
+    totalPages: Math.ceil(total / safeLimit),
+  };
+};
+
+export const deleteFeedbackById = async (id) => {
+  const feedback = await Feedback.findById(id);
+  if (!feedback) return false;
+
+  const booking = await Booking.findById(feedback.rideId);
+  if (!booking) return false;
+
+  // Only compare if the fields are not null
+  if (
+    booking.driverRating &&
+    booking.driverRating.toString() === feedback._id.toString()
+  ) {
+    booking.driverRating = null;
+  }
+
+  if (
+    booking.passengerRating &&
+    booking.passengerRating.toString() === feedback._id.toString()
+  ) {
+    booking.passengerRating = null;
+  }
+
+  await booking.save();
+  await Feedback.findByIdAndDelete(id);
+
+  return true;
+};
+
+export const getFeedbackStats = async (type = 'by_passenger') => {
+  if (!['by_driver', 'by_passenger'].includes(type)) {
+    throw new Error('Invalid feedback type');
+  }
+
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const lastYear = currentYear - 1;
+
+  const stats = await Feedback.aggregate([
+    { $match: { type } },
+
+    // 1️⃣ Group all feedbacks for overall stats
+    {
+      $group: {
+        _id: null,
+        totalFeedbacks: { $sum: 1 },
+        averageRating: { $avg: '$rating' },
+        oneStar: { $sum: { $cond: [{ $eq: ['$rating', 1] }, 1, 0] } },
+        twoStar: { $sum: { $cond: [{ $eq: ['$rating', 2] }, 1, 0] } },
+        threeStar: { $sum: { $cond: [{ $eq: ['$rating', 3] }, 1, 0] } },
+        fourStar: { $sum: { $cond: [{ $eq: ['$rating', 4] }, 1, 0] } },
+        fiveStar: { $sum: { $cond: [{ $eq: ['$rating', 5] }, 1, 0] } },
+
+        // Count per year for growth
+        currentYearCount: {
+          $sum: {
+            $cond: [{ $eq: [{ $year: '$createdAt' }, currentYear] }, 1, 0],
+          },
+        },
+        lastYearCount: {
+          $sum: { $cond: [{ $eq: [{ $year: '$createdAt' }, lastYear] }, 1, 0] },
+        },
+      },
+    },
+
+    // 2️⃣ Compute growth percentage
+    {
+      $project: {
+        _id: 0,
+        totalFeedbacks: 1,
+        averageRating: { $round: ['$averageRating', 2] },
+        oneStar: 1,
+        twoStar: 1,
+        threeStar: 1,
+        fourStar: 1,
+        fiveStar: 1,
+        currentYearGrowthRate: {
+          $cond: [
+            { $eq: ['$lastYearCount', 0] },
+            null,
+            {
+              $round: [
+                {
+                  $multiply: [
+                    {
+                      $divide: [
+                        { $subtract: ['$currentYearCount', '$lastYearCount'] },
+                        '$lastYearCount',
+                      ],
+                    },
+                    100,
+                  ],
+                },
+                2,
+              ],
+            },
+          ],
+        },
+      },
+    },
+  ]);
+
+  return (
+    stats[0] || {
+      totalFeedbacks: 0,
+      averageRating: 0,
+      oneStar: 0,
+      twoStar: 0,
+      threeStar: 0,
+      fourStar: 0,
+      fiveStar: 0,
+      currentYearGrowthRate: null,
+    }
+  );
 };

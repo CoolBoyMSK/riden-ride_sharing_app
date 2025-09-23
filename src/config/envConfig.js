@@ -85,6 +85,11 @@ const env = {
     process.env.LOCATION_TTL_SECONDS,
     'LOCATION_TTL_SECONDS',
   ),
+  AGORA_APP_ID: required(process.env.AGORA_APP_ID, 'AGORA_APP_ID'),
+  AGORA_APP_CERTIFICATE: required(
+    process.env.AGORA_APP_CERTIFICATE,
+    'AGORA_APP_CERTIFICATE',
+  ),
 };
 
 export default env;

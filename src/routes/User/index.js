@@ -5,6 +5,9 @@ import driverRouter from './Driver/index.js';
 import rideRouter from './Ride/index.js';
 import passengerRouter from './Passenger/index.js';
 import supportRouter from './support/index.js';
+import callRouter from './Call/index.js';
+import notificationRouter from './Notification/index.js';
+import securityRouter from './Security/index.js';
 
 const userRouter = express.Router();
 
@@ -14,5 +17,8 @@ userRouter.use('/driver', driverRouter);
 userRouter.use('/rides', rideRouter);
 userRouter.use('/passenger', passengerRouter);
 userRouter.use('/support', supportRouter);
+userRouter.use('/call', callRouter);
+userRouter.use('/notification', notificationRouter);
+userRouter.use('/security', securityRouter);
 
 export default userRouter;

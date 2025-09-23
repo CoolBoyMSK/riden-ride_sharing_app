@@ -160,6 +160,9 @@ export const findDriver = async (driverId) => {
   return result;
 };
 
+export const findDriverById = async (id) =>
+  DriverModel.findById(id).populate('userId').lean();
+
 export const addDriverSuspension = (driverId, reason, endDate) =>
   DriverModel.findByIdAndUpdate(
     driverId,

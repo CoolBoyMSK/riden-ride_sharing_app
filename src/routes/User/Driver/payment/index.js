@@ -2,6 +2,7 @@ import express from 'express';
 import { registerRoute } from '../../../../utils/registerRoute.js';
 import {
   addPayoutMethodController,
+  getDriverOnBoardingLinkController,
   getAllPayoutMethodsController,
   getPayoutMethodByIdController,
   updatePayoutMethodController,
@@ -16,6 +17,13 @@ registerRoute({
   route: '/add',
   driver_auth_enable: true,
   post_method: addPayoutMethodController,
+});
+
+registerRoute({
+  router,
+  route: '/onboard',
+  driver_auth_enable: true,
+  post_method: getDriverOnBoardingLinkController,
 });
 
 registerRoute({

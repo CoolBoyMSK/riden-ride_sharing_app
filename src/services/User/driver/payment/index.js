@@ -1,6 +1,7 @@
 import { findDriverByUserId } from '../../../../dal/driver.js';
 import {
   addDriverExternalAccount,
+  generateDriverOnboardingLink,
   getAllExternalAccounts,
   getExternalAccountById,
   updateExternalAccount,
@@ -30,6 +31,33 @@ export const addPayoutMethod = async (user, { bankDetails }, resp) => {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
     resp.error_message = 'Something went wrong while adding payout method';
+    return resp;
+  }
+};
+
+export const getDriverOnBoardingLink = async (user, resp) => {
+  try {
+    const driver = await findDriverByUserId(user._id);
+    if (!driver) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch driver';
+      return resp;
+    }
+
+    const success = await generateDriverOnboardingLink(driver);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to generate onboarding link';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message =
+      'Something went wrong while generating onboarding link';
     return resp;
   }
 };
@@ -125,7 +153,11 @@ export const deletePayoutMethod = async (user, { id }, resp) => {
       return resp;
     }
 
-    const success = await deleteExternalAccount(driver.stripeAccountId, id);
+    const success = await deleteExternalAccount(
+      driver,
+      driver.stripeAccountId,
+      id,
+    );
     if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to delete payout method';

@@ -233,7 +233,12 @@ export const topUpInAppWallet = async (
       return resp;
     }
 
-    const success = await addFundsToWallet(passenger, amount, paymentMethodId);
+    const success = await addFundsToWallet(
+      passenger,
+      amount,
+      paymentMethodId,
+      'TOP-UP',
+    );
     if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to top-up in-app wallet';

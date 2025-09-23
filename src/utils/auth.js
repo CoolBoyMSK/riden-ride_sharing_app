@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import env from '../config/envConfig.js';
 import crypto from 'crypto';
 import mongoose from 'mongoose';
+import User from '../models/User.js';
 
 const SALT_ROUNDS = env.SALT_ROUNDS;
 const JWT_ACCESS_SECRET = env.JWT_ACCESS_SECRET;
@@ -83,6 +84,93 @@ const generateUniqueId = (role, userObjectId) => {
   return prefix + last6;
 };
 
+const getPasskeyLoginOptions = async (emailOrPhone) => {
+  const user = await User.findOne({
+    $or: [{ email: emailOrPhone }, { phoneNumber: emailOrPhone }],
+  });
+
+  if (!user || !user.passkeys || !user.passkeys.length) {
+    throw new Error('No passkeys registered');
+  }
+
+  // Convert stored credentialID (base64url or Buffer) to a BufferSource
+  const allowCredentials = user.passkeys.map((pk) => {
+    // If you stored credentialID as base64url, decode it:
+    const credentialIDBuffer =
+      typeof pk.credentialID === 'string'
+        ? Buffer.from(pk.credentialID, 'base64url')
+        : pk.credentialID;
+
+    return {
+      id: credentialIDBuffer,
+      type: 'public-key',
+    };
+  });
+
+  const options = generateAuthenticationOptions({
+    allowCredentials,
+    userVerification: 'preferred', // optional: 'preferred' | 'required' | 'discouraged'
+  });
+
+  user.passkeyChallenge = options.challenge;
+  await user.save();
+
+  return options;
+};
+
+const verifyPasskeyLogin = async (emailOrPhone, response) => {
+  const user = await User.findOne({
+    $or: [{ email: emailOrPhone }, { phoneNumber: emailOrPhone }],
+  });
+  if (!user || !user.passkeys) throw new Error('User or passkeys not found');
+
+  // Decode credential ID from response
+  const credentialIDBuffer = Buffer.from(response.id, 'base64url');
+
+  // Find the stored authenticator that matches the credential
+  const authenticator = user.passkeys.find((pk) => {
+    const storedID =
+      typeof pk.credentialID === 'string'
+        ? Buffer.from(pk.credentialID, 'base64url')
+        : Buffer.from(pk.credentialID);
+    return storedID.equals(credentialIDBuffer);
+  });
+
+  if (!authenticator)
+    throw new Error('Authenticator not found for this credential');
+
+  // Verify the authentication response
+  const verification = await verifyAuthenticationResponse({
+    response,
+    expectedChallenge: user.passkeyChallenge,
+    expectedOrigin: 'https://example.com', // your frontend origin
+    expectedRPID: 'example.com', // your RP ID (usually your domain)
+    authenticator: {
+      credentialID:
+        authenticator.credentialID instanceof Buffer
+          ? authenticator.credentialID
+          : Buffer.from(authenticator.credentialID, 'base64url'),
+      credentialPublicKey: Buffer.from(authenticator.credentialPublicKey), // stored during registration
+      counter: authenticator.counter,
+      transports: authenticator.transports, // optional
+    },
+  });
+
+  if (!verification.verified) throw new Error('Invalid passkey login');
+
+  // ✅ Update signature counter
+  authenticator.counter = verification.authenticationInfo.newCounter;
+  await user.save();
+
+  // Generate tokens
+  const payload = { id: user._id, roles: user.roles };
+  return {
+    user,
+    accessToken: generateAccessToken(payload),
+    refreshToken: generateRefreshToken(payload),
+  };
+};
+
 export {
   hashPassword,
   comparePasswords,
@@ -94,4 +182,6 @@ export {
   extractToken,
   censorString,
   generateUniqueId,
+  getPasskeyLoginOptions,
+  verifyPasskeyLogin,
 };

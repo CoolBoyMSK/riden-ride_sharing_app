@@ -6,6 +6,7 @@ import passengersRouter from './Passengers/index.js';
 import driverRouter from './Drivers/index.js';
 import fareRouter from './FareManagement/index.js';
 import bookingRouter from './Booking/index.js';
+import feedbackRouter from './Feedback/index.js';
 
 const adminRouter = express.Router();
 
@@ -16,5 +17,6 @@ adminRouter.use('/passengers', passengersRouter);
 adminRouter.use('/drivers', driverRouter);
 adminRouter.use('/fare-management', fareRouter);
 adminRouter.use('/bookings', bookingRouter);
+adminRouter.use('/feedback', feedbackRouter);
 
 export default adminRouter;

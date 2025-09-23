@@ -8,6 +8,7 @@ import env from '../config/envConfig.js';
 import { RESTRICTED_AREA } from '../enums/restrictedArea.js';
 import ParkingQueue from '../models/ParkingQueue.js';
 import mongoose from 'mongoose';
+import Feedback from '../models/Feedback.js';
 
 // Ride Operations
 export const createRide = async (rideData) => {
@@ -60,9 +61,13 @@ export const updateRideById = async (
       path: 'passengerId',
       populate: { path: 'userId' }, // populate passengerId.userId
     },
+    { path: 'passengerRating' },
+    { path: 'driverRating' },
     { path: 'chatRoomId' }, // simple top-level ref
   ]);
 };
+
+export const createFeedback = async (payload) => Feedback.create(payload);
 
 export const updateRideByRideId = async (rideId, updateData) => {
   return await RideModel.findOneAndUpdate(

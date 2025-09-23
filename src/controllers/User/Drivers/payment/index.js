@@ -1,6 +1,7 @@
 import { handleResponse } from '../../../../utils/handleRespone.js';
 import {
   addPayoutMethod,
+  getDriverOnBoardingLink,
   getAllPayoutMethods,
   getPayoutMethodById,
   updatePayoutMethod,
@@ -15,6 +16,18 @@ export const addPayoutMethodController = (req, res) =>
       validationFn: null,
       handlerParams: [req.user, req.body],
       successMessage: 'Payout Method Added successfully',
+    },
+    req,
+    res,
+  );
+
+export const getDriverOnBoardingLinkController = (req, res) =>
+  handleResponse(
+    {
+      handler: getDriverOnBoardingLink,
+      validationFn: null,
+      handlerParams: [req.user],
+      successMessage: 'Onboarding Link generated successfully',
     },
     req,
     res,

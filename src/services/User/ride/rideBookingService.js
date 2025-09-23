@@ -171,12 +171,15 @@ export const bookRide = async (userId, rideData) => {
       }
     } else if (paymentMethod === 'WALLET') {
       wallet = await getWallet(passenger._id);
+      console.log(wallet);
       if (!wallet) {
         return {
           success: false,
           message: 'Wallet not available',
         };
       } else if (wallet.balance < fareResult.estimatedFare) {
+        console.log(wallet.balance);
+        console.log(fareResult.estimatedFare);
         return {
           success: false,
           message: 'Insufficient wallet funds',

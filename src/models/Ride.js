@@ -172,7 +172,7 @@ const rideSchema = new mongoose.Schema(
     // Payment
     paymentMethod: {
       type: String,
-      enum: ['CARD', 'WALLET', 'CASH'],
+      enum: ['CARD', 'WALLET'],
       required: true,
     },
     paymentStatus: {
@@ -252,28 +252,12 @@ const rideSchema = new mongoose.Schema(
 
     // Rating & Feedback
     passengerRating: {
-      rating: {
-        type: Number,
-        min: 1,
-        max: 5,
-      },
-      feedback: {
-        type: String,
-        trim: true,
-        maxlength: 500,
-      },
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Feedback',
     },
     driverRating: {
-      rating: {
-        type: Number,
-        min: 1,
-        max: 5,
-      },
-      feedback: {
-        type: String,
-        trim: true,
-        maxlength: 500,
-      },
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Feedback',
     },
 
     chatRoomId: {

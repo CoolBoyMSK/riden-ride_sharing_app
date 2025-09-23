@@ -81,3 +81,16 @@ export const validateUpdateLegalAgreement = (body) => {
 
   return schema.validate(body, { abortEarly: false });
 };
+
+export const validatePhoneNumber = (body) => {
+  const schema = Joi.object({
+    phoneNumber: Joi.string()
+      .pattern(/^[0-9+\- ]{7,20}$/)
+      .message(
+        'Phone number must be 7-20 characters and contain only digits, +, -, or spaces.',
+      )
+      .optional(),
+  });
+
+  return schema.validate(body, { abortEarly: false });
+};
