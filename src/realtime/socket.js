@@ -3,8 +3,6 @@ import env from '../config/envConfig.js';
 import { verifyAccessToken } from '../utils/auth.js';
 import {
   createMessage,
-  markMessageRead,
-  getMessagesByRide,
   findChatRoomByRideId,
   updateChatById,
   markAllRideMessagesAsRead,
@@ -1058,7 +1056,7 @@ export const initSocket = (server) => {
             });
           }
 
-          if (!actualDistance || actualDistance < 0) {
+          if (!actualDistance || Math.ceil(actualDistance) < 0) {
             await session.abortTransaction();
             session.endSession();
             return socket.emit('ride:driver_complete_ride', {
@@ -1735,6 +1733,7 @@ export const initSocket = (server) => {
         }
 
         const ride = await findRideByRideId(rideId, { session });
+        console.log(ride);
         const passengerId = ride?.passengerId?._id;
         if (!ride) {
           await session.abortTransaction();
@@ -2314,10 +2313,9 @@ export const initSocket = (server) => {
             'DRIVER_ARRIVED',
             'RIDE_STARTED',
             'RIDE_IN_PROGRESS',
-            'RIDE_COMPLETED',
           ].includes(ride.status)
         ) {
-          return socket.emit('ride:get_chat', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'INVALID_CHAT',
@@ -2336,7 +2334,7 @@ export const initSocket = (server) => {
             !['on_ride'].includes(receiver.status) ||
             ride.driverId.toString() !== receiver._id.toString()
           ) {
-            return socket.emit('ride:get_chat', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
@@ -2351,7 +2349,7 @@ export const initSocket = (server) => {
             receiver.isSuspended ||
             ride.passengerId.toString() !== receiver._id.toString()
           ) {
-            return socket.emit('ride:get_chat', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
@@ -2362,7 +2360,7 @@ export const initSocket = (server) => {
 
         const chat = await findChatRoomByRideId(ride._id);
         if (!chat) {
-          return socket.emit('ride:get_chat', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'FETCH_FAILED',
@@ -2371,10 +2369,10 @@ export const initSocket = (server) => {
         }
 
         socket.emit('ride:get_chat', {
-          success: false,
+          success: true,
           objectType,
           data: chat,
-          message: 'Failed to fetch chat',
+          message: 'Chat fetched successfully',
         });
       } catch (error) {
         console.error(`SOCKET ERROR: ${error}`);
@@ -2393,7 +2391,7 @@ export const initSocket = (server) => {
         const objectType = 'ride-send-message';
         try {
           let sender;
-          if (['driver'].includes(socket.user.roles)) {
+          if (socket.user.roles.includes('driver')) {
             sender = await findDriverByUserId(userId);
 
             if (
@@ -2403,20 +2401,18 @@ export const initSocket = (server) => {
               sender.backgroundCheckStatus !== 'approved' ||
               !['online', 'on_ride'].includes(sender.status)
             ) {
-              return socket.emit('ride:send_message', {
+              return socket.emit('error', {
                 success: false,
                 objectType,
                 code: 'FORBIDDEN',
                 message: 'Forbidden: Driver not eligible',
               });
             }
-          } else if (['passenger'].includes(socket.user.roles)) {
+          } else if (socket.user.roles.includes('passenger')) {
             sender = await findPassengerByUserId(userId);
 
             if (!sender || sender.isBlocked || sender.isSuspended) {
-              await session.abortTransaction();
-              session.endSession();
-              return socket.emit('ride:send_message', {
+              return socket.emit('error', {
                 success: false,
                 objectType,
                 code: 'FORBIDDEN',
@@ -2426,19 +2422,19 @@ export const initSocket = (server) => {
           }
 
           if (!rideId) {
-            socket.emit('ride:send_message', {
+            return socket.emit('error', {
               success: false,
               message: 'Ride Id is required',
             });
           } else if (!text || text.trim().length === 0) {
-            socket.emit('ride:send_message', {
+            return socket.emit('error', {
               success: false,
               message: 'Empty message is not allowed',
             });
           } else if (
             !['text', 'system', 'location', 'image'].includes(messageType)
           ) {
-            socket.emit('ride:send_message', {
+            return socket.emit('error', {
               success: false,
               message: 'Invalid message type',
             });
@@ -2446,7 +2442,7 @@ export const initSocket = (server) => {
 
           const chat = await findChatRoomByRideId(rideId);
           if (!chat) {
-            socket.emit('ride:send_message', {
+            return socket.emit('error', {
               success: false,
               message: 'Chat not found',
             });
@@ -2464,18 +2460,22 @@ export const initSocket = (server) => {
           const payload = { $push: { messages: { messageId: newMsg._id } } };
 
           const updatedChat = await updateChatById(chat._id, payload);
-          if (updatedChat) {
-            io.to('ride:${rideId}').emit('ride:new_message', {
-              success: true,
-              data: updatedChat.messages[-1],
-              message: `${sender.name} send you a message`,
-            });
-          } else {
-            socket.emit('ride:send_message', {
+          if (!updatedChat) {
+            return socket.emit('error', {
               success: false,
+              objectType,
+              code: 'MESSAGE_FAILED',
               message: 'Failed to send message',
             });
           }
+
+          socket.join(`ride:${rideId}`);
+          io.to(`ride:${rideId}`).emit('ride:send_message', {
+            success: true,
+            objectType,
+            data: updatedChat,
+            message: `${socket.user.roles[0]} send you a message`,
+          });
         } catch (error) {
           console.error(`SOCKET ERROR: ${error}`);
           return socket.emit('error', {
@@ -2492,7 +2492,7 @@ export const initSocket = (server) => {
       const objectType = 'read-message';
       try {
         let reader;
-        if (['driver'].includes(socket.user.roles)) {
+        if (socket.user.roles.includes('driver')) {
           reader = await findDriverByUserId(userId);
 
           if (
@@ -2502,20 +2502,20 @@ export const initSocket = (server) => {
             reader.backgroundCheckStatus !== 'approved' ||
             !['online', 'on_ride'].includes(reader.status)
           ) {
-            return socket.emit('ride:read_messages', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
               message: 'Forbidden: Driver not eligible',
             });
           }
-        } else if (['passenger'].includes(socket.user.roles)) {
+        } else if (socket.user.roles.includes('passenger')) {
           reader = await findPassengerByUserId(userId);
 
           if (!reader || reader.isBlocked || reader.isSuspended) {
             await session.abortTransaction();
             session.endSession();
-            return socket.emit('ride:read_messages', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
@@ -2524,23 +2524,22 @@ export const initSocket = (server) => {
           }
         }
 
-        const isRead = await markAllRideMessagesAsRead(rideId, reader._id);
-        if (!isRead) {
-          return socket.emit('ride:read_messages', {
+        const isRead = await markAllRideMessagesAsRead(rideId, reader.userId);
+        if (!isRead.modifiedCount && isRead.modifiedCount < 0) {
+          return socket.emit('error', {
             success: false,
+            objectType,
             code: 'FAILED_TO_READ',
             message: `Failed to mark messages as read`,
           });
         }
 
+        socket.join(`ride:${rideId}`);
         io.to(`ride:${rideId}`).emit('ride:read_messages', {
           success: true,
-          message: `${isRead} message(s) successfully marked as read ${reader.name}`,
-        });
-
-        socket.emit('ride:read_messages', {
-          success: true,
-          message: `${isRead} message(s) successfully marked as read`,
+          objectType,
+          data: isRead,
+          message: `${isRead} message(s) successfully marked as read by ${socket.user.roles[0]}`,
         });
       } catch (error) {
         console.error(`SOCKET ERROR: ${error}`);
@@ -2553,11 +2552,11 @@ export const initSocket = (server) => {
       }
     });
 
-    socket.on('chat:edit_message', async ({ messageId, text }) => {
+    socket.on('ride:edit_message', async ({ messageId, text }) => {
       const objectType = 'edit-message';
       try {
         let sender;
-        if (['driver'].includes(socket.user.roles)) {
+        if (socket.user.roles.includes('driver')) {
           sender = await findDriverByUserId(userId);
 
           if (
@@ -2567,20 +2566,20 @@ export const initSocket = (server) => {
             sender.backgroundCheckStatus !== 'approved' ||
             !['online', 'on_ride'].includes(sender.status)
           ) {
-            return socket.emit('chat:edit_message', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
               message: 'Forbidden: Driver not eligible',
             });
           }
-        } else if (['passenger'].includes(socket.user.roles)) {
+        } else if (socket.user.roles.includes('passenger')) {
           sender = await findPassengerByUserId(userId);
 
           if (!sender || sender.isBlocked || sender.isSuspended) {
             await session.abortTransaction();
             session.endSession();
-            return socket.emit('chat:edit_message', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
@@ -2591,7 +2590,7 @@ export const initSocket = (server) => {
 
         const updatedMsg = await editMessage(messageId, sender.userId, text);
         if (!updatedMsg) {
-          return socket.emit('chat:edit_message', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'EDIT_FAILED',
@@ -2599,7 +2598,7 @@ export const initSocket = (server) => {
           });
         }
 
-        socket.emit('chat:edit_message', {
+        socket.emit('ride:edit_message', {
           success: true,
           objectType,
           data: updatedMsg,
@@ -2628,7 +2627,7 @@ export const initSocket = (server) => {
         const objectType = 'reply-message';
         try {
           let sender;
-          if (['driver'].includes(socket.user.roles)) {
+          if (socket.user.roles.includes('driver')) {
             sender = await findDriverByUserId(userId);
 
             if (
@@ -2638,20 +2637,20 @@ export const initSocket = (server) => {
               sender.backgroundCheckStatus !== 'approved' ||
               !['online', 'on_ride'].includes(sender.status)
             ) {
-              return socket.emit('ride:reply_message', {
+              return socket.emit('error', {
                 success: false,
                 objectType,
                 code: 'FORBIDDEN',
                 message: 'Forbidden: Driver not eligible',
               });
             }
-          } else if (['passenger'].includes(socket.user.roles)) {
+          } else if (socket.user.roles.includes('passenger')) {
             sender = await findPassengerByUserId(userId);
 
             if (!sender || sender.isBlocked || sender.isSuspended) {
               await session.abortTransaction();
               session.endSession();
-              return socket.emit('ride:reply_message', {
+              return socket.emit('error', {
                 success: false,
                 objectType,
                 code: 'FORBIDDEN',
@@ -2661,41 +2660,46 @@ export const initSocket = (server) => {
           }
 
           if (!rideId) {
-            socket.emit('ride:reply_message', {
+            socket.emit('error', {
               success: false,
               objectType,
+              code: 'INVALID_RIDE',
               message: 'Ride Id is required',
             });
           } else if (!text || text.trim().length === 0) {
-            socket.emit('ride:reply_message', {
+            socket.emit('error', {
               success: false,
               objectType,
+              code: 'INVALID_TEXT',
               message: 'Empty message is not allowed',
             });
           } else if (
             !['text', 'system', 'location', 'image'].includes(messageType)
           ) {
-            socket.emit('ride:reply_message', {
+            socket.emit('error', {
               success: false,
               objectType,
+              code: 'INVALID_TYPE',
               message: 'Invalid message type',
             });
           }
 
           const msg = await findMessageById(messageId);
           if (!msg) {
-            socket.emit('ride:reply_message', {
+            socket.emit('error', {
               success: false,
               objectType,
+              code: 'NOT_FOUND',
               message: 'Message not found',
             });
           }
 
           const chat = await findChatRoomByRideId(rideId);
           if (!chat) {
-            socket.emit('ride:reply_message', {
+            socket.emit('error', {
               success: false,
               objectType,
+              code: 'MESSAGE_FAILED',
               message: 'Chat not found',
             });
           }
@@ -2713,18 +2717,22 @@ export const initSocket = (server) => {
           const payload = { $push: { messages: { messageId: newMsg._id } } };
 
           const updatedChat = await updateChatById(chat._id, payload);
-          if (updatedChat) {
-            io.to('ride:${rideId}').emit('ride:new_message', {
-              success: true,
-              data: updatedChat.messages[-1],
-              message: `${sender.name} replied to ${msg.senderId.name}`,
-            });
-          } else {
-            socket.emit('ride:reply_message', {
+          if (!updatedChat) {
+            return socket.emit('error', {
               success: false,
+              objectType,
+              code: 'MESSAGE_FAILED',
               message: 'Failed to send message',
             });
           }
+
+          socket.join(`ride:${rideId}`);
+          io.to(`ride:${rideId}`).emit('ride:reply_message', {
+            success: true,
+            objectType,
+            data: updatedChat,
+            message: `${socket.user.roles[0]} replied to you`,
+          });
         } catch (error) {
           console.error(`SOCKET ERROR: ${error}`);
           return socket.emit('error', {
@@ -2737,11 +2745,11 @@ export const initSocket = (server) => {
       },
     );
 
-    socket.on('chat:delete_message', async ({ messageId }) => {
+    socket.on('ride:delete_message', async ({ messageId }) => {
       const objectType = 'delete-message';
       try {
         let sender;
-        if (['driver'].includes(socket.user.roles)) {
+        if (socket.user.roles.includes('driver')) {
           sender = await findDriverByUserId(userId);
 
           if (
@@ -2751,20 +2759,20 @@ export const initSocket = (server) => {
             sender.backgroundCheckStatus !== 'approved' ||
             !['online', 'on_ride'].includes(sender.status)
           ) {
-            return socket.emit('chat:delete_message', {
+            return socket.emit('ride:delete_message', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
               message: 'Forbidden: Driver not eligible',
             });
           }
-        } else if (['passenger'].includes(socket.user.roles)) {
+        } else if (socket.user.roles.includes('passenger')) {
           sender = await findPassengerByUserId(userId);
 
           if (!sender || sender.isBlocked || sender.isSuspended) {
             await session.abortTransaction();
             session.endSession();
-            return socket.emit('chat:delete_message', {
+            return socket.emit('ride:delete_message', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
@@ -2775,7 +2783,7 @@ export const initSocket = (server) => {
 
         const deletedMsg = await deleteMessage(messageId, sender.userId);
         if (!deletedMsg.acknowledged) {
-          return socket.emit('chat:delete_message', {
+          return socket.emit('ride:delete_message', {
             success: false,
             objectType,
             code: 'DELETE_FAILED',
@@ -2783,7 +2791,7 @@ export const initSocket = (server) => {
           });
         }
 
-        socket.emit('chat:delete_message', {
+        socket.emit('ride:delete_message', {
           success: true,
           objectType,
           data: deletedMsg,
@@ -2799,148 +2807,6 @@ export const initSocket = (server) => {
         });
       }
     });
-
-    // // Event: Join ride room for real-time communication
-    // socket.on('ride:join', async ({ rideId }) => {
-    //   try {
-    //     const ride = await findRideByRideId(rideId);
-    //     if (!ride) {
-    //       return socket.emit('error', { message: 'Ride not found' });
-    //     }
-
-    //     // Check if user is participant in this ride
-    //     const participants = [
-    //       ride.passengerId?.userId?.toString(),
-    //       ride.driverId?.userId?.toString(),
-    //     ].filter(Boolean);
-
-    //     if (!participants.includes(userId)) {
-    //       return socket.emit('error', {
-    //         message: 'Forbidden: Not a participant in this ride',
-    //       });
-    //     }
-
-    //     socket.join(`ride:${rideId}`);
-    //     socket.emit('response', {
-    //       rideId,
-    //       message: 'Successfully joined ride room',
-    //     });
-
-    //     // Notify other participants that user joined
-    //     socket.to(`ride:${rideId}`).emit('response', {
-    //       userId,
-    //       rideId,
-    //       timestamp: new Date(),
-    //     });
-
-    //     console.log(`📍 User ${userId} joined ride room: ${rideId}`);
-    //   } catch (error) {
-    //     console.error('Error joining ride room:', error);
-    //     socket.emit('error', { message: 'Failed to join ride room' });
-    //   }
-    // });
-
-    // // Event: Real-time location updates (primarily for drivers)
-    // socket.on('ride:location', ({ rideId, coords, heading, speed }) => {
-    //   if (!rideId || !coords) {
-    //     return socket.emit('error', { message: 'Invalid location data' });
-    //   }
-
-    //   // Broadcast location to all participants in the ride
-    //   io.to(`ride:${rideId}`).emit('ride:location', {
-    //     rideId,
-    //     coords,
-    //     heading,
-    //     speed,
-    //     senderId: userId,
-    //     timestamp: Date.now(),
-    //   });
-    // });
-
-    // // // Event: Send chat message
-    // // socket.on('chat:send', async ({ rideId, tempId, text }) => {
-    // //   try {
-    // //     if (!text?.trim()) {
-    // //       return socket.emit('error', { message: 'Message text is required' });
-    // //     }
-
-    // //     // Save message to database
-    // //     const msg = await createMessage({
-    // //       rideId,
-    // //       senderId: userId,
-    // //       text: text.trim(),
-    // //     });
-
-    // //     // Acknowledge to sender with message ID
-    // //     socket.emit('chat:ack', {
-    // //       tempId,
-    // //       messageId: msg._id.toString(),
-    // //       timestamp: msg.createdAt,
-    // //     });
-
-    // //     // Broadcast message to all participants in the ride
-    // //     io.to(`ride:${rideId}`).emit('chat:message', {
-    // //       messageId: msg._id.toString(),
-    // //       rideId,
-    // //       senderId: userId,
-    // //       text: msg.text,
-    // //       createdAt: msg.createdAt,
-    // //     });
-
-    // //     console.log(`💬 Message sent in ride ${rideId} by user ${userId}`);
-    // //   } catch (error) {
-    // //     console.error('Error sending chat message:', error);
-    // //     socket.emit('error', { message: 'Failed to send message' });
-    // //   }
-    // // });
-
-    // // Event: Mark message as read
-    // socket.on('chat:read', async ({ rideId, messageId }) => {
-    //   try {
-    //     if (!rideId || !messageId) {
-    //       return socket.emit('error', { message: 'Invalid read receipt data' });
-    //     }
-
-    //     const result = await markMessageRead(messageId, userId);
-    //     if (result?.acknowledged) {
-    //       // Broadcast read receipt to all participants
-    //       io.to(`ride:${rideId}`).emit('chat:read', {
-    //         messageId,
-    //         readAt: new Date(),
-    //         readBy: userId,
-    //       });
-    //     }
-    //   } catch (error) {
-    //     console.error('Error marking message as read:', error);
-    //   }
-    // });
-
-    // // Event: Typing indicator
-    // socket.on('chat:typing', ({ rideId, isTyping }) => {
-    //   if (!rideId) return;
-
-    //   socket.to(`ride:${rideId}`).emit('chat:typing', {
-    //     rideId,
-    //     userId,
-    //     isTyping,
-    //     timestamp: Date.now(),
-    //   });
-    // });
-
-    // // Event: Ride status updates
-    // socket.on('status_update', ({ rideId, status, data }) => {
-    //   if (!rideId || !status) return;
-
-    //   io.to(`ride:${rideId}`).emit('status_update', {
-    //     rideId,
-    //     status,
-    //     data,
-    //     updatedBy: userId,
-    //     timestamp: Date.now(),
-    //   });
-    // });
-
-    // Handle disconnection
 
     socket.on('disconnect', (reason) => {
       console.log(`🔌 User ${userId} disconnected: ${reason}`);

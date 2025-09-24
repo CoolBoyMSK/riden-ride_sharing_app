@@ -2,6 +2,7 @@ import ComplainModel from '../models/ComplainTicket.js';
 import Passenger from '../models/Passenger.js';
 import Driver from '../models/Driver.js';
 import Ride from '../models/Ride.js';
+import Report from '../models/Report.js';
 import mongoose from 'mongoose';
 import { generateUniqueId } from '../utils/auth.js';
 
@@ -204,3 +205,194 @@ export const adminComplainReply = async (id, text, attachments) =>
   )
     .populate('userId')
     .lean();
+
+export const getAllReports = async ({
+  type,
+  page = 1,
+  limit = 10,
+  search = '',
+  fromDate,
+  toDate,
+}) => {
+  // --- Validate pagination ---
+  const safePage =
+    Number.isInteger(Number(page)) && Number(page) > 0 ? Number(page) : 1;
+  const safeLimit =
+    Number.isInteger(Number(limit)) && Number(limit) > 0 ? Number(limit) : 10;
+  const skip = (safePage - 1) * safeLimit;
+
+  // --- Build filter ---
+  const filter = {};
+  if (type) filter.type = type;
+
+  // --- Date filter ---
+  if (fromDate || toDate) {
+    const dateFilter = {};
+    if (fromDate) dateFilter.$gte = new Date(fromDate);
+    if (toDate) {
+      const to = new Date(toDate);
+      // Ensure end of the day is included
+      to.setHours(23, 59, 59, 999);
+      dateFilter.$lte = to;
+    }
+    filter.createdAt = dateFilter;
+  }
+
+  // --- Escape search ---
+  const safeSearch = typeof search === 'string' ? search.trim() : '';
+  const escapedSearch = safeSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  // --- Build aggregation stages ---
+  const baseStages = [
+    { $match: filter },
+
+    {
+      $lookup: {
+        from: 'rides',
+        localField: 'bookingId',
+        foreignField: '_id',
+        as: 'booking',
+      },
+    },
+    { $unwind: { path: '$booking', preserveNullAndEmptyArrays: true } },
+
+    {
+      $lookup: {
+        from: 'drivers',
+        localField: 'driverId',
+        foreignField: '_id',
+        as: 'driver',
+      },
+    },
+    { $unwind: { path: '$driver', preserveNullAndEmptyArrays: true } },
+
+    {
+      $lookup: {
+        from: 'users',
+        localField: 'driver.userId',
+        foreignField: '_id',
+        as: 'driverUser',
+      },
+    },
+    { $unwind: { path: '$driverUser', preserveNullAndEmptyArrays: true } },
+
+    {
+      $lookup: {
+        from: 'passengers',
+        localField: 'passengerId',
+        foreignField: '_id',
+        as: 'passenger',
+      },
+    },
+    { $unwind: { path: '$passenger', preserveNullAndEmptyArrays: true } },
+
+    {
+      $lookup: {
+        from: 'users',
+        localField: 'passenger.userId',
+        foreignField: '_id',
+        as: 'passengerUser',
+      },
+    },
+    { $unwind: { path: '$passengerUser', preserveNullAndEmptyArrays: true } },
+  ];
+
+  // --- Search Stage ---
+  if (safeSearch) {
+    baseStages.push({
+      $match: {
+        $or: [
+          { 'driverUser.name': { $regex: escapedSearch, $options: 'i' } },
+          { 'passengerUser.name': { $regex: escapedSearch, $options: 'i' } },
+          { 'booking.uniqueId': { $regex: escapedSearch, $options: 'i' } },
+        ],
+      },
+    });
+  }
+
+  const dataPipeline = [
+    ...baseStages,
+    { $sort: { createdAt: -1 } },
+    { $skip: skip },
+    { $limit: safeLimit },
+    {
+      $project: {
+        _id: 1,
+        bookingId: 1,
+        uniqueId: 1,
+        status: 1,
+        type: 1,
+        reason: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        'booking.uniqueId': 1,
+        'driver._id': 1,
+        'driverUser._id': 1,
+        'driverUser.name': 1,
+        'driverUser.email': 1,
+        'driverUser.phoneNumber': 1,
+        'driverUser.profileImg': 1,
+        'passenger._id': 1,
+        'passengerUser._id': 1,
+        'passengerUser.name': 1,
+        'passengerUser.email': 1,
+        'passengerUser.phoneNumber': 1,
+        'passengerUser.profileImg': 1,
+      },
+    },
+  ];
+
+  const countPipeline = [...baseStages, { $count: 'total' }];
+
+  const [reports, totalCountResult] = await Promise.all([
+    Report.aggregate(dataPipeline),
+    Report.aggregate(countPipeline),
+  ]);
+
+  const totalRecords = totalCountResult[0]?.total || 0;
+
+  return {
+    data: reports,
+    currentPage: safePage,
+    totalPages: Math.ceil(totalRecords / safeLimit),
+    limit: safeLimit,
+    totalRecords,
+  };
+};
+
+export const findReportById = async (id) =>
+  Report.findById(id)
+    .populate([
+      {
+        path: 'passengerId',
+        select: 'userId',
+        populate: {
+          path: 'userId',
+          select: 'name email phoneNumber profileImg',
+        },
+      },
+      {
+        path: 'driverId',
+        select: 'userId',
+        populate: {
+          path: 'userId',
+          select: 'name email phoneNumber profileImg',
+        },
+      },
+      {
+        path: 'bookingId',
+      },
+    ])
+    .lean();
+
+export const updateReportStatusById = async (id, status) =>
+  Report.findByIdAndUpdate(id, { status }, { new: true }).lean();
+
+export const sendReplySupportChat = async (id, text, attachments) =>
+  ComplainModel.findByIdAndUpdate(
+    id,
+    {
+      $push: { chat: { isSupportReply: false, text, attachments } },
+    },
+    { new: true },
+  ).lean();

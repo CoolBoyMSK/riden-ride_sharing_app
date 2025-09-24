@@ -6,6 +6,7 @@ import {
   createComplainTicketController,
   getAllComplainTicketsController,
   getComplainTicketByIdController,
+  replySupportChatController,
 } from '../../../controllers/User/support/index.js';
 
 const router = express.Router();
@@ -24,6 +25,8 @@ registerRoute({
   route: '/:id',
   get_middlewares: [authenticateUser],
   get_method: getComplainTicketByIdController,
+  put_middlewares: [authenticateUser, uploadMany],
+  put_method: replySupportChatController,
 });
 
 export default router;

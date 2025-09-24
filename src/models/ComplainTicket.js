@@ -17,7 +17,7 @@ const chatSchema = new mongoose.Schema(
       },
     ],
   },
-  { _id: false },
+  { _id: false, timestamps: true },
 );
 
 const complainSchema = new mongoose.Schema(

@@ -1,6 +1,6 @@
 import bookingModel from '../models/Ride.js';
 import Report from '../models/Report.js';
-import mongoose from 'mongoose';
+import { generateUniqueId } from '../utils/auth.js';
 
 export const findMyBookingsByPassengerId = (passengerId) => {
   return bookingModel
@@ -117,6 +117,8 @@ export const createBookingReportByDriverId = async (
     reason,
   });
   if (!report) return false;
+  report.uniqueId = generateUniqueId('report', report._id);
+  await report.save();
 
   return report;
 };
@@ -198,6 +200,9 @@ export const createBookingReportByPassengerId = async (
     reason,
   });
   if (!report) return false;
+
+  report.uniqueId = generateUniqueId('report', report._id);
+  await report.save();
 
   return report;
 };

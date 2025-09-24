@@ -15,6 +15,16 @@ const reportSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Passenger',
     },
+    uniqueId: {
+      type: String,
+      unique: true,
+      trim: true,
+    },
+    status: {
+      type: String,
+      enum: ['resolved', 'pending'],
+      default: 'pending',
+    },
     type: {
       type: String,
       enum: ['by_driver', 'by_passenger'],

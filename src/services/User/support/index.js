@@ -3,6 +3,7 @@ import {
   createComplain,
   findComplains,
   findComplainById,
+  sendReplySupportChat,
 } from '../../../dal/support.js';
 import {
   uploadPassengerImage,
@@ -103,6 +104,53 @@ export const getComplainTicketById = async (user, { id }, resp) => {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
     resp.error_message = 'something went wrong while finding complain ticket';
+    return resp;
+  }
+};
+
+export const replySupportChat = async (user, { id }, { text }, files, resp) => {
+  try {
+    let uploadedUrls = [];
+
+    if (files && files.length > 0) {
+      for (const file of files) {
+        if (file.buffer && file.mimetype) {
+          try {
+            let url;
+            if (user.roles.includes('driver')) {
+              url = await uploadDriverImage(user.id, file);
+            } else if (user.roles.includes('passenger')) {
+              url = await uploadPassengerImage(user.id, file);
+            }
+            uploadedUrls.push(url);
+          } catch (uploadError) {
+            resp.error = true;
+            resp.error_message = `❌ S3 upload failed: ${uploadError.message}`;
+            return resp;
+          }
+        }
+      }
+    }
+
+    if (text.trim() === '' && uploadedUrls.length <= 0) {
+      resp.error = true;
+      resp.error_message = 'Empty messages are not allowed';
+      return resp;
+    }
+
+    const success = await sendReplySupportChat(id, text, uploadedUrls);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to reply support';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message;
     return resp;
   }
 };

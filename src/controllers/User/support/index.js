@@ -3,6 +3,7 @@ import {
   createComplainTicket,
   getAllComplainTickets,
   getComplainTicketById,
+  replySupportChat,
 } from '../../../services/User/support/index.js';
 import { validateComplainTicket } from '../../../validations/user/supportValidators.js';
 import { validatePagination } from '../../../validations/pagination.js';
@@ -38,6 +39,17 @@ export const getComplainTicketByIdController = async (req, res) =>
       handler: getComplainTicketById,
       handlerParams: [req.user, req.params],
       successMessage: 'Complain fetched successfully',
+    },
+    req,
+    res,
+  );
+
+export const replySupportChatController = async (req, res) =>
+  handleResponse(
+    {
+      handler: replySupportChat,
+      handlerParams: [req.user, req.params, req.body, req.files],
+      successMessage: 'Support replied successfully',
     },
     req,
     res,

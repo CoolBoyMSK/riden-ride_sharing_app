@@ -3,6 +3,9 @@ import {
   findComplainById,
   updateComplaniStatusById,
   adminComplainReply,
+  getAllReports,
+  findReportById,
+  updateReportStatusById,
 } from '../../../dal/support.js';
 import { uploadAdminImage } from '../../../utils/s3Uploader.js';
 
@@ -112,6 +115,74 @@ export const replyToComplain = async (user, { id }, { text }, files, resp) => {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
     resp.error_message = 'Something went wrong while updating complain status';
+    return resp;
+  }
+};
+
+export const findAllReports = async (
+  user,
+  { type, page, limit, search, fromDate, toDate },
+  resp,
+) => {
+  try {
+    const success = await getAllReports({
+      type,
+      page,
+      limit,
+      search,
+      fromDate,
+      toDate,
+    });
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch reports';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = 'Something went wrong while fetching reports';
+    return resp;
+  }
+};
+
+export const getReportById = async (user, { id }, resp) => {
+  try {
+    const success = await findReportById(id);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch report';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = 'Something went wrong while fetching report';
+    return resp;
+  }
+};
+
+export const updateReportStatus = async (user, { id, status }, resp) => {
+  try {
+    const success = await updateReportStatusById(id, status);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch update status';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = 'Something went wrong while updating report status';
     return resp;
   }
 };

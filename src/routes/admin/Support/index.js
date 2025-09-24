@@ -5,6 +5,9 @@ import {
   getComplainByIdController,
   updateComplainStatusController,
   replyToComplainController,
+  findAllReportsController,
+  getReportByIdController,
+  updateReportStatusController,
 } from '../../../controllers/Admin/Support/index.js';
 import { uploadMany } from '../../../middlewares/upload.js';
 
@@ -37,6 +40,27 @@ registerRoute({
   admin_auth_enable: true,
   put_middlewares: [uploadMany],
   put_method: replyToComplainController,
+});
+
+registerRoute({
+  router,
+  route: '/reports',
+  admin_auth_enable: true,
+  get_method: findAllReportsController,
+});
+
+registerRoute({
+  router,
+  route: '/report',
+  admin_auth_enable: true,
+  get_method: getReportByIdController,
+});
+
+registerRoute({
+  router,
+  route: '/report-edit',
+  admin_auth_enable: true,
+  put_method: updateReportStatusController,
 });
 
 export default router;

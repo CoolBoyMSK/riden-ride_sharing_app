@@ -1,13 +1,190 @@
 import ChatMessage from '../models/ChatMessage.js';
 import ChatRoom from '../models/ChatRoom.js';
+import mongoose from 'mongoose';
 
-export const findChatRoomByRideId = async (rideId) =>
-  ChatRoom.findOne({ rideId }).populate('messages.messageId').lean();
+export const findChatRoomByRideId = async (rideId) => {
+  const chatRoom = await ChatRoom.aggregate([
+    // Match by rideId
+    { $match: { rideId: new mongoose.Types.ObjectId(rideId) } },
 
-export const updateChatById = async (chatId, payload) =>
-  ChatRoom.findByIdAndUpdate(chatId, payload, { new: true });
+    // Lookup messages.messageId -> ChatMessage
+    {
+      $lookup: {
+        from: 'chatmessages',
+        localField: 'messages.messageId',
+        foreignField: '_id',
+        as: 'messagesData',
+      },
+    },
 
-// Create a new chat message
+    // Lookup sender details for each message
+    {
+      $lookup: {
+        from: 'users',
+        localField: 'messagesData.senderId',
+        foreignField: '_id',
+        as: 'senders',
+      },
+    },
+
+    // Merge sender info into messagesData
+    {
+      $addFields: {
+        messages: {
+          $map: {
+            input: '$messagesData',
+            as: 'msg',
+            in: {
+              _id: '$$msg._id',
+              text: '$$msg.text',
+              attachments: '$$msg.attachments',
+              readAt: '$$msg.readAt',
+              replyTo: '$$msg.replyTo',
+              isDeleted: '$$msg.isDeleted',
+              editedAt: '$$msg.editedAt',
+              createdAt: '$$msg.createdAt',
+              updatedAt: '$$msg.updatedAt',
+              sender: {
+                $let: {
+                  vars: {
+                    sender: {
+                      $arrayElemAt: [
+                        {
+                          $filter: {
+                            input: '$senders',
+                            as: 's',
+                            cond: { $eq: ['$$s._id', '$$msg.senderId'] },
+                          },
+                        },
+                        0,
+                      ],
+                    },
+                  },
+                  in: {
+                    _id: '$$sender._id',
+                    name: '$$sender.name',
+                    profileImg: '$$sender.profileImg',
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    // Clean fields
+    {
+      $project: {
+        __v: 0,
+        createdAt: 0,
+        updatedAt: 0,
+        type: 0,
+        messagesData: 0,
+        senders: 0,
+      },
+    },
+  ]);
+
+  return chatRoom[0] || null;
+};
+
+export const updateChatById = async (chatId, payload) => {
+  const chat = await ChatRoom.findByIdAndUpdate(chatId, payload, { new: true });
+  if (!chat) return false;
+
+  const chatRoom = await ChatRoom.aggregate([
+    // Match by rideId
+    { $match: { rideId: new mongoose.Types.ObjectId(chat.rideId) } },
+
+    // Lookup messages.messageId -> ChatMessage
+    {
+      $lookup: {
+        from: 'chatmessages',
+        localField: 'messages.messageId',
+        foreignField: '_id',
+        as: 'messagesData',
+      },
+    },
+
+    // Lookup sender details
+    {
+      $lookup: {
+        from: 'users',
+        localField: 'messagesData.senderId',
+        foreignField: '_id',
+        as: 'senders',
+      },
+    },
+
+    // Sort messagesData by createdAt (latest first)
+    {
+      $addFields: {
+        messagesData: {
+          $sortArray: { input: '$messagesData', sortBy: { createdAt: -1 } },
+        },
+      },
+    },
+
+    // Take only the first (latest) message
+    {
+      $addFields: {
+        latestMessage: { $arrayElemAt: ['$messagesData', 0] },
+      },
+    },
+
+    // Merge sender info into latestMessage
+    {
+      $addFields: {
+        message: {
+          _id: '$latestMessage._id',
+          text: '$latestMessage.text',
+          attachments: '$latestMessage.attachments',
+          readAt: '$latestMessage.readAt',
+          replyTo: '$latestMessage.replyTo',
+          isDeleted: '$latestMessage.isDeleted',
+          editedAt: '$latestMessage.editedAt',
+          createdAt: '$latestMessage.createdAt',
+          updatedAt: '$latestMessage.updatedAt',
+          sender: {
+            $let: {
+              vars: {
+                sender: {
+                  $arrayElemAt: [
+                    {
+                      $filter: {
+                        input: '$senders',
+                        as: 's',
+                        cond: { $eq: ['$$s._id', '$latestMessage.senderId'] },
+                      },
+                    },
+                    0,
+                  ],
+                },
+              },
+              in: {
+                _id: '$$sender._id',
+                name: '$$sender.name',
+                profileImg: '$$sender.profileImg',
+              },
+            },
+          },
+        },
+      },
+    },
+
+    // Final projection
+    {
+      $project: {
+        _id: 1,
+        rideId: 1,
+        message: 1,
+      },
+    },
+  ]);
+
+  return chatRoom[0] || null;
+};
+
 export const createMessage = async ({
   rideId,
   senderId,
@@ -15,7 +192,7 @@ export const createMessage = async ({
   text,
   messageType = 'text',
   attachments = [],
-  messageId = null,
+  replyTo = null,
 }) => {
   try {
     const message = new ChatMessage({
@@ -25,7 +202,7 @@ export const createMessage = async ({
       text,
       messageType,
       attachments,
-      replyTo: messageId,
+      replyTo,
     });
 
     const savedMessage = await message.save();
@@ -43,7 +220,6 @@ export const createMessage = async ({
 export const findMessageById = async (messageId) =>
   ChatMessage.findById(messageId).populate('senderId').lean();
 
-// Get messages for a specific ride
 export const getMessagesByRide = async (rideId, options = {}) => {
   try {
     const { before = null, limit = 50, includeDeleted = false } = options;
@@ -72,7 +248,6 @@ export const getMessagesByRide = async (rideId, options = {}) => {
   }
 };
 
-// Mark message as delivered
 export const markMessageDelivered = async (messageId, userId) => {
   try {
     const result = await ChatMessage.updateOne(
@@ -93,7 +268,6 @@ export const markMessageDelivered = async (messageId, userId) => {
   }
 };
 
-// Mark message as read
 export const markMessageRead = async (messageId, userId) => {
   try {
     const message = await ChatMessage.findById(messageId);
@@ -130,7 +304,6 @@ export const markMessageRead = async (messageId, userId) => {
   }
 };
 
-// Mark all messages in a ride as delivered for a user
 export const markAllMessagesDelivered = async (rideId, userId) => {
   try {
     const result = await ChatMessage.updateMany(
@@ -151,24 +324,22 @@ export const markAllMessagesDelivered = async (rideId, userId) => {
   }
 };
 
-// Mark all messages in a ride as read for a user
 export const markAllRideMessagesAsRead = async (rideId, userId) => {
   const result = await ChatMessage.updateMany(
     {
       rideId,
       isDeleted: false,
+      senderId: { $ne: userId },
       'readBy.userId': { $ne: userId },
     },
     {
       $addToSet: { readBy: { userId, readAt: new Date() } },
-      $set: { readAt: new Date() },
     },
   );
 
-  return result.modifiedCount; // number of updated messages
+  return result.modifiedCount;
 };
 
-// Get unread message count for a user in a ride
 export const getUnreadMessageCount = async (rideId, userId) => {
   try {
     const count = await ChatMessage.countDocuments({
@@ -185,7 +356,6 @@ export const getUnreadMessageCount = async (rideId, userId) => {
   }
 };
 
-// Soft delete a message
 export const deleteMessage = async (messageId, userId) => {
   try {
     const message = await ChatMessage.findById(messageId);
@@ -209,7 +379,6 @@ export const deleteMessage = async (messageId, userId) => {
   }
 };
 
-// Edit a message
 export const editMessage = async (messageId, userId, newText) => {
   try {
     const message = await ChatMessage.findById(messageId);
@@ -241,7 +410,6 @@ export const editMessage = async (messageId, userId, newText) => {
   }
 };
 
-// Get chat statistics for a ride
 export const getChatStats = async (rideId) => {
   try {
     const stats = await ChatMessage.aggregate([
