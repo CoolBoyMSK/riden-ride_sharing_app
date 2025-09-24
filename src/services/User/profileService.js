@@ -18,7 +18,7 @@ export const getUserProfile = async (user, resp) => {
     resp.error_message = 'User not found';
     return resp;
   }
-  delete profile.password;
+  delete profile.userId.password;
   resp.data = profile;
   return resp;
 };
