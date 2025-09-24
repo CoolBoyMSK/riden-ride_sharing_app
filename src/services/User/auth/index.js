@@ -241,7 +241,7 @@ export const loginUser = async (
           }
 
           if (success.status === 'offline') success.status = 'online';
-          success.save();
+          await success.save();
 
           // const match = await comparePasswords(password, user.password);
           // if (!match) {
