@@ -240,8 +240,12 @@ export const loginUser = async (
             return resp;
           }
 
-          if (success.status === 'offline') success.status = 'online';
-          await success.save();
+          const driverPayload = { status: success.status };
+          if (success.status === 'offline') driverPayload.status = 'online';
+
+          await updateDriverByUserId(user._id, {
+            driverPayload,
+          });
 
           // const match = await comparePasswords(password, user.password);
           // if (!match) {
