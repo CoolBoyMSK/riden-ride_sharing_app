@@ -266,6 +266,10 @@ const rideSchema = new mongoose.Schema(
       unique: true,
     },
 
+    isReported: {
+      type: Boolean,
+      default: false,
+    },
     // Metadata
     createdAt: {
       type: Date,

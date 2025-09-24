@@ -2,6 +2,8 @@ import crypto from 'crypto';
 import fetch from 'node-fetch';
 import fs from 'fs/promises';
 import UserModel from '../../models/User.js';
+import DriverModel from '../../models/Driver.js';
+import PassengerModel from '../../models/Passenger.js';
 import UpdateRequest from '../../models/updateRequest.js';
 import { sendEmailUpdateVerificationOtp } from '../../templates/emails/user/index.js';
 import mongoose from 'mongoose';
@@ -20,7 +22,24 @@ export const createUser = (payload) => new UserModel(payload).save();
 export const updateUserById = (filter, update) =>
   UserModel.findByIdAndUpdate(filter, update, { new: true });
 
-export const findUserById = (id) => UserModel.findById(id).lean();
+export const findUserById = async (id) => {
+  const user = await UserModel.findById(id).lean();
+  if (!user) return false;
+
+  if (user.roles.includes('driver')) {
+    const driver = await DriverModel.findOne({ userId: user._id })
+      .populate('userId')
+      .lean();
+    return driver;
+  }
+
+  if (user.roles.includes('passenger')) {
+    const passenger = await PassengerModel.findOne({ userId: user._id })
+      .populate('userId')
+      .lean();
+    return passenger;
+  }
+};
 
 export const createProfileUpdateRequest = async (payload) => {
   try {

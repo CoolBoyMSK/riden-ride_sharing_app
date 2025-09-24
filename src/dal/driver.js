@@ -585,7 +585,7 @@ export const createDestination = async (
 };
 
 export const findAllDestination = async (driverId) =>
-  DestinationModel.findOne({ driverId }).lean();
+  DestinationModel.find({ driverId }).lean();
 
 export const findDestinationById = async (id, driverId) =>
   DestinationModel.findOne({ _id: id, driverId }).lean();

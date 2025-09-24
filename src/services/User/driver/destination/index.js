@@ -68,8 +68,6 @@ export const fetchDestinations = async (user, resp) => {
       return resp;
     }
 
-    console.log(driver);
-
     const destinations = await findAllDestination(driver._id);
     if (!destinations) {
       resp.error = true;
@@ -216,7 +214,7 @@ export const toggleDestination = async (user, resp) => {
   try {
     const updated = await updateDriverByUserId(
       user._id,
-      [{ $set: { isDestination: { $not: "$isDestination" } } }],
+      [{ $set: { isDestination: { $not: '$isDestination' } } }],
       { session },
     );
     if (!updated) {
