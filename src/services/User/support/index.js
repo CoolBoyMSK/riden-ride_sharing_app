@@ -46,7 +46,7 @@ export const createComplainTicket = async (
     }
 
     const success = await createComplain({
-      userId: user.id,
+      user,
       bookingId: booking._id,
       text,
       type,

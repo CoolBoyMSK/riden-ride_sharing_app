@@ -82,6 +82,15 @@ export const findBookingById = async (driverId, bookingId) =>
         },
       },
       { path: 'driverRating' },
+      {
+        path: 'driverId',
+        select: 'userId',
+        populate: {
+          path: 'userId',
+          select: 'name email phoneNumber profileImg',
+        },
+      },
+      { path: 'passengerRating' },
     ])
     .lean();
 
@@ -145,6 +154,15 @@ export const findPassengerBookingById = async (passengerId, bookingId) =>
   bookingModel
     .findOne({ _id: bookingId, passengerId })
     .populate([
+      {
+        path: 'passengerId',
+        select: 'userId',
+        populate: {
+          path: 'userId',
+          select: 'name email phoneNumber profileImg',
+        },
+      },
+      { path: 'driverRating' },
       {
         path: 'driverId',
         select: 'userId',
