@@ -1,5 +1,6 @@
 import { findRideByRideId } from '../../../dal/ride.js';
 import {
+  findComplainTypes,
   createComplain,
   findComplains,
   findComplainById,
@@ -9,6 +10,25 @@ import {
   uploadPassengerImage,
   uploadDriverImage,
 } from '../../../utils/s3Uploader.js';
+
+export const getComplainTypes = async (user, resp) => {
+  try {
+    const success = findComplainTypes();
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch complain types';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
+    return resp;
+  }
+};
 
 export const createComplainTicket = async (
   user,

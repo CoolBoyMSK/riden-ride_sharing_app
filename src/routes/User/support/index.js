@@ -3,6 +3,7 @@ import { registerRoute } from '../../../utils/registerRoute.js';
 import { authenticateUser } from '../../../middlewares/genericAuth.js';
 import { uploadMany } from '../../../middlewares/upload.js';
 import {
+  getComplainTypesController,
   createComplainTicketController,
   getAllComplainTicketsController,
   getComplainTicketByIdController,
@@ -10,6 +11,13 @@ import {
 } from '../../../controllers/User/support/index.js';
 
 const router = express.Router();
+
+registerRoute({
+  router,
+  route: '/types',
+  get_middlewares: [authenticateUser],
+  get_method: getComplainTypesController,
+});
 
 registerRoute({
   router,

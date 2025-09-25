@@ -1,5 +1,6 @@
 import { handleResponse } from '../../../utils/handleRespone.js';
 import {
+  getComplainTypes,
   createComplainTicket,
   getAllComplainTickets,
   getComplainTicketById,
@@ -7,6 +8,17 @@ import {
 } from '../../../services/User/support/index.js';
 import { validateComplainTicket } from '../../../validations/user/supportValidators.js';
 import { validatePagination } from '../../../validations/pagination.js';
+
+export const getComplainTypesController = async (req, res) =>
+  handleResponse(
+    {
+      handler: getComplainTypes,
+      handlerParams: [req.user],
+      successMessage: 'Complain types fetched successfully',
+    },
+    req,
+    res,
+  );
 
 export const createComplainTicketController = async (req, res) =>
   handleResponse(

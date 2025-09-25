@@ -5,6 +5,11 @@ import Ride from '../models/Ride.js';
 import Report from '../models/Report.js';
 import mongoose from 'mongoose';
 import { generateUniqueId } from '../utils/auth.js';
+import { COMPLAIN_TYPES } from '../enums/complainTypes.js';
+
+export const findComplainTypes = () => {
+  return COMPLAIN_TYPES;
+};
 
 export const createComplain = async (payload) => {
   const ride = await Ride.findOne({ _id: payload.bookingId }).lean();
