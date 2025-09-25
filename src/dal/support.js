@@ -195,7 +195,7 @@ export const getAllComplainTickets = async ({
 };
 
 export const findComplainById = async (id) =>
-  ComplainModel.findById(id).populate('userId').lean();
+  ComplainModel.findById(id).populate('userId bookingId').lean();
 
 export const updateComplaniStatusById = async (id, status) =>
   ComplainModel.findByIdAndUpdate(id, { status }, { new: true })
