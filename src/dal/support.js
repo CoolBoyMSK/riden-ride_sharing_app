@@ -58,6 +58,7 @@ export const findComplains = async (userId, { page = 1, limit = 10 } = {}) => {
 
   const [complains, total] = await Promise.all([
     ComplainModel.find({ userId })
+      .populate('userId bookingId')
       .skip(skip)
       .limit(limit)
       .sort({ createdAt: -1 }), // ✅ Optional: newest first
