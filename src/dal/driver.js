@@ -60,7 +60,7 @@ export const findDriver = async (driverId) => {
     // Lookup bookings for this driver
     {
       $lookup: {
-        from: 'bookings',
+        from: 'rides',
         let: { driverId: '$_id' },
         pipeline: [
           { $match: { $expr: { $eq: ['$driverId', '$$driverId'] } } },
