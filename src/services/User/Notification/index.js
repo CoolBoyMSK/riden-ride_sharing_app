@@ -13,12 +13,16 @@ export const getNotificationSettings = async (user, resp) => {
       return resp;
     }
 
-    const settings = await findNotificationSettings(isUser._id);
+    console.log(isUser);
+
+    const settings = await findNotificationSettings(isUser.userId._id);
     if (!settings) {
       resp.error = true;
       resp.error_message = 'Failed to fetch settings';
       return resp;
     }
+
+    console.log(settings);
 
     resp.data = settings;
     return resp;
@@ -41,7 +45,7 @@ export const toggleNotification = async (user, { type }, resp) => {
     }
 
     const path = `notifications.${type}`;
-    const success = await updateNotificaition(isUser._id, [
+    const success = await updateNotificaition(isUser.userId._id, [
       {
         $set: {
           [path]: { $not: `$${path}` },
