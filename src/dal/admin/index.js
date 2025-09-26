@@ -85,131 +85,86 @@ export const findFinishedBookings = async ({
   fromDate,
   toDate,
 }) => {
-  const safePage =
-    Number.isInteger(Number(page)) && Number(page) > 0 ? Number(page) : 1;
-  const safeLimit =
-    Number.isInteger(Number(limit)) && Number(limit) > 0 ? Number(limit) : 10;
-  const skip = (safePage - 1) * safeLimit;
+  const safePage = Number(page) > 0 ? Number(page) : 1;
+  const safeLimit = Number(limit) > 0 ? Number(limit) : 10;
 
-  // Escape and normalize search
+  const finishedStatuses = [
+    'RIDE_COMPLETED',
+    'CANCELLED_BY_PASSENGER',
+    'CANCELLED_BY_DRIVER',
+    'CANCELLED_BY_SYSTEM',
+  ];
+
+  // Build initial date/status match
+  const match = { status: { $in: finishedStatuses } };
+  if (fromDate || toDate) {
+    match.createdAt = {};
+    if (fromDate) match.createdAt.$gte = new Date(fromDate);
+    if (toDate) match.createdAt.$lte = new Date(`${toDate}T23:59:59.999Z`);
+  }
+
+  // Load everything with passenger/driver populated
+  const allBookings = await Booking.find(match)
+    .populate({
+      path: 'passengerId',
+      populate: { path: 'userId', select: 'name email phoneNumber' },
+    })
+    .populate({
+      path: 'driverId',
+      populate: { path: 'userId', select: 'name email phoneNumber' },
+    })
+    .lean();
+
+  // Escape regex safely
   const safeSearch = typeof search === 'string' ? search.trim() : '';
   const escapedSearch = safeSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = safeSearch ? new RegExp(escapedSearch, 'i') : null;
 
-  const dateFilter = {};
-  if (fromDate) {
-    const start = new Date(fromDate);
-    if (!isNaN(start)) dateFilter.$gte = start;
-  }
-  if (toDate) {
-    const end = new Date(`${toDate}T23:59:59.999Z`);
-    if (!isNaN(end)) dateFilter.$lte = end;
-  }
+  // Filter in JS for guaranteed accuracy
+  const filtered = regex
+    ? allBookings.filter((b) => {
+        const passenger = b.passengerId?.userId || {};
+        const driver = b.driverId?.userId || {};
+        return (
+          regex.test(passenger.name || '') ||
+          regex.test(passenger.email || '') ||
+          regex.test(passenger.phoneNumber || '') ||
+          regex.test(driver.name || '') ||
+          regex.test(driver.email || '') ||
+          regex.test(driver.phoneNumber || '')
+        );
+      })
+    : allBookings;
 
-  const [result] = await Booking.aggregate([
-    // Lookup passenger user
-    {
-      $lookup: {
-        from: 'users',
-        localField: 'passengerId.userId',
-        foreignField: '_id',
-        as: 'passengerUser',
-      },
+  // Sort newest first
+  filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  const total = filtered.length;
+  const start = (safePage - 1) * safeLimit;
+  const paged = filtered.slice(start, start + safeLimit);
+
+  // Map to desired shape
+  const data = paged.map((b) => ({
+    _id: b._id,
+    rideId: b.rideId,
+    status: b.status,
+    createdAt: b.createdAt,
+    updatedAt: b.updatedAt,
+    actualFare: b.actualFare,
+    passenger: {
+      name: b.passengerId?.userId?.name || '',
+      email: b.passengerId?.userId?.email || '',
+      phoneNumber: b.passengerId?.userId?.phoneNumber || '',
     },
-    { $unwind: { path: '$passengerUser', preserveNullAndEmptyArrays: true } },
-
-    // Lookup driver user
-    {
-      $lookup: {
-        from: 'users',
-        localField: 'driverId.userId',
-        foreignField: '_id',
-        as: 'driverUser',
-      },
+    driver: {
+      name: b.driverId?.userId?.name || '',
+      email: b.driverId?.userId?.email || '',
+      phoneNumber: b.driverId?.userId?.phoneNumber || '',
     },
-    { $unwind: { path: '$driverUser', preserveNullAndEmptyArrays: true } },
-
-    // Build clean passenger and driver objects
-    {
-      $addFields: {
-        passenger: {
-          name: '$passengerUser.name',
-          email: '$passengerUser.email',
-          phoneNumber: '$passengerUser.phoneNumber',
-        },
-        driver: {
-          name: '$driverUser.name',
-          email: '$driverUser.email',
-          phoneNumber: '$driverUser.phoneNumber',
-        },
-      },
-    },
-
-    // Match filters
-    {
-      $match: {
-        status: {
-          $in: [
-            'RIDE_COMPLETED',
-            'CANCELLED_BY_PASSENGER',
-            'CANCELLED_BY_DRIVER',
-            'CANCELLED_BY_SYSTEM',
-          ],
-        },
-        ...(safeSearch
-          ? {
-              $or: [
-                { 'passenger.name': { $regex: escapedSearch, $options: 'i' } },
-                { 'passenger.email': { $regex: escapedSearch, $options: 'i' } },
-                {
-                  'passenger.phoneNumber': {
-                    $regex: escapedSearch,
-                    $options: 'i',
-                  },
-                },
-                { 'driver.name': { $regex: escapedSearch, $options: 'i' } },
-                { 'driver.email': { $regex: escapedSearch, $options: 'i' } },
-                {
-                  'driver.phoneNumber': {
-                    $regex: escapedSearch,
-                    $options: 'i',
-                  },
-                },
-              ],
-            }
-          : {}),
-        ...(Object.keys(dateFilter).length ? { createdAt: dateFilter } : {}),
-      },
-    },
-
-    { $sort: { createdAt: -1 } },
-
-    {
-      $facet: {
-        metadata: [{ $count: 'total' }],
-        data: [
-          { $skip: skip },
-          { $limit: safeLimit },
-          {
-            $project: {
-              _id: 1,
-              rideId: 1,
-              status: 1,
-              createdAt: 1,
-              updatedAt: 1,
-              estimatedFare: 1,
-              passenger: 1,
-              driver: 1,
-            },
-          },
-        ],
-      },
-    },
-  ]);
-
-  const total = result?.metadata?.[0]?.total || 0;
+  }));
 
   return {
-    data: result?.data || [],
+    data,
     total,
     page: safePage,
     limit: safeLimit,
@@ -363,6 +318,28 @@ export const findBookingById = async (id) => {
     },
     { $unwind: { path: '$driverUser', preserveNullAndEmptyArrays: true } },
 
+    {
+      $lookup: {
+        from: 'feedbacks',
+        localField: 'driverRating',
+        foreignField: '_id',
+        as: 'driverFeedback',
+      },
+    },
+    { $unwind: { path: '$driverFeedback', preserveNullAndEmptyArrays: true } },
+
+    {
+      $lookup: {
+        from: 'feedbacks',
+        localField: 'passengerRating',
+        foreignField: '_id',
+        as: 'passengerFeedback',
+      },
+    },
+    {
+      $unwind: { path: '$passengerFeedback', preserveNullAndEmptyArrays: true },
+    },
+
     // ✅ Final projection including vehicle details
     {
       $project: {
@@ -375,11 +352,18 @@ export const findBookingById = async (id) => {
         pickupLocation: 1,
         dropoffLocation: 1,
         actualDistance: 1,
-        actualDuration: 1,
-        passengerRating: 1,
-        driverRating: 1,
         paymentMethod: 1,
-
+        tipBreakdown: {
+          amount: '$tipBreakdown.amount',
+        },
+        passengerFeedback: {
+          rating: '$passengerFeedback.rating',
+          review: '$passengerFeedback.feedback',
+        },
+        driverFeedback: {
+          rating: '$driverFeedback.rating',
+          feedback: '$driverFeedback.feedback',
+        },
         passenger: {
           _id: '$passengerUser._id',
           name: { $ifNull: ['$passengerUser.name', 'N/A'] },

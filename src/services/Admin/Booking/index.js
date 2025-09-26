@@ -18,13 +18,13 @@ export const getCompletedBookings = async (
       return resp;
     }
 
-    const bookings = await findFinishedBookings(
+    const bookings = await findFinishedBookings({
       page,
       limit,
       search,
       fromDate,
       toDate,
-    );
+    });
     if (!bookings) {
       resp.error = true;
       resp.error_message = 'Failed to fetch bookings';
