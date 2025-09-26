@@ -190,6 +190,8 @@ export const setDefaultPayoutMethod = async (user, { id }, resp) => {
       return resp;
     }
 
+    console.log(success)
+
     resp.data = success;
     return resp;
   } catch (error) {

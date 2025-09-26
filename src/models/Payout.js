@@ -7,15 +7,15 @@ const payoutSchema = new mongoose.Schema(
       ref: 'Driver',
       required: true,
     },
-    amount: {
+    balance: {
       type: Number,
-      required: true,
-      min: 10,
+      min: 0,
+      default: 0,
     },
-    type: {
-      type: String,
-      enum: [],
-      required: true,
+    rides: {
+      type: Number,
+      min: 0,
+      default: 0,
     },
   },
   { timestamps: true },

@@ -18,7 +18,7 @@ export const createRecoveryNumber = async (user, { phoneNumber }, resp) => {
       return resp;
     }
 
-    const success = await addRecoveryNumber(isUser._id, phoneNumber);
+    const success = await addRecoveryNumber(isUser.userId._id, phoneNumber);
     if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to add recovery phone number';
@@ -45,7 +45,7 @@ export const getRecoveryNumbers = async (user, resp) => {
       return resp;
     }
 
-    const recoveryNumbers = await findRecovertNumbersbyUserId(isUser._id);
+    const recoveryNumbers = await findRecovertNumbersbyUserId(isUser.userId._id);
     if (!recoveryNumbers) {
       resp.error = true;
       resp.error_message = 'Failed to fetch recovery phone numbers';
@@ -78,7 +78,7 @@ export const editRecoveryNumber = async (
     }
 
     const updated = await updateRecoveryPhoneNumber(
-      isUser._id,
+      isUser.userId._id,
       numberId,
       phoneNumber,
     );
@@ -108,7 +108,7 @@ export const removeRecoveryNumber = async (user, { numberId }, resp) => {
       return resp;
     }
 
-    const deleted = await deleteRecoveryNumber(isUser._id, numberId);
+    const deleted = await deleteRecoveryNumber(isUser.userId._id, numberId);
     if (!deleted) {
       resp.error = true;
       resp.error_message = 'Failed to delete recovery phone number';
@@ -135,7 +135,7 @@ export const fetchPasskeyRegisterOptions = async (user, resp) => {
       return resp;
     }
 
-    const success = await getPasskeyRegisterOptions(isUser._id);
+    const success = await getPasskeyRegisterOptions(isUser.userId._id);
     if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to register passkey';
@@ -162,7 +162,7 @@ export const verifyAndSavePasskeyInDb = async (user, { payload }, resp) => {
       return resp;
     }
 
-    const success = await verifyPasskeyRegistration(isUser._id, payload);
+    const success = await verifyPasskeyRegistration(isUser.userId._id, payload);
     if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to save passkeys';
@@ -188,7 +188,7 @@ export const toggle2FAStatus = async (user, resp) => {
       return resp;
     }
 
-    const success = await update2FAStatus(isUser._id);
+    const success = await update2FAStatus(isUser.userId._id);
     if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to save passkeys';

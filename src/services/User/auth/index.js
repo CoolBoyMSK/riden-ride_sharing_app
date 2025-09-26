@@ -27,6 +27,7 @@ import {
   createPassengerStripeCustomer,
   createDriverStripeAccount,
   createWallet,
+  createPayout,
 } from '../../../dal/stripe.js';
 // import { otpQueue } from '../../../queues/otpQueue.js';
 import { verifyOtp, sendOtp } from '../../../utils/otpUtils.js';
@@ -44,12 +45,15 @@ export const signupUser = async (
   if (users) {
     user = await findUserById(users.id);
   }
+
+  console.log(user);
   const hashed = await hashPassword(password);
 
   if (users && users.roles.includes('driver')) {
     let isEmail = await findUserByEmail(email);
+    console.log(isEmail);
     if (isEmail) {
-      if (isEmail._id.toString() !== user._id.toString()) {
+      if (isEmail._id.toString() !== user.userId._id.toString()) {
         resp.error = true;
         resp.error_message = 'Email already in use';
         return resp;
@@ -57,7 +61,7 @@ export const signupUser = async (
     }
 
     user = await updateUserById(
-      { _id: user._id },
+      { _id: user.userId._id },
       {
         email,
         name,
@@ -243,6 +247,8 @@ export const loginUser = async (
           const driverPayload = { status: success.status };
           if (success.status === 'offline') driverPayload.status = 'online';
 
+          console.log(driverPayload);
+
           await updateDriverByUserId(user._id, {
             driverPayload,
           });
@@ -292,9 +298,14 @@ export const loginUser = async (
               isPhoneVerified: true,
               // For Testing
             });
-            const uniqueId = generateUniqueId(user.roles[0], user._id);
+            if (!user) throw new Error('Failed to create user');
 
-            await createDriverProfile(user._id, uniqueId);
+            const uniqueId = generateUniqueId(user.roles[0], user._id);
+            const driver = await createDriverProfile(user._id, uniqueId);
+            if (!driver) throw new Error('Failed to create driver profile');
+
+            const payout = await createPayout(driver._id);
+            if (!payout) throw new Error('Failed to create driver payout');
 
             // For Testing
             const payload = { id: user._id, roles: user.roles };
@@ -341,12 +352,14 @@ export const loginUser = async (
           // For Production
           const success = await updateDriverByUserId(user._id, {
             isActive: true,
+            status: 'online',
           });
           if (!success) {
             resp.error = true;
             resp.error_message = 'Failed to activate passenger';
             return resp;
           }
+
           // For Testing
           const payload = { id: user._id, roles: user.roles };
           resp.data = {

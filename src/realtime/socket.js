@@ -2300,6 +2300,123 @@ export const initSocket = (server) => {
       }
     });
 
+    socket.on('ride:pay_driver', async ({ rideId }) => {
+      const objectType = 'tip-driver';
+      try {
+        const ride = await findRideById(rideId);
+        if (!ride) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'NOT_FOUND',
+            message: 'Ride not found',
+          });
+        } else if (ride.status !== 'RIDE_COMPLETED') {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'INVALID_STATUS',
+            message: `Cannot rate driver. Current ride status: ${ride.status}`,
+          });
+        } else if (!ride.actualFare || ride.actualFare <= 0) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'INVALID_AMOUNT',
+            message: `Actual fare must be greter than 0`,
+          });
+        } else if (ride.paymentStatus === 'COMPLETED') {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'ALLREADY_PAID',
+            message: `You have already paid $${ride.actualFare} of fare`,
+          });
+        }
+
+        const passenger = await findPassengerById(ride.passengerId._id);
+        const driver = await findDriverById(ride.driverId._id);
+
+        if (!passenger || !driver) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'NOT_FOUND',
+            message: `Driver or Passenger not found`,
+          });
+        }
+
+        socket.join(`ride:${ride._id}`);
+        if (ride.paymentMethod === 'WALLET') {
+          const fare = await payDriverFromWallet(
+            passenger,
+            driver,
+            ride,
+            ride.actualFare,
+            'RIDE',
+          );
+          if (!fare.success) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'PAYMENT_FAILED',
+              message: fare.error,
+            });
+          }
+
+          await updateRideById(ride._id, { paymentStatus: 'COMPLETED' });
+          io.to(`ride:${ride._id}`).emit('ride:pay_driver', {
+            success: true,
+            objectType,
+            data: {
+              ride,
+              transaction: fare.transaction,
+            },
+            message: 'Fare successfully paid to driver',
+          });
+        }
+
+        if (ride.paymentMethod === 'CARD') {
+          const fare = await passengerPaysDriver(
+            passenger,
+            driver,
+            ride,
+            ride.actualFare,
+            passenger.defaultCardId,
+            'RIDE',
+          );
+          if (!fare.payment || !fare.transaction) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'PAYMENT_FAILED',
+              message: `Failed to pay ride fare`,
+            });
+          }
+
+          await updateRideById(ride._id, { paymentStatus: 'COMPLETED' });
+          io.to(`ride:${ride._id}`).emit('ride:pay_driver', {
+            success: true,
+            objectType,
+            data: {
+              ride,
+              payment: fare.payment,
+              transaction: fare.transaction,
+            },
+            message: 'Tip successfully send to driver',
+          });
+        }
+      } catch (error) {
+        console.error(`SOCKET ERROR: ${error}`);
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: `${error.code || 'SOCKET_ERROR'}`,
+          message: `SOCKET ERROR: ${error.message}`,
+        });
+      }
+    });
+
     // chat Events
     socket.on('ride:get_chat', async ({ rideId }) => {
       const objectType = 'ride-chat';

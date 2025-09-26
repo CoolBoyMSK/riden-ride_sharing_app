@@ -29,13 +29,17 @@ const transactionSchema = new mongoose.Schema(
     },
     category: {
       type: String,
-      enum: ['TIP', 'PAYOUT', 'TOP-UP', 'RIDE'],
+      enum: ['TIP', 'PAYOUT', 'TOP-UP', 'RIDE', 'INSTANT_PAYOUT', 'TRANSFER'], // TRANSFER = Normal Payout, PAYOUT = Driver Balance
       required: true,
     },
     amount: {
       type: Number,
       required: true,
       min: [0.01, 'Amount must be greater than zero'],
+    },
+    rides: {
+      type: Number,
+      default: 0,
     },
     metadata: {
       type: Object,

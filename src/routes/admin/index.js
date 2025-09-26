@@ -8,6 +8,7 @@ import fareRouter from './FareManagement/index.js';
 import bookingRouter from './Booking/index.js';
 import feedbackRouter from './Feedback/index.js';
 import supportRouter from './Support/index.js';
+import payoutRouter from './Payout/index.js';
 
 const adminRouter = express.Router();
 
@@ -20,5 +21,6 @@ adminRouter.use('/fare-management', fareRouter);
 adminRouter.use('/bookings', bookingRouter);
 adminRouter.use('/feedback', feedbackRouter);
 adminRouter.use('/support', supportRouter);
+adminRouter.use('/payout', payoutRouter);
 
 export default adminRouter;

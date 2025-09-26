@@ -1,10 +1,11 @@
 import Stripe from 'stripe';
-import env from '../config/envConfig.js';
 const stripe = new Stripe(env.STRIPE_SECRET_KEY);
+import TransactionModel from '../models/Transaction.js';
 import PassengerModel from '../models/Passenger.js';
 import DriverModel from '../models/Driver.js';
 import WalletModel from '../models/Wallet.js';
-import TransactionModel from '../models/Transaction.js';
+import PayoutModel from '../models/Payout.js';
+import env from '../config/envConfig.js';
 
 const savePassengerPaymentMethod = async (passengerId, cardId) =>
   PassengerModel.findByIdAndUpdate(
@@ -77,6 +78,34 @@ export const setDefaultAccount = async (stripeAccountId, defaultAccountId) =>
   DriverModel.findOneAndUpdate(
     { stripeAccountId },
     { defaultAccountId },
+    { new: true },
+  );
+
+export const createPayout = async (driverId) =>
+  PayoutModel.create({ driverId });
+
+export const getPayout = async (driverId) =>
+  PayoutModel.findOne({ driverId }).lean();
+
+export const increasePayoutBalance = async (driverId, balance, rides) =>
+  PayoutModel.findOneAndUpdate(
+    { driverId },
+    {
+      $$inc: {
+        balance,
+        rides,
+      },
+    },
+    { new: true },
+  );
+
+export const decreasePayoutBalance = async (driverId) =>
+  PayoutModel.findOneAndUpdate(
+    { driverId },
+    {
+      balance: 0,
+      rides: 0,
+    },
     { new: true },
   );
 
@@ -189,27 +218,18 @@ export const addFundsToWallet = async (
   paymentMethodId,
   category,
 ) => {
-  // const paymentIntent = await stripe.paymentIntents.create({
-  //   amount: amount * 100,
-  //   currency: 'cad',
-  //   customer: passenger.stripeCustomerId,
-  //   payment_method: paymentMethodId,
-  //   off_session: true,
-  //   confirm: true,
-  // });
-
   const paymentIntent = await stripe.paymentIntents.create({
     amount: amount * 100,
     currency: 'cad',
     customer: passenger.stripeCustomerId,
-    payment_method: 'pm_card_visa', // Stripe test card
-    off_session: true,
+    payment_method: paymentMethodId,
     confirm: true,
-    automatic_payment_methods: {
-      enabled: true,
-      allow_redirects: 'never', // prevent redirect-based PMs
-    },
+    off_session: true,
   });
+
+  if (paymentIntent.status !== 'succeeded') {
+    throw new Error('Top-up failed');
+  }
 
   const wallet = await increaseWalletBalance(passenger._id, amount);
 
@@ -220,13 +240,54 @@ export const addFundsToWallet = async (
     category,
     amount,
     metadata: paymentIntent,
-    status: paymentIntent.status || 'failed',
+    status: paymentIntent.status,
     referenceId: paymentIntent.id,
     receiptUrl: paymentIntent.id,
   });
 
   return paymentIntent;
 };
+
+// export const payDriverFromWallet = async (
+//   passenger,
+//   driver,
+//   ride,
+//   amount,
+//   category,
+// ) => {
+//   try {
+//     const wallet = await getWallet(passenger._id);
+//     if (!wallet) throw new Error('Wallet not found');
+//     if (wallet.balance < amount) throw new Error('Insufficient wallet balance');
+
+//     const payment = await stripe.transfers.create({
+//       amount: amount * 100,
+//       currency: 'cad',
+//       destination: driver.stripeAccountId,
+//     });
+
+//     await decreaseWalletBalance(passenger._id, amount);
+
+//     const transaction = await createTransaction({
+//       passengerId: passenger._id,
+//       driverId: driver._id,
+//       ride: ride._id,
+//       walletId: wallet._id,
+//       type: 'DEBIT',
+//       category,
+//       amount,
+//       metadata: payment,
+//       status: payment.balance_transaction ? 'succeeded' : 'failed',
+//       referenceId: payment.id,
+//       receiptUrl: payment.id,
+//     });
+
+//     return { payment, transaction };
+//   } catch (error) {
+//     console.error(`SOCKET ERROR in payDriverFromWallet: ${error}`);
+//     return { error: error.message };
+//   }
+// };
 
 export const payDriverFromWallet = async (
   passenger,
@@ -240,32 +301,44 @@ export const payDriverFromWallet = async (
     if (!wallet) throw new Error('Wallet not found');
     if (wallet.balance < amount) throw new Error('Insufficient wallet balance');
 
-    const payment = await stripe.transfers.create({
-      amount: amount * 100,
-      currency: 'cad',
-      destination: driver.stripeAccountId,
-    });
+    const payout = await getPayout(driver._id);
+    if (!payout) throw new Error('Driver Payout not found');
 
     await decreaseWalletBalance(passenger._id, amount);
+    await increasePayoutBalance(driver._id, amount, 1);
 
     const transaction = await createTransaction({
       passengerId: passenger._id,
       driverId: driver._id,
-      ride: ride._id,
+      rideId: ride._id,
       walletId: wallet._id,
       type: 'DEBIT',
       category,
       amount,
-      metadata: payment,
-      status: payment.balance_transaction ? 'succeeded' : 'failed',
-      referenceId: payment.id,
-      receiptUrl: payment.id,
+      metadata: {},
+      status: 'succeeded',
+      referenceId: wallet._id,
+      receiptUrl: wallet._id,
     });
 
-    return { payment, transaction };
+    await createTransaction({
+      passengerId: passenger._id,
+      driverId: driver._id,
+      rideId: ride._id,
+      walletId: wallet._id,
+      type: 'CREDIT',
+      category: 'PAYOUT',
+      amount,
+      metadata: {},
+      status: 'succeeded',
+      referenceId: wallet._id,
+      receiptUrl: wallet._id,
+    });
+
+    return { success: true, transaction };
   } catch (error) {
-    console.error(`SOCKET ERROR in payDriverFromWallet: ${error}`);
-    return { error: error.message }; // ✅ Always return an object
+    console.error(`ERROR in payDriverFromWallet: ${error}`);
+    return { error: error.message };
   }
 };
 
@@ -277,6 +350,9 @@ export const passengerPaysDriver = async (
   paymentMethodId,
   category,
 ) => {
+  const payout = await getPayout(driver._id);
+  if (!payout) throw new Error('Driver Payout not found');
+
   const payment = await stripe.paymentIntents.create({
     amount: amount * 100,
     currency: 'cad',
@@ -284,12 +360,9 @@ export const passengerPaysDriver = async (
     payment_method: paymentMethodId,
     off_session: true,
     confirm: true,
-    transfer_data: {
-      destination: driver.stripeAccountId,
-    },
   });
 
-  console.log(payment);
+  await increasePayoutBalance(driver._id, amount, 1);
 
   const transaction = await createTransaction({
     passengerId: passenger._id,
@@ -299,9 +372,22 @@ export const passengerPaysDriver = async (
     category,
     amount,
     metadata: payment,
-    status: payment.charges.data[0].status || 'failed',
+    status: payment.status || 'failed',
     referenceId: payment.id,
-    receiptUrl: payment.charges.data[0].receipt_url || '',
+    receiptUrl: payment.id,
+  });
+
+  await createTransaction({
+    passengerId: passenger._id,
+    driverId: driver._id,
+    rideId: ride._id,
+    type: 'CREDIT',
+    category: 'PAYOUT',
+    amount,
+    metadata: payment,
+    status: payment.status || 'failed',
+    referenceId: payment.id,
+    receiptUrl: payment.id,
   });
 
   return { payment, transaction };
@@ -414,13 +500,52 @@ export const setDefaultExternalAccount = async (
   return updatedAccount;
 };
 
-export const transferToDriverBank = async (driver, amount) => {
-  const payout = await stripe.payouts.create({
-    amount: amount * 100, // cents
+export const transferAndPayoutDriver = async (driver, amount) => {
+  const payout = await getPayout(driver._id);
+  if (!payout) throw new Error('Driver Payout not found');
+
+  const transfer = await stripe.transfers.create({
+    amount: amount * 100,
     currency: 'cad',
-    destination: driver.defaultAccountId,
-    stripe_account: driver.stripeAccountId, // important!
+    destination: driver.stripeAccountId,
+    description: `Instant Payout Request`,
   });
 
-  return payout;
+  // Step 2: Instantly payout to driver’s debit card
+  const instantPayout = await stripe.payouts.create(
+    {
+      amount: amount * 100,
+      currency: 'cad',
+      method: 'instant',
+    },
+    {
+      stripeAccount: driver.stripeAccountId,
+    },
+  );
+
+  await decreasePayoutBalance(driver._id);
+
+  await createTransaction({
+    driverId: driver._id,
+    type: 'DEBIT',
+    category: 'INSTANT-PAYOUT',
+    amount,
+    metadata: instantPayout,
+    status: 'succeeded',
+    referenceId: instantPayout.id,
+    receiptUrl: instantPayout.id,
+  });
+
+  await createTransaction({
+    driverId: driver._id,
+    type: 'CREDIT',
+    category: 'INSTANT-PAYOUT',
+    amount,
+    metadata: instantPayout,
+    status: 'succeeded',
+    referenceId: instantPayout.id,
+    receiptUrl: instantPayout.id,
+  });
+
+  return { transfer, instantPayout };
 };
