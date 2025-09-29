@@ -446,6 +446,12 @@ export const onboardDriverStripeAccount = async (user, driver, data) => {
     },
   });
 
+  await DriverModel.findByIdAndUpdate(
+    driver._id,
+    { isVerified: true },
+    { new: true },
+  ).lean();
+
   return account.id;
 };
 

@@ -119,6 +119,10 @@ const driverSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    isVerified: {
+      type: Boolean,
+      default: false,
+    },
     isRestricted: {
       type: Boolean,
       default: false,
