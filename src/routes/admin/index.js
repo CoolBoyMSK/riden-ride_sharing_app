@@ -1,5 +1,7 @@
 import express from 'express';
 import authRouter from './Auth/index.js';
+import dashboardRouter from './Dashboard/index.js';
+import analyticsRouter from './Analytics/index.js';
 import adminsRouter from './admins/index.js';
 import promoCodeRouter from './promo_codes/index.js';
 import passengersRouter from './Passengers/index.js';
@@ -13,6 +15,8 @@ import payoutRouter from './Payout/index.js';
 const adminRouter = express.Router();
 
 adminRouter.use('/auth', authRouter);
+adminRouter.use('/dashboard', dashboardRouter);
+adminRouter.use('/analytics', analyticsRouter);
 adminRouter.use('/manage', adminsRouter);
 adminRouter.use('/promo-code', promoCodeRouter);
 adminRouter.use('/passengers', passengersRouter);

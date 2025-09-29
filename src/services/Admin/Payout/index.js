@@ -5,7 +5,7 @@ import {
   updateInstatnPayoutRequest,
   countTotalPendingRequests,
 } from '../../../dal/payout.js';
-import { transferAndPayoutDriver } from '../../../dal/stripe.js';
+import { instantPayoutDriver } from '../../../dal/stripe.js';
 
 export const getUpcomingPayouts = async (
   user,
@@ -105,8 +105,8 @@ export const editInstantPayoutRequest = async (user, { id, status }, resp) => {
     }
 
     let success;
-    if (status === 'approved') {
-      success = await transferAndPayoutDriver(data.driverId, data.balance);
+    if (status === 'APPROVED') {
+      success = await instantPayoutDriver(data.driverId, data._id);
     }
 
     resp.data = success;

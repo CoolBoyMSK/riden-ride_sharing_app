@@ -1,12 +1,14 @@
 import { handleResponse } from '../../../../utils/handleRespone.js';
 import {
   addPayoutMethod,
-  getDriverOnBoardingLink,
+  onBoardDriver,
+  getDriverStripeAccount,
   getAllPayoutMethods,
   getPayoutMethodById,
   updatePayoutMethod,
   deletePayoutMethod,
   setDefaultPayoutMethod,
+  sendInstantPayoutRequest,
 } from '../../../../services/User/driver/payment/index.js';
 
 export const addPayoutMethodController = (req, res) =>
@@ -21,13 +23,25 @@ export const addPayoutMethodController = (req, res) =>
     res,
   );
 
-export const getDriverOnBoardingLinkController = (req, res) =>
+export const onBoardDriverController = (req, res) =>
   handleResponse(
     {
-      handler: getDriverOnBoardingLink,
+      handler: onBoardDriver,
+      validationFn: null,
+      handlerParams: [req.user, req.body],
+      successMessage: 'Driver onboard successfully',
+    },
+    req,
+    res,
+  );
+
+export const getDriverStripeAccountController = (req, res) =>
+  handleResponse(
+    {
+      handler: getDriverStripeAccount,
       validationFn: null,
       handlerParams: [req.user],
-      successMessage: 'Onboarding Link generated successfully',
+      successMessage: 'Stripe account created successfully',
     },
     req,
     res,
@@ -88,6 +102,18 @@ export const setDefaultPayoutMethodController = (req, res) =>
       validationFn: null,
       handlerParams: [req.user, req.params],
       successMessage: 'Default payout method successfully',
+    },
+    req,
+    res,
+  );
+
+export const sendInstantPayoutRequestController = (req, res) =>
+  handleResponse(
+    {
+      handler: sendInstantPayoutRequest,
+      validationFn: null,
+      handlerParams: [req.user],
+      successMessage: 'Payout request sent successfully',
     },
     req,
     res,

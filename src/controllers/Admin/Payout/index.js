@@ -4,6 +4,7 @@ import {
   getPreviousPayouts,
   getInstantPayoutRequests,
   editInstantPayoutRequest,
+  getInstantPayoutRequestsCount,
 } from '../../../services/Admin/Payout/index.js';
 
 export const getUpcomingPayoutsController = (req, res) =>

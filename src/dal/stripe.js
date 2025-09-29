@@ -1,11 +1,15 @@
 import Stripe from 'stripe';
-const stripe = new Stripe(env.STRIPE_SECRET_KEY);
+import mongoose from 'mongoose';
+import PayoutRequestModel from '../models/InstantPayoutRequest.js';
 import TransactionModel from '../models/Transaction.js';
 import PassengerModel from '../models/Passenger.js';
 import DriverModel from '../models/Driver.js';
 import WalletModel from '../models/Wallet.js';
 import PayoutModel from '../models/Payout.js';
+import RideModel from '../models/Ride.js';
 import env from '../config/envConfig.js';
+
+const stripe = new Stripe(env.STRIPE_SECRET_KEY);
 
 const savePassengerPaymentMethod = async (passengerId, cardId) =>
   PassengerModel.findByIdAndUpdate(
@@ -81,33 +85,86 @@ export const setDefaultAccount = async (stripeAccountId, defaultAccountId) =>
     { new: true },
   );
 
-export const createPayout = async (driverId) =>
-  PayoutModel.create({ driverId });
+export const createPayout = async (
+  driverId,
+  amount,
+  payoutType,
+  rides,
+  payoutRequestId,
+  status,
+) =>
+  PayoutModel.create({
+    driverId,
+    amount,
+    payoutType,
+    rides,
+    payoutRequestId,
+    status,
+  });
 
-export const getPayout = async (driverId) =>
-  PayoutModel.findOne({ driverId }).lean();
-
-export const increasePayoutBalance = async (driverId, balance, rides) =>
-  PayoutModel.findOneAndUpdate(
-    { driverId },
+export const getDriverUnpaidBalance = async (driverId) => {
+  const completedRides = await RideModel.aggregate([
     {
-      $$inc: {
-        balance,
-        rides,
+      $match: {
+        driverId: new mongoose.Types.ObjectId(driverId),
+        status: 'RIDE_COMPLETED',
+        paymentStatus: 'COMPLETED',
       },
     },
-    { new: true },
-  );
-
-export const decreasePayoutBalance = async (driverId) =>
-  PayoutModel.findOneAndUpdate(
-    { driverId },
     {
-      balance: 0,
-      rides: 0,
+      $project: {
+        rideId: '$_id',
+        fare: { $ifNull: ['$actualFare', 0] },
+        tip: { $ifNull: ['$tipBreakdown.amount', 0] },
+        isDestinationRide: 1,
+      },
     },
-    { new: true },
-  );
+    {
+      $addFields: {
+        platformFee: {
+          $cond: [
+            { $eq: ['$isDestinationRide', true] },
+            { $multiply: ['$fare', 0.45] }, // ✅ fee only on fare
+            { $multiply: ['$fare', 0.25] },
+          ],
+        },
+        totalRideEarnings: { $add: ['$fare', '$tip'] }, // fare + tip
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        rideIds: { $push: '$rideId' }, // ✅ collect ride IDs
+        totalEarnings: { $sum: '$totalRideEarnings' }, // fare + tip
+        totalTips: { $sum: '$tip' },
+        totalFares: { $sum: '$fare' },
+        totalPlatformFees: { $sum: '$platformFee' },
+        rideCount: { $sum: 1 },
+      },
+    },
+  ]);
+
+  const totalEarnings = completedRides[0]?.totalEarnings || 0;
+  const totalFares = completedRides[0]?.totalFares || 0;
+  const totalTips = completedRides[0]?.totalTips || 0;
+  const totalPlatformFees = completedRides[0]?.totalPlatformFees || 0;
+  const rideIds = completedRides[0]?.rideIds || [];
+
+  // ✅ driver gets: (fare - platformFee) + full tips
+  const netEarnings = totalFares - totalPlatformFees + totalTips;
+  const rideCount = completedRides[0]?.rideCount || 0;
+
+  return {
+    totalFares,
+    totalTips,
+    totalPlatformFees,
+    totalEarnings, // fares + tips before deductions
+    netEarnings, // after deducting platform fee (tips untouched)
+    rideCount,
+    rideIds, // ✅ return unpaid ride IDs
+    unpaidBalance: netEarnings,
+  };
+};
 
 // Passenger Flow
 export const createPassengerStripeCustomer = async (user, passenger) => {
@@ -248,47 +305,6 @@ export const addFundsToWallet = async (
   return paymentIntent;
 };
 
-// export const payDriverFromWallet = async (
-//   passenger,
-//   driver,
-//   ride,
-//   amount,
-//   category,
-// ) => {
-//   try {
-//     const wallet = await getWallet(passenger._id);
-//     if (!wallet) throw new Error('Wallet not found');
-//     if (wallet.balance < amount) throw new Error('Insufficient wallet balance');
-
-//     const payment = await stripe.transfers.create({
-//       amount: amount * 100,
-//       currency: 'cad',
-//       destination: driver.stripeAccountId,
-//     });
-
-//     await decreaseWalletBalance(passenger._id, amount);
-
-//     const transaction = await createTransaction({
-//       passengerId: passenger._id,
-//       driverId: driver._id,
-//       ride: ride._id,
-//       walletId: wallet._id,
-//       type: 'DEBIT',
-//       category,
-//       amount,
-//       metadata: payment,
-//       status: payment.balance_transaction ? 'succeeded' : 'failed',
-//       referenceId: payment.id,
-//       receiptUrl: payment.id,
-//     });
-
-//     return { payment, transaction };
-//   } catch (error) {
-//     console.error(`SOCKET ERROR in payDriverFromWallet: ${error}`);
-//     return { error: error.message };
-//   }
-// };
-
 export const payDriverFromWallet = async (
   passenger,
   driver,
@@ -301,11 +317,7 @@ export const payDriverFromWallet = async (
     if (!wallet) throw new Error('Wallet not found');
     if (wallet.balance < amount) throw new Error('Insufficient wallet balance');
 
-    const payout = await getPayout(driver._id);
-    if (!payout) throw new Error('Driver Payout not found');
-
     await decreaseWalletBalance(passenger._id, amount);
-    await increasePayoutBalance(driver._id, amount, 1);
 
     const transaction = await createTransaction({
       passengerId: passenger._id,
@@ -350,9 +362,6 @@ export const passengerPaysDriver = async (
   paymentMethodId,
   category,
 ) => {
-  const payout = await getPayout(driver._id);
-  if (!payout) throw new Error('Driver Payout not found');
-
   const payment = await stripe.paymentIntents.create({
     amount: amount * 100,
     currency: 'cad',
@@ -361,8 +370,6 @@ export const passengerPaysDriver = async (
     off_session: true,
     confirm: true,
   });
-
-  await increasePayoutBalance(driver._id, amount, 1);
 
   const transaction = await createTransaction({
     passengerId: passenger._id,
@@ -396,12 +403,12 @@ export const passengerPaysDriver = async (
 // Driver Flow
 export const createDriverStripeAccount = async (user, driver) => {
   const account = await stripe.accounts.create({
-    type: 'express',
-    country: 'CA', // ✅ Use Canada
+    type: 'custom', // or 'express'
+    country: 'CA',
     email: user.email,
-    business_type: 'individual',
     capabilities: {
       transfers: { requested: true },
+      card_payments: { requested: true },
     },
   });
 
@@ -411,13 +418,35 @@ export const createDriverStripeAccount = async (user, driver) => {
   return account.id;
 };
 
-export const generateDriverOnboardingLink = async (driver) => {
-  return await stripe.accountLinks.create({
-    account: driver.stripeAccountId,
-    refresh_url: 'https://yourapp.com/driver/onboarding-error',
-    return_url: 'https://yourapp.com/driver/onboarding-complete',
-    type: 'account_onboarding',
+export const onboardDriverStripeAccount = async (user, driver, data) => {
+  const required = await stripe.accounts.retrieve(driver.stripeAccountId);
+  console.log(required.requirements);
+
+  const account = await stripe.accounts.update(driver.stripeAccountId, {
+    business_type: 'individual',
+    business_profile: {
+      mcc: '4121',
+      product_description: 'Ride-hailing and transportation services',
+      url: 'https://api.riden.online/api',
+    },
+    individual: {
+      first_name: data.first_name,
+      last_name: data.last_name,
+      dob: data.dob,
+      email: user.email,
+      phone: '+14165550000',
+      address: data.address,
+      relationship: {
+        title: 'Driver',
+      },
+    },
+    tos_acceptance: {
+      date: Math.floor(Date.now() / 1000),
+      ip: '127.0.0.1',
+    },
   });
+
+  return account.id;
 };
 
 export const addDriverExternalAccount = async (driver, bankAccountData) => {
@@ -500,52 +529,74 @@ export const setDefaultExternalAccount = async (
   return updatedAccount;
 };
 
-export const transferAndPayoutDriver = async (driver, amount) => {
-  const payout = await getPayout(driver._id);
-  if (!payout) throw new Error('Driver Payout not found');
+export const instantPayoutDriver = async (driver, requestId) => {
+  const balance = await getDriverUnpaidBalance(driver._id);
+  if (balance.unpaidBalance <= 10)
+    throw new Error('Payout must be greater than $10');
 
   const transfer = await stripe.transfers.create({
-    amount: amount * 100,
+    amount: Math.round(balance.unpaidBalance * 100),
     currency: 'cad',
     destination: driver.stripeAccountId,
-    description: `Instant Payout Request`,
+    description: `Driver payout transfer`,
   });
 
-  // Step 2: Instantly payout to driver’s debit card
-  const instantPayout = await stripe.payouts.create(
+  const payout = await stripe.payouts.create(
     {
-      amount: amount * 100,
+      amount: Math.round(balance.unpaidBalance * 100),
       currency: 'cad',
-      method: 'instant',
     },
     {
       stripeAccount: driver.stripeAccountId,
     },
   );
 
-  await decreasePayoutBalance(driver._id);
+  await createPayout(
+    driver._id,
+    balance.unpaidBalance,
+    'INSTANT',
+    balance.rideIds,
+    requestId,
+    'SUCCESS',
+  );
 
   await createTransaction({
     driverId: driver._id,
     type: 'DEBIT',
     category: 'INSTANT-PAYOUT',
-    amount,
-    metadata: instantPayout,
+    amount: balance.unpaidBalance,
+    metadata: { transfer, payout },
     status: 'succeeded',
-    referenceId: instantPayout.id,
-    receiptUrl: instantPayout.id,
+    referenceId: payout.id,
+    receiptUrl: payout.id,
   });
 
   await createTransaction({
     driverId: driver._id,
     type: 'CREDIT',
     category: 'INSTANT-PAYOUT',
-    amount,
-    metadata: instantPayout,
+    amount: balance.unpaidBalance,
+    metadata: { transfer, payout },
     status: 'succeeded',
-    referenceId: instantPayout.id,
-    receiptUrl: instantPayout.id,
+    referenceId: payout.id,
+    receiptUrl: payout.id,
   });
 
-  return { transfer, instantPayout };
+  return { transfer, payout };
+};
+
+export const createPayoutRequest = async (driverId) => {
+  const { unpaidBalance, rideIds } = await getDriverUnpaidBalance(driverId);
+
+  if (unpaidBalance <= 9.99) {
+    throw new Error('Unpaid balance must be at least $10');
+  }
+
+  const payoutRequest = await PayoutRequestModel.create({
+    driverId,
+    amount: unpaidBalance,
+    rides: rideIds,
+  });
+
+  return payoutRequest;
 };

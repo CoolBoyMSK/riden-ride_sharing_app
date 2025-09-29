@@ -273,7 +273,7 @@ export const findInstantPayoutRequests = async ({
 
   // --- Base filters ---
   const matchFilter = {
-    status: { $in: ['pending', 'approved'] }, // ignore rejected
+    status: { $in: ['PENDING', 'APPROVED'] }, // ignore rejected
     ...(Object.keys(dateFilter).length ? { createdAt: dateFilter } : {}),
   };
 
@@ -306,11 +306,18 @@ export const findInstantPayoutRequests = async ({
     // Apply search
     ...(Object.keys(searchMatch).length ? [{ $match: searchMatch }] : []),
 
+    // Add totalRides field
+    {
+      $addFields: {
+        totalRides: { $size: { $ifNull: ['$rides', []] } },
+      },
+    },
+
     // Sort: pending first, approved after, then newest first
     {
       $addFields: {
         sortOrder: {
-          $cond: [{ $eq: ['$status', 'pending'] }, 0, 1], // pending = 0, approved = 1
+          $cond: [{ $eq: ['$status', 'PENDING'] }, 0, 1],
         },
       },
     },
@@ -327,6 +334,7 @@ export const findInstantPayoutRequests = async ({
               _id: 1,
               amount: 1,
               rides: 1,
+              totalRides: 1, // ✅ include totalRides
               status: 1,
               createdAt: 1,
               driver: { _id: 1, uniqueId: 1 },
@@ -360,7 +368,7 @@ export const updateInstatnPayoutRequest = async ({ id, status }) =>
     id,
     { status },
     { new: true },
-  ).populate(driverId);
+  ).populate('driverId');
 
 export const countTotalPendingRequests = async () =>
-  InstantPayoutRequest.countDocuments({ status: 'pending' });
+  InstantPayoutRequest.countDocuments({ status: 'PENDING' });

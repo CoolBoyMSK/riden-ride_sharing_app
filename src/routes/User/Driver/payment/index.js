@@ -2,12 +2,14 @@ import express from 'express';
 import { registerRoute } from '../../../../utils/registerRoute.js';
 import {
   addPayoutMethodController,
-  getDriverOnBoardingLinkController,
+  onBoardDriverController,
+  getDriverStripeAccountController,
   getAllPayoutMethodsController,
   getPayoutMethodByIdController,
   updatePayoutMethodController,
   deletePayoutMethodController,
   setDefaultPayoutMethodController,
+  sendInstantPayoutRequestController,
 } from '../../../../controllers/User/Drivers/payment/index.js';
 
 const router = express.Router();
@@ -23,7 +25,14 @@ registerRoute({
   router,
   route: '/onboard',
   driver_auth_enable: true,
-  post_method: getDriverOnBoardingLinkController,
+  post_method: onBoardDriverController,
+});
+
+registerRoute({
+  router,
+  route: '/create',
+  driver_auth_enable: true,
+  post_method: getDriverStripeAccountController,
 });
 
 registerRoute({
@@ -61,4 +70,10 @@ registerRoute({
   put_method: setDefaultPayoutMethodController,
 });
 
+registerRoute({
+  router,
+  route: '/request',
+  driver_auth_enable: true,
+  post_method: sendInstantPayoutRequestController,
+});
 export default router;

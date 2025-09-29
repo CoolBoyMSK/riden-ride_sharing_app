@@ -40,6 +40,7 @@ import {
 import { calculateActualFare } from '../services/User/ride/fareCalculationService.js';
 import { findPassengerByUserId, findPassengerById } from '../dal/passenger.js';
 import { passengerPaysDriver, payDriverFromWallet } from '../dal/stripe.js';
+import { findDashboardData } from '../dal/admin/index.js';
 import mongoose from 'mongoose';
 
 let ioInstance = null;
@@ -419,12 +420,18 @@ export const initSocket = (server) => {
             });
           }
 
+          let isDestinationRide = false;
+          if (driver.isDestination) {
+            isDestinationRide = true;
+          }
+
           const updatedRide = await updateRideById(
             ride._id,
             {
               status: 'DRIVER_ASSIGNED',
               driverId: driver._id,
               driverAssignedAt: new Date(),
+              isDestinationRide,
             },
             { session },
           );
@@ -2913,6 +2920,37 @@ export const initSocket = (server) => {
           objectType,
           data: deletedMsg,
           message: 'Message deleted successfully',
+        });
+      } catch (error) {
+        console.error(`SOCKET ERROR: ${error}`);
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: `${error.code || 'SOCKET_ERROR'}`,
+          message: `SOCKET ERROR: ${error.message}`,
+        });
+      }
+    });
+
+    // Admin Events
+    socket.on('admin:dashboard', async () => {
+      const objectType = 'get-dashboard-data';
+      try {
+        const data = await findDashboardData();
+        if (!data) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'NOT_FOUND',
+            message: 'Failed to fetch rides data',
+          });
+        }
+
+        socket.emit('admin:dashboard', {
+          success: true,
+          objectType,
+          data,
+          message: 'Ongoing rides data fetched successfully',
         });
       } catch (error) {
         console.error(`SOCKET ERROR: ${error}`);

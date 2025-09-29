@@ -1,8 +1,18 @@
 import AdminModel from '../../models/Admin.js';
-import UpdateRequest from '../../models/updateRequest.js';
 import Booking from '../../models/Ride.js';
 import Feedback from '../../models/Feedback.js';
 import mongoose from 'mongoose';
+import Driver from '../../models/Driver.js';
+import DriverLocation from '../../models/DriverLocation.js';
+
+const parseDateDMY = (dateStr, endOfDay = false) => {
+  if (!dateStr) return null;
+  const [day, month, year] = dateStr.split('-').map(Number);
+  if (endOfDay) {
+    return new Date(year, month - 1, day, 23, 59, 59, 999);
+  }
+  return new Date(year, month - 1, day, 0, 0, 0, 0);
+};
 
 export const findAdminByEmail = (email) => AdminModel.findOne({ email });
 
@@ -394,15 +404,6 @@ export const findBookingById = async (id) => {
   return booking || null;
 };
 
-const parseDateDMY = (dateStr, endOfDay = false) => {
-  if (!dateStr) return null;
-  const [day, month, year] = dateStr.split('-').map(Number);
-  if (!day || !month || !year) return null;
-  const date = new Date(year, month - 1, day);
-  if (endOfDay) date.setHours(23, 59, 59, 999);
-  return date;
-};
-
 export const findDriverFeedbacks = async ({
   page = 1,
   limit = 10,
@@ -430,8 +431,8 @@ export const findDriverFeedbacks = async ({
 
   // --- Date filter ---
   const dateFilter = {};
-  const startDate = parseDateDMY(fromDate);
-  const endDate = parseDateDMY(toDate, true);
+  const startDate = parseDateDMYDMY(fromDate);
+  const endDate = parseDateDMYDMY(toDate, true);
 
   if (startDate) dateFilter.$gte = startDate;
   if (endDate) dateFilter.$lte = endDate;
@@ -653,4 +654,316 @@ export const getFeedbackStats = async (type = 'by_passenger') => {
       currentYearGrowthRate: null,
     }
   );
+};
+
+export const findActiveDriversCount = async () =>
+  Driver.countDocuments({
+    status: { $in: ['online', 'on_ride'] },
+    isBlocked: false,
+    isSuspended: false,
+    isDeleted: false,
+    isApproved: true,
+  }).lean();
+
+export const findDashboardData = async () => {
+  const ongoingStatuses = [
+    'DRIVER_ASSIGNED',
+    'DRIVER_ARRIVING',
+    'DRIVER_ARRIVED',
+    'RIDE_STARTED',
+    'RIDE_IN_PROGRESS',
+  ];
+
+  // Fetch ongoing rides
+  const rides = await Booking.find({ status: { $in: ongoingStatuses } }).lean();
+
+  // Total ongoing rides count (more efficient than rides.length in case you filter later)
+  const totalOngoingRides = rides.length;
+
+  // Get driverIds from rides
+  const driverIds = rides.map((r) => r.driverId);
+
+  // Fetch driver locations in a single query
+  const locations = await DriverLocation.find({
+    driverId: { $in: driverIds },
+  }).lean();
+
+  // Merge ride with driver location
+  const rideData = rides.map((ride) => {
+    const loc = locations.find(
+      (l) => l.driverId.toString() === ride.driverId.toString(),
+    );
+    return {
+      rideId: ride._id,
+      status: ride.status,
+      driverId: ride.driverId,
+      location: loc
+        ? { lng: loc.location.coordinates[0], lat: loc.location.coordinates[1] }
+        : null,
+    };
+  });
+
+  return {
+    totalOngoingRides,
+    rides: rideData,
+  };
+};
+
+export const findOngoingRideInfo = async (rideId) => {
+  const rides = await Booking.aggregate([
+    { $match: { _id: new mongoose.Types.ObjectId(rideId) } },
+
+    // Lookup driver
+    {
+      $lookup: {
+        from: 'drivers',
+        localField: 'driverId',
+        foreignField: '_id',
+        as: 'driver',
+      },
+    },
+    { $unwind: { path: '$driver', preserveNullAndEmptyArrays: true } },
+
+    // Lookup driver->user (profile info)
+    {
+      $lookup: {
+        from: 'users',
+        localField: 'driver.userId',
+        foreignField: '_id',
+        as: 'driverUser',
+      },
+    },
+    { $unwind: { path: '$driverUser', preserveNullAndEmptyArrays: true } },
+
+    // Total rides of driver (only completed/cancelled, excluding current)
+    {
+      $lookup: {
+        from: 'rides',
+        let: { dId: '$driver._id', currentRideId: '$_id' },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ['$driverId', '$$dId'] },
+                  { $ne: ['$_id', '$$currentRideId'] },
+                  {
+                    $in: [
+                      '$status',
+                      [
+                        'RIDE_COMPLETED',
+                        'CANCELLED_BY_PASSENGER',
+                        'CANCELLED_BY_DRIVER',
+                        'CANCELLED_BY_SYSTEM',
+                      ],
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+          { $count: 'totalRides' },
+        ],
+        as: 'driverRides',
+      },
+    },
+    {
+      $addFields: {
+        totalRides: {
+          $ifNull: [{ $arrayElemAt: ['$driverRides.totalRides', 0] }, 0],
+        },
+      },
+    },
+
+    // Total feedbacks of driver (only from passengers)
+    {
+      $lookup: {
+        from: 'feedbacks',
+        let: { dId: '$driver._id' },
+        pipeline: [
+          {
+            $match: {
+              $expr: { $eq: ['$driverId', '$$dId'] },
+              type: 'by_passenger',
+            },
+          },
+          { $count: 'totalFeedbacks' },
+        ],
+        as: 'driverFeedbacks',
+      },
+    },
+    {
+      $addFields: {
+        totalFeedbacks: {
+          $ifNull: [
+            { $arrayElemAt: ['$driverFeedbacks.totalFeedbacks', 0] },
+            0,
+          ],
+        },
+      },
+    },
+
+    // Final projection
+    {
+      $project: {
+        _id: 1,
+        rideId: 1,
+        pickupLocation: 1,
+        dropoffLocation: 1,
+        estimatedFare: 1,
+        estimatedDistance: 1,
+        estimatedDuration: 1,
+
+        driver: {
+          vehicle: 1,
+        },
+        driverUser: {
+          name: 1,
+          profileImg: 1,
+        },
+        totalRides: 1,
+        totalFeedbacks: 1,
+      },
+    },
+  ]);
+
+  return rides[0] || null;
+};
+
+export const findGenericAnalytics = async (
+  filter = 'this_month',
+  startDate = null,
+  endDate = null,
+) => {
+  const excludeStatuses = [
+    'REQUESTED',
+    'DRIVER_ASSIGNED',
+    'DRIVER_ARRIVING',
+    'DRIVER_ARRIVED',
+    'RIDE_STARTED',
+    'RIDE_IN_PROGRESS',
+  ];
+
+  // --- Handle date filters ---
+  let dateFilter = {};
+  if (startDate && endDate) {
+    // ✅ Custom range with DD-MM-YYYY
+    dateFilter = {
+      createdAt: {
+        $gte: parseDateDMY(startDate),
+        $lte: parseDateDMY(endDate, true),
+      },
+    };
+  } else if (filter) {
+    const now = new Date();
+    let start;
+
+    switch (filter) {
+      case 'today':
+        start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        dateFilter = { createdAt: { $gte: start, $lte: now } };
+        break;
+
+      case 'this_week': {
+        const firstDayOfWeek = new Date(now);
+        firstDayOfWeek.setDate(now.getDate() - now.getDay());
+        firstDayOfWeek.setHours(0, 0, 0, 0);
+        dateFilter = { createdAt: { $gte: firstDayOfWeek, $lte: now } };
+        break;
+      }
+
+      case 'this_month':
+        start = new Date(now.getFullYear(), now.getMonth(), 1);
+        dateFilter = { createdAt: { $gte: start, $lte: now } };
+        break;
+
+      case 'last_year':
+        start = new Date(now.getFullYear() - 1, 0, 1);
+        const end = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
+        dateFilter = { createdAt: { $gte: start, $lte: end } };
+        break;
+
+      default:
+        dateFilter = {};
+    }
+  }
+
+  // --- Total rides & total actual fare ---
+  const rideStats = await Booking.aggregate([
+    {
+      $match: {
+        status: { $nin: excludeStatuses },
+        ...dateFilter,
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        totalRides: { $sum: 1 },
+        totalActualFare: {
+          $sum: {
+            $cond: [
+              {
+                $and: [
+                  { $ifNull: ['$actualFare', false] },
+                  { $eq: ['$paymentStatus', 'COMPLETED'] },
+                ],
+              },
+              '$actualFare',
+              0,
+            ],
+          },
+        },
+      },
+    },
+  ]);
+
+  // --- Total drivers ---
+  const driverFilter = dateFilter.createdAt
+    ? { createdAt: dateFilter.createdAt }
+    : {};
+  const totalDrivers = await Driver.countDocuments(driverFilter);
+
+  // --- Passenger feedback stats ---
+  const feedbackStats = await Feedback.aggregate([
+    {
+      $match: {
+        type: 'by_passenger',
+        ...dateFilter,
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        totalFeedbacks: { $sum: 1 },
+        fiveStarCount: {
+          $sum: { $cond: [{ $eq: ['$rating', 5] }, 1, 0] },
+        },
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        percentageFiveStar: {
+          $cond: [
+            { $gt: ['$totalFeedbacks', 0] },
+            {
+              $multiply: [
+                { $divide: ['$fiveStarCount', '$totalFeedbacks'] },
+                100,
+              ],
+            },
+            0,
+          ],
+        },
+      },
+    },
+  ]);
+
+  return {
+    totalRides: rideStats[0]?.totalRides || 0,
+    totalDrivers,
+    totalRevenue: rideStats[0]?.totalActualFare || 0,
+    satisfactionRate: feedbackStats[0]?.percentageFiveStar || 0,
+  };
 };

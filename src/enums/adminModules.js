@@ -1,5 +1,6 @@
 export const ADMIN_ROLES = ['super_admin', 'admin'];
 export const ADMIN_MODULES = [
+  'dashboard',
   'analytics',
   'admin_roles',
   'driver_management',

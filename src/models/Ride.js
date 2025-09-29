@@ -179,6 +179,7 @@ const rideSchema = new mongoose.Schema(
       type: String,
       enum: PAYMENT_STATUS,
       default: 'PENDING',
+      index: true,
     },
     paymentTransactionId: {
       type: String,
@@ -190,6 +191,10 @@ const rideSchema = new mongoose.Schema(
       required: function () {
         return this.paymentMethod === 'WALLET';
       },
+    },
+    walletId: {
+      type: String,
+      trim: true,
     },
 
     // Distance & Time
@@ -267,6 +272,10 @@ const rideSchema = new mongoose.Schema(
     },
 
     isReported: {
+      type: Boolean,
+      default: false,
+    },
+    isDestinationRide: {
       type: Boolean,
       default: false,
     },

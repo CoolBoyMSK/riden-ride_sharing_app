@@ -1,12 +1,14 @@
 import { findDriverByUserId } from '../../../../dal/driver.js';
 import {
+  createDriverStripeAccount,
   addDriverExternalAccount,
-  generateDriverOnboardingLink,
+  onboardDriverStripeAccount,
   getAllExternalAccounts,
   getExternalAccountById,
   updateExternalAccount,
   deleteExternalAccount,
   setDefaultExternalAccount,
+  createPayoutRequest,
 } from '../../../../dal/stripe.js';
 
 export const addPayoutMethod = async (user, { bankDetails }, resp) => {
@@ -35,7 +37,7 @@ export const addPayoutMethod = async (user, { bankDetails }, resp) => {
   }
 };
 
-export const getDriverOnBoardingLink = async (user, resp) => {
+export const onBoardDriver = async (user, { data }, resp) => {
   try {
     const driver = await findDriverByUserId(user._id);
     if (!driver) {
@@ -44,10 +46,10 @@ export const getDriverOnBoardingLink = async (user, resp) => {
       return resp;
     }
 
-    const success = await generateDriverOnboardingLink(driver);
+    const success = await onboardDriverStripeAccount(user, driver, data);
     if (!success) {
       resp.error = true;
-      resp.error_message = 'Failed to generate onboarding link';
+      resp.error_message = 'Failed to onboard driver';
       return resp;
     }
 
@@ -56,8 +58,33 @@ export const getDriverOnBoardingLink = async (user, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message =
-      'Something went wrong while generating onboarding link';
+    resp.error_message = error.message || 'Something went wrong';
+    return resp;
+  }
+};
+
+export const getDriverStripeAccount = async (user, resp) => {
+  try {
+    const driver = await findDriverByUserId(user._id);
+    if (!driver) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch driver';
+      return resp;
+    }
+
+    const success = await createDriverStripeAccount(user, driver);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to create driver account';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
     return resp;
   }
 };
@@ -190,7 +217,7 @@ export const setDefaultPayoutMethod = async (user, { id }, resp) => {
       return resp;
     }
 
-    console.log(success)
+    console.log(success);
 
     resp.data = success;
     return resp;
@@ -211,11 +238,20 @@ export const sendInstantPayoutRequest = async (user, resp) => {
       resp.error_message = 'Failed to fetch driver';
       return resp;
     }
+
+    const success = await createPayoutRequest(driver._id);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to send payout request';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message =
-      'Something went wrong while setting default payout method';
+    resp.error_message = error.message || 'Something went wrong';
     return resp;
   }
 };
