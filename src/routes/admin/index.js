@@ -11,6 +11,7 @@ import bookingRouter from './Booking/index.js';
 import feedbackRouter from './Feedback/index.js';
 import supportRouter from './Support/index.js';
 import payoutRouter from './Payout/index.js';
+import cmsRouter from './CMS/index.js';
 
 const adminRouter = express.Router();
 
@@ -26,5 +27,6 @@ adminRouter.use('/bookings', bookingRouter);
 adminRouter.use('/feedback', feedbackRouter);
 adminRouter.use('/support', supportRouter);
 adminRouter.use('/payout', payoutRouter);
+adminRouter.use('/cms', cmsRouter);
 
 export default adminRouter;
