@@ -5,8 +5,9 @@ import {
   uploadDocumentController,
   updateDriverDocumentController,
   updateLegalAgreementController,
+  getWayBillDocumentController,
+  getWayBillController,
 } from '../../../../controllers/User/Drivers/Documents/index.js';
-import { uploadDriverDocumentToS3 } from '../../../../utils/s3Uploader.js';
 import { uploadSingle } from '../../../../middlewares/upload.js';
 
 const router = express.Router();
@@ -39,6 +40,20 @@ registerRoute({
   route: '/update-agreement',
   driver_auth_enable: true,
   patch_method: updateLegalAgreementController,
+});
+
+registerRoute({
+  router,
+  route: '/certificate',
+  driver_auth_enable: true,
+  get_method: getWayBillDocumentController,
+});
+
+registerRoute({
+  router,
+  route: '/waybill',
+  driver_auth_enable: true,
+  get_method: getWayBillController,
 });
 
 export default router;

@@ -3,6 +3,8 @@ import {
   uploadDriverDocument,
   updateDriverDocument,
   updateLegalAgreement,
+  getWayBillDocument,
+  getWayBill,
 } from '../../../../services/User/driver/documents/index.js';
 import { handleResponse } from '../../../../utils/handleRespone.js';
 import {
@@ -52,6 +54,28 @@ export const updateLegalAgreementController = (req, res) =>
       validationFn: () => validateUpdateLegalAgreement(req.query),
       handlerParams: [req.user, req.query],
       successMessage: 'Legal Agreement upated successfully',
+    },
+    req,
+    res,
+  );
+
+export const getWayBillDocumentController = (req, res) =>
+  handleResponse(
+    {
+      handler: getWayBillDocument,
+      handlerParams: [req.user, req.query],
+      successMessage: 'Way bill document fetched successfully',
+    },
+    req,
+    res,
+  );
+
+export const getWayBillController = (req, res) =>
+  handleResponse(
+    {
+      handler: getWayBill,
+      handlerParams: [req.user],
+      successMessage: 'Way bill fetched successfully',
     },
     req,
     res,

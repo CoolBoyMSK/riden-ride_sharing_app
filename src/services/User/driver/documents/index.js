@@ -5,6 +5,8 @@ import {
   findDriverByUserId,
   createDriverUpdateRequest,
   updateDriverLegalAgreement,
+  findWayBill,
+  findDriverWayBill,
 } from '../../../../dal/driver.js';
 import { uploadDriverDocumentToS3 } from '../../../../utils/s3Uploader.js';
 
@@ -153,6 +155,59 @@ export const updateLegalAgreement = async (user, { status }, resp) => {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
     resp.error_message = 'Something went wrong while updating legal agreement';
+    return resp;
+  }
+};
+
+export const getWayBillDocument = async (user, { docType }, resp) => {
+  try {
+    const driver = await findDriverByUserId(user._id);
+    if (!driver) {
+      resp.error = true;
+      resp.error_message = 'Driver not found';
+      return resp;
+    }
+
+    const docs = await findWayBill(driver._id, docType);
+    if (!docs) {
+      resp.error = true;
+      resp.error_message = 'Driver not found';
+      return resp;
+    }
+    resp.data = docs;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
+    return resp;
+  }
+};
+
+export const getWayBill = async (user, resp) => {
+  try {
+    const driver = await findDriverByUserId(user._id);
+    if (!driver) {
+      resp.error = true;
+      resp.error_message = 'Driver not found';
+      return resp;
+    }
+    console.log(driver)
+
+    const success = await findDriverWayBill(driver._id);
+    console.log(success)
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch way bill';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
     return resp;
   }
 };

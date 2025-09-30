@@ -13,7 +13,7 @@ import {
   updateDriverById,
   updateWayBillDocuments,
   findWayBill,
-  updateWayBillStatus,
+  updateDriverByUserId,
 } from '../../../dal/driver.js';
 import { uploadDriverDocumentToS3 } from '../../../utils/s3Uploader.js';
 
@@ -313,6 +313,15 @@ export const approveRequestedDriver = async ({ id }, resp) => {
 
 export const uploadWayBillDocument = async (
   { id, docType }, // id = driver.userId
+  {
+    insurer,
+    naic,
+    policy,
+    operator,
+    policyStartDate,
+    policyEndDate,
+    coveredRideStartTime,
+  },
   file,
   resp,
 ) => {
@@ -326,11 +335,29 @@ export const uploadWayBillDocument = async (
     const imageUrl = await uploadDriverDocumentToS3(id, docType, file);
     console.log(imageUrl);
 
-    const updated = await updateWayBillDocuments(id, docType, imageUrl);
+    let updated = await updateWayBillDocuments(id, docType, imageUrl);
     if (!updated) {
       resp.error = true;
       resp.error_message = 'Driver record not found';
       return resp;
+    }
+
+    if (docType === 'certificateOfInsurance') {
+      updated = await updateDriverByUserId(
+        id,
+        {
+          $set: {
+            [`wayBill.${docType}.insurer`]: insurer,
+            [`wayBill.${docType}.naic`]: naic,
+            [`wayBill.${docType}.policy`]: policy,
+            [`wayBill.${docType}.operator`]: operator,
+            [`wayBill.${docType}.policyStartDate`]: policyStartDate,
+            [`wayBill.${docType}.policyEndDate`]: policyEndDate,
+            [`wayBill.${docType}.coveredRideStartTime`]: coveredRideStartTime,
+          },
+        },
+        { new: true },
+      );
     }
 
     resp.data = updated.wayBill[docType];

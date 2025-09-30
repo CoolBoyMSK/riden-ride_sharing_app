@@ -157,7 +157,7 @@ export const uploadWayBillDocumentController = (req, res) =>
   handleResponse(
     {
       handler: uploadWayBillDocument,
-      handlerParams: [req.query, req.file],
+      handlerParams: [req.query, req.body, req.file],
       successMessage: 'Way Bill issued successfully',
     },
     req,

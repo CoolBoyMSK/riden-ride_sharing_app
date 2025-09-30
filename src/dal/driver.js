@@ -3,6 +3,7 @@ import DriverModel from '../models/Driver.js';
 import UserModel from '../models/User.js';
 import UpdateRequestModel from '../models/updateRequest.js';
 import DestinationModel from '../models/Destination.js';
+import RideModel from '../models/Ride.js';
 import { DOCUMENT_TYPES } from '../enums/driver.js';
 
 export const findDriverByUserId = (userId, { session } = {}) => {
@@ -200,7 +201,7 @@ export const removeDriverBlock = (driverId) =>
 export const findDriverDocuments = (driverId) =>
   DriverModel.findById(driverId, { documents: 1, _id: 0 }).lean();
 
-export const findWayBill = (driverId, docType) => {
+export const findWayBill = async (driverId, docType) => {
   return DriverModel.findById(driverId, {
     [`wayBill.${docType}`]: 1,
     _id: 0,
@@ -628,3 +629,106 @@ export const updateDriverById = async (id, update, options = {}) =>
 
 export const sendInstantPayoutRequest = async (driverId) =>
   PayoutRequest.create();
+
+export const findDriverWayBill = async (driverId) => {
+  const driverObjectId = new mongoose.Types.ObjectId(driverId);
+
+  const result = await DriverModel.aggregate([
+    {
+      $match: { _id: driverObjectId },
+    },
+    // Get driver user info
+    {
+      $lookup: {
+        from: 'users',
+        localField: 'userId',
+        foreignField: '_id',
+        as: 'driverUser',
+      },
+    },
+    { $unwind: { path: '$driverUser', preserveNullAndEmptyArrays: true } },
+
+    // Get current ride if any
+    {
+      $lookup: {
+        from: 'rides',
+        let: { dId: '$_id' },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ['$driverId', '$$dId'] },
+                  {
+                    $in: [
+                      '$status',
+                      [
+                        'DRIVER_ASSIGNED',
+                        'DRIVER_ARRIVING',
+                        'DRIVER_ARRIVED',
+                        'RIDE_STARTED',
+                        'RIDE_IN_PROGRESS',
+                      ],
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+          { $sort: { createdAt: -1 } }, // latest ride if multiple
+          { $limit: 1 },
+          {
+            $lookup: {
+              from: 'users',
+              localField: 'passengerId',
+              foreignField: '_id',
+              as: 'passenger',
+            },
+          },
+          { $unwind: { path: '$passenger', preserveNullAndEmptyArrays: true } },
+          {
+            $project: {
+              rideId: 1,
+              pickupLocation: { $ifNull: ['$pickupLocation', 'N/A'] },
+              dropOffLocation: { $ifNull: ['$dropOffLocation', 'N/A'] },
+              driverAssignedAt: { $ifNull: ['$driverAssignedAt', 'N/A'] },
+              passenger: {
+                userId: { $ifNull: ['$passenger.userId', 'N/A'] },
+                name: { $ifNull: ['$passenger.name', 'N/A'] },
+                email: { $ifNull: ['$passenger.email', 'N/A'] },
+                profileImg: { $ifNull: ['$passenger.profileImg', 'N/A'] },
+              },
+            },
+          },
+        ],
+        as: 'ride',
+      },
+    },
+    { $unwind: { path: '$ride', preserveNullAndEmptyArrays: true } },
+
+    // Final projection
+    {
+      $project: {
+        ride: { $ifNull: ['$ride', null] },
+        driver: {
+          _id: { $ifNull: ['$_id', 'N/A'] },
+          vehicle: { $ifNull: ['$vehicle', 'N/A'] },
+          insurance: {
+            $ifNull: ['$wayBill.certificateOfInsurance', 'N/A'],
+          },
+          documents: {
+            $ifNull: [{ $mergeObjects: ['$wayBill', '$documents'] }, 'N/A'],
+          },
+          profile: {
+            name: { $ifNull: ['$driverUser.name', 'N/A'] },
+            email: { $ifNull: ['$driverUser.email', 'N/A'] },
+            phoneNumber: { $ifNull: ['$driverUser.phoneNumber', 'N/A'] },
+            profileImg: { $ifNull: ['$driverUser.profileImg', 'N/A'] },
+          },
+        },
+      },
+    },
+  ]);
+
+  return result.length ? result[0] : null;
+};

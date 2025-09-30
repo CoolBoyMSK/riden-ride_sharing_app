@@ -58,6 +58,50 @@ const wayBillSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const certificateOfInsuranceSchema = new mongoose.Schema(
+  {
+    imageUrl: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    insurer: {
+      type: String,
+      trim: true,
+    },
+    naic: {
+      type: Number,
+      trim: true,
+    },
+    policy: {
+      type: String,
+      trim: true,
+    },
+    operator: {
+      type: String,
+      trim: true,
+    },
+    policyStartDate: {
+      type: Date,
+      trim: true,
+    },
+    policyEndDate: {
+      type: Date,
+      trim: true,
+    },
+    coveredRideStartTime: {
+      type: Date,
+      trim: true,
+    },
+    status: {
+      type: String,
+      enum: WAYBILL_STATUS,
+      default: 'not_issued',
+    },
+  },
+  { _id: false },
+);
+
 const driverSchema = new mongoose.Schema(
   {
     userId: {
@@ -140,7 +184,7 @@ const driverSchema = new mongoose.Schema(
     },
     wayBill: {
       certificateOfInsurance: {
-        type: wayBillSchema,
+        type: certificateOfInsuranceSchema,
         default: () => ({}),
       },
       recordCheckCertificate: {
