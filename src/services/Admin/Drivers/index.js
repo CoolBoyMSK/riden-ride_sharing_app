@@ -11,7 +11,11 @@ import {
   findDriverUpdateRequests,
   updateDriverRequest,
   updateDriverById,
+  updateWayBillDocuments,
+  findWayBill,
+  updateWayBillStatus,
 } from '../../../dal/driver.js';
+import { uploadDriverDocumentToS3 } from '../../../utils/s3Uploader.js';
 
 export const getAllDrivers = async (
   { page, limit, search, fromDate, toDate, isApproved },
@@ -303,6 +307,58 @@ export const approveRequestedDriver = async ({ id }, resp) => {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
     resp.error_message = 'Something went wrong while approving driver';
+    return resp;
+  }
+};
+
+export const uploadWayBillDocument = async (
+  { id, docType }, // id = driver.userId
+  file,
+  resp,
+) => {
+  try {
+    if (!file) {
+      resp.error = true;
+      resp.error_message = 'No file provided';
+      return resp;
+    }
+
+    const imageUrl = await uploadDriverDocumentToS3(id, docType, file);
+    console.log(imageUrl);
+
+    const updated = await updateWayBillDocuments(id, docType, imageUrl);
+    if (!updated) {
+      resp.error = true;
+      resp.error_message = 'Driver record not found';
+      return resp;
+    }
+
+    resp.data = updated.wayBill[docType];
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
+    return resp;
+  }
+};
+
+export const getWayBillDocument = async ({ id, docType }, resp) => {
+  // id = driver._id
+  try {
+    const success = await findWayBill(id, docType);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = `Failed to fetch ${docType}`;
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
     return resp;
   }
 };

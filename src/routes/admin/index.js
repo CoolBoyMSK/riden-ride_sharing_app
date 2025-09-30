@@ -13,6 +13,7 @@ import supportRouter from './Support/index.js';
 import payoutRouter from './Payout/index.js';
 import cmsRouter from './CMS/index.js';
 import commissionRouter from './Commission/index.js';
+import alertRouter from './Alert/index.js';
 
 const adminRouter = express.Router();
 
@@ -30,5 +31,6 @@ adminRouter.use('/support', supportRouter);
 adminRouter.use('/payout', payoutRouter);
 adminRouter.use('/cms', cmsRouter);
 adminRouter.use('/commission', commissionRouter);
+adminRouter.use('/alert', alertRouter);
 
 export default adminRouter;

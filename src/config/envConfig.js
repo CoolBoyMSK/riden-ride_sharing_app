@@ -54,6 +54,14 @@ const env = {
   AWS_S3_BUCKET: required(process.env.AWS_S3_BUCKET, 'AWS_S3_BUCKET'),
   FRONTEND_URL: required(process.env.FRONTEND_URL, 'FRONTEND_URL'),
   REDIS_URL: required(process.env.REDIS_URL, 'REDIS_URL'),
+  JOB_ATTEMPTS: required(process.env.JOB_ATTEMPTS, 'JOB_ATTEMPTS'),
+  JOB_BACKOFF_MS: required(process.env.JOB_BACKOFF_MS, 'JOB_BACKOFF_MS'),
+  DLQ_QUEUE_NAME: required(process.env.DLQ_QUEUE_NAME, 'DLQ_QUEUE_NAME'),
+  BATCH_SIZE: required(process.env.BATCH_SIZE, 'BATCH_SIZE'),
+  WORKER_CONCURRENCY: required(
+    process.env.WORKER_CONCURRENCY,
+    'WORKER_CONCURRENCY',
+  ),
   TWILIO_ACCOUNT_SID: required(
     process.env.TWILIO_ACCOUNT_SID,
     'TWILIO_ACCOUNT_SID',

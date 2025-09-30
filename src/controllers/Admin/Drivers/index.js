@@ -10,6 +10,8 @@ import {
   getAllUpdateRequests,
   toggleUpdateRequest,
   approveRequestedDriver,
+  uploadWayBillDocument,
+  getWayBillDocument,
 } from '../../../services/Admin/Drivers/index.js';
 import { handleResponse } from '../../../utils/handleRespone.js';
 import {
@@ -146,6 +148,28 @@ export const approveRequestedDriverController = (req, res) =>
       handler: approveRequestedDriver,
       handlerParams: [req.params],
       successMessage: 'Driver approved successfully',
+    },
+    req,
+    res,
+  );
+
+export const uploadWayBillDocumentController = (req, res) =>
+  handleResponse(
+    {
+      handler: uploadWayBillDocument,
+      handlerParams: [req.query, req.file],
+      successMessage: 'Way Bill issued successfully',
+    },
+    req,
+    res,
+  );
+
+export const getWayBillDocumentController = (req, res) =>
+  handleResponse(
+    {
+      handler: getWayBillDocument,
+      handlerParams: [req.query],
+      successMessage: 'Way Bill fetched successfully',
     },
     req,
     res,

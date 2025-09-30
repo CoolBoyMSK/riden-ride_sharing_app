@@ -107,6 +107,15 @@ const userSchema = new mongoose.Schema(
       default: false,
     },
     notifications: notificationSchema,
+    userDeviceToken: {
+      type: String,
+      trim: true,
+    },
+    userDeviceType: {
+      type: String,
+      trim: true,
+      default: 'ios',
+    },
   },
   {
     timestamps: true,

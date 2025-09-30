@@ -20,3 +20,5 @@ export const DOCUMENT_TYPES = [
   'vehicleOwnerCertificateAndInsurance',
   'vehicleInspection',
 ];
+
+export const WAYBILL_STATUS = ['not_issued', 'issued'];

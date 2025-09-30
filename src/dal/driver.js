@@ -200,6 +200,13 @@ export const removeDriverBlock = (driverId) =>
 export const findDriverDocuments = (driverId) =>
   DriverModel.findById(driverId, { documents: 1, _id: 0 }).lean();
 
+export const findWayBill = (driverId, docType) => {
+  return DriverModel.findById(driverId, {
+    [`wayBill.${docType}`]: 1,
+    _id: 0,
+  }).lean();
+};
+
 export const updateDriverDocumentRecord = (driverId, docType, imageUrl) =>
   DriverModel.findOneAndUpdate(
     { userId: driverId },
@@ -210,6 +217,18 @@ export const updateDriverDocumentRecord = (driverId, docType, imageUrl) =>
       },
     },
     { new: true, select: `documents.${docType}` },
+  ).lean();
+
+export const updateWayBillDocuments = (driverId, docType, imageUrl) =>
+  DriverModel.findOneAndUpdate(
+    { userId: driverId },
+    {
+      $set: {
+        [`wayBill.${docType}.imageUrl`]: imageUrl,
+        [`wayBill.${docType}.status`]: 'issued',
+      },
+    },
+    { new: true, select: `wayBill.${docType}` },
   ).lean();
 
 export const findVehicleByUserId = async (userId, options = {}) =>
@@ -349,6 +368,14 @@ export const deleteDriver = async (driverId, session) => {
 };
 
 export const updateDocumentStatus = (driverId, type, status, options = {}) => {
+  return DriverModel.findOneAndUpdate(
+    { _id: driverId },
+    { $set: { [`documents.${type}.status`]: status } },
+    { new: true, ...options },
+  );
+};
+
+export const updateWayBillStatus = (driverId, type, status, options = {}) => {
   return DriverModel.findOneAndUpdate(
     { _id: driverId },
     { $set: { [`documents.${type}.status`]: status } },

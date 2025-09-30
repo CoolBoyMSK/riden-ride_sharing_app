@@ -11,6 +11,11 @@ import Report from '../../models/Report.js';
 import CMS from '../../models/CMS.js';
 import Commission from '../../models/Commission.js';
 import AdminCommission from '../../models/AdminCommission.js';
+import Alert from '../../models/Alert.js';
+import User from '../../models/User.js';
+
+import firebaseAdmin from '../../config/firebaseAdmin.js';
+import env from '../../config/envConfig.js';
 
 const parseDateDMY = (dateStr, endOfDay = false) => {
   if (!dateStr) return null;
@@ -30,6 +35,24 @@ const getAllDaysInMonth = (year, month) => {
   }
   return days;
 };
+
+const BATCH_SIZE = Number(env.BATCH_SIZE || 500);
+const messaging = firebaseAdmin.messaging();
+
+const isInvalidTokenError = (err) => {
+  if (!err) return false;
+  const m = (err.message || '').toLowerCase();
+  return /registration-token-not-registered|invalid-registration-token|not-registered|invalid argument|unauthorized/i.test(
+    m,
+  );
+};
+
+const _sumStats = (a, b) => ({
+  totalTargets: a.totalTargets + b.totalTargets,
+  sent: a.sent + b.sent,
+  failed: a.failed + b.failed,
+  invalidTokens: a.invalidTokens + b.invalidTokens,
+});
 
 export const findAdminByEmail = (email) => AdminModel.findOne({ email });
 
@@ -2051,4 +2074,130 @@ export const findComissionStats = async () => {
     totalRides,
     totalCommission,
   };
+};
+
+export const createAlert = async ({ user, audience, recipients, blocks }) =>
+  Alert.create({
+    createdBy: user._id,
+    audience,
+    recipients: recipients || [],
+    blocks,
+    status: 'PENDING',
+  });
+
+// --- Main ---
+export const sendAlert = async (alertId) => {
+  const alert = await Alert.findById(alertId);
+  if (!alert) throw new Error('Alert not found');
+
+  alert.status = 'IN_PROGRESS';
+  await alert.save();
+
+  // Build user query based on audience
+  let userQuery = { userDeviceToken: { $exists: true, $ne: null } };
+
+  if (alert.audience === 'custom') {
+    userQuery._id = { $in: alert.recipients || [] };
+  } else if (alert.audience === 'drivers') {
+    userQuery.roles = { $in: ['driver'] };
+  } else if (alert.audience === 'passengers') {
+    userQuery.roles = { $in: ['passenger'] };
+  }
+  // audience = all → keep base query
+
+  // Stream users to avoid memory blowup
+  const cursor = User.find(userQuery)
+    .select('_id userDeviceToken')
+    .lean()
+    .cursor();
+
+  let stats = { totalTargets: 0, sent: 0, failed: 0, invalidTokens: 0 };
+  const primaryBlock = (alert.blocks && alert.blocks[0]) || {
+    title: '',
+    body: '',
+    data: {},
+  };
+
+  let collector = [];
+
+  for await (const user of cursor) {
+    if (!user.userDeviceToken) continue;
+    collector.push({ token: user.userDeviceToken, userId: user._id });
+
+    if (collector.length >= BATCH_SIZE) {
+      const res = await _sendBatch(collector, primaryBlock);
+      stats = _sumStats(stats, res);
+      collector = [];
+    }
+  }
+
+  // leftover batch
+  if (collector.length) {
+    const res = await _sendBatch(collector, primaryBlock);
+    stats = _sumStats(stats, res);
+  }
+
+  // Update alert stats
+  alert.stats = {
+    totalTargets: stats.totalTargets,
+    sent: stats.sent,
+    failed: stats.failed,
+    invalidTokens: stats.invalidTokens,
+  };
+  alert.status =
+    stats.failed === 0 ? 'SENT' : stats.sent === 0 ? 'FAILED' : 'SENT';
+  await alert.save();
+
+  return stats;
+};
+
+// --- Batch sender ---
+const _sendBatch = async (items, block) => {
+  const tokens = items.map((i) => i.token);
+  const message = {
+    notification: { title: block.title || '', body: block.body || '' },
+    data: Object.keys(block.data || {}).reduce(
+      (acc, k) => ({ ...acc, [k]: String(block.data[k]) }),
+      {},
+    ),
+    tokens,
+  };
+
+  const result = {
+    totalTargets: tokens.length,
+    sent: 0,
+    failed: 0,
+    invalidTokens: 0,
+  };
+
+  try {
+    const resp = await messaging.sendEachForMulticast(message);
+
+    for (let i = 0; i < resp.responses.length; i++) {
+      const r = resp.responses[i];
+      const token = tokens[i];
+
+      if (r.success) {
+        result.sent++;
+      } else {
+        result.failed++;
+        if (isInvalidTokenError(r.error)) {
+          result.invalidTokens++;
+          // mark token as invalid in User schema
+          await mongoose
+            .model('User')
+            .updateOne(
+              { userDeviceToken: token },
+              { $unset: { userDeviceToken: 1 } },
+            )
+            .exec();
+        }
+      }
+    }
+  } catch (err) {
+    console.error('_sendBatch fatal error', err);
+    result.failed = tokens.length;
+  }
+
+  return result;
 };

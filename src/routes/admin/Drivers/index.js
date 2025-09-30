@@ -12,7 +12,10 @@ import {
   getAllUpdateRequestsController,
   toggleUpdateRequestController,
   approveRequestedDriverController,
+  uploadWayBillDocumentController,
+  getWayBillDocumentController,
 } from '../../../controllers/Admin/Drivers/index.js';
+import { uploadSingle } from '../../../middlewares/upload.js';
 
 const router = express.Router();
 
@@ -96,6 +99,17 @@ registerRoute({
   admin_auth_enable: true,
   put_permission: 'driver_management',
   put_method: approveRequestedDriverController,
+});
+
+registerRoute({
+  router,
+  route: '/waybill',
+  admin_auth_enable: true,
+  put_middlewares: [uploadSingle],
+  put_permission: 'driver_management',
+  put_method: uploadWayBillDocumentController,
+  get_permission: 'driver_management',
+  get_method: getWayBillDocumentController,
 });
 
 export default router;

@@ -1,6 +1,10 @@
 import mongoose from 'mongoose';
 import { CAR_TYPES } from '../enums/carType.js';
-import { DRIVER_STATUS, DOCUMENT_STATUS } from '../enums/driver.js';
+import {
+  DRIVER_STATUS,
+  DOCUMENT_STATUS,
+  WAYBILL_STATUS,
+} from '../enums/driver.js';
 
 const suspensionSchema = new mongoose.Schema(
   {
@@ -38,6 +42,22 @@ const documentSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const wayBillSchema = new mongoose.Schema(
+  {
+    imageUrl: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    status: {
+      type: String,
+      enum: WAYBILL_STATUS,
+      default: 'not_issued',
+    },
+  },
+  { _id: false },
+);
+
 const driverSchema = new mongoose.Schema(
   {
     userId: {
@@ -58,10 +78,22 @@ const driverSchema = new mongoose.Schema(
       index: true,
     },
     vehicle: {
-      type: { type: String, enum: CAR_TYPES },
-      model: { type: String, trim: true },
-      plateNumber: { type: String, trim: true },
-      color: { type: String, trim: true },
+      type: {
+        type: String,
+        enum: CAR_TYPES,
+      },
+      model: {
+        type: String,
+        trim: true,
+      },
+      plateNumber: {
+        type: String,
+        trim: true,
+      },
+      color: {
+        type: String,
+        trim: true,
+      },
       imageUrl: {
         type: String,
         trim: true,
@@ -74,8 +106,14 @@ const driverSchema = new mongoose.Schema(
       default: 'approved',
     },
     payoutDetails: {
-      bankAccount: { type: String, trim: true },
-      ifscCode: { type: String, trim: true },
+      bankAccount: {
+        type: String,
+        trim: true,
+      },
+      ifscCode: {
+        type: String,
+        trim: true,
+      },
     },
     isBlocked: {
       type: Boolean,
@@ -100,16 +138,41 @@ const driverSchema = new mongoose.Schema(
       type: [suspensionSchema],
       default: [],
     },
+    wayBill: {
+      certificateOfInsurance: {
+        type: wayBillSchema,
+        default: () => ({}),
+      },
+      recordCheckCertificate: {
+        type: wayBillSchema,
+        default: () => ({}),
+      },
+    },
     documents: {
-      proofOfWork: { type: documentSchema, default: () => ({}) },
-      profilePicture: { type: documentSchema, default: () => ({}) },
-      driversLicense: { type: documentSchema, default: () => ({}) },
-      commercialDrivingRecord: { type: documentSchema, default: () => ({}) },
+      proofOfWork: {
+        type: documentSchema,
+        default: () => ({}),
+      },
+      profilePicture: {
+        type: documentSchema,
+        default: () => ({}),
+      },
+      driversLicense: {
+        type: documentSchema,
+        default: () => ({}),
+      },
+      commercialDrivingRecord: {
+        type: documentSchema,
+        default: () => ({}),
+      },
       vehicleOwnerCertificateAndInsurance: {
         type: documentSchema,
         default: () => ({}),
       },
-      vehicleInspection: { type: documentSchema, default: () => ({}) },
+      vehicleInspection: {
+        type: documentSchema,
+        default: () => ({}),
+      },
     },
     legalAgreemant: {
       type: Boolean,
