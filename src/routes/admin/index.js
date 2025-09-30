@@ -12,6 +12,7 @@ import feedbackRouter from './Feedback/index.js';
 import supportRouter from './Support/index.js';
 import payoutRouter from './Payout/index.js';
 import cmsRouter from './CMS/index.js';
+import commissionRouter from './Commission/index.js';
 
 const adminRouter = express.Router();
 
@@ -28,5 +29,6 @@ adminRouter.use('/feedback', feedbackRouter);
 adminRouter.use('/support', supportRouter);
 adminRouter.use('/payout', payoutRouter);
 adminRouter.use('/cms', cmsRouter);
+adminRouter.use('/commission', commissionRouter);
 
 export default adminRouter;

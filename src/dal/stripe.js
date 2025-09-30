@@ -418,7 +418,12 @@ export const createDriverStripeAccount = async (user, driver) => {
   return account.id;
 };
 
-export const onboardDriverStripeAccount = async (user, driver, data) => {
+export const onboardDriverStripeAccount = async (
+  user,
+  driver,
+  data,
+  userIP,
+) => {
   const required = await stripe.accounts.retrieve(driver.stripeAccountId);
   console.log(required.requirements);
 
@@ -442,7 +447,7 @@ export const onboardDriverStripeAccount = async (user, driver, data) => {
     },
     tos_acceptance: {
       date: Math.floor(Date.now() / 1000),
-      ip: '127.0.0.1',
+      ip: userIP || '127.0.0.1',
     },
   });
 

@@ -37,7 +37,7 @@ export const addPayoutMethod = async (user, { bankDetails }, resp) => {
   }
 };
 
-export const onBoardDriver = async (user, { data }, resp) => {
+export const onBoardDriver = async (user, { data }, ip, resp) => {
   try {
     const driver = await findDriverByUserId(user._id);
     if (!driver) {
@@ -46,7 +46,9 @@ export const onBoardDriver = async (user, { data }, resp) => {
       return resp;
     }
 
-    const success = await onboardDriverStripeAccount(user, driver, data);
+    console.log(ip);
+
+    const success = await onboardDriverStripeAccount(user, driver, data, ip);
     if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to onboard driver';

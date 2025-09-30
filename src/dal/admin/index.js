@@ -1,13 +1,16 @@
+import mongoose from 'mongoose';
+import { uploadAdminImage } from '../../utils/s3Uploader.js';
+import { CAR_TYPES } from '../../enums/carType.js';
 import AdminModel from '../../models/Admin.js';
 import Booking from '../../models/Ride.js';
 import Feedback from '../../models/Feedback.js';
-import mongoose from 'mongoose';
 import Driver from '../../models/Driver.js';
 import DriverLocation from '../../models/DriverLocation.js';
 import Passenger from '../../models/Passenger.js';
 import Report from '../../models/Report.js';
 import CMS from '../../models/CMS.js';
-import { uploadAdminImage } from '../../utils/s3Uploader.js';
+import Commission from '../../models/Commission.js';
+import AdminCommission from '../../models/AdminCommission.js';
 
 const parseDateDMY = (dateStr, endOfDay = false) => {
   if (!dateStr) return null;
@@ -1932,3 +1935,120 @@ export const findCMSPageById = async (id) => CMS.findById(id).lean();
 // --- Update CMS page ---
 export const findCMSPageByIdAndUpdate = async (id, blocks) =>
   CMS.findByIdAndUpdate(id, { blocks }, { new: true }).lean();
+
+export const findCommissions = async () => {
+  const commissions = await Commission.find({
+    carType: { $in: CAR_TYPES },
+  }).lean();
+
+  const commissionMap = new Map(
+    commissions.map((c) => [c.carType, c.percentage]),
+  );
+
+  const result = CAR_TYPES.map((type) => ({
+    carType: type,
+    percentage: commissionMap.get(type) || 0,
+  }));
+
+  return result;
+};
+
+export const addOrUpdateCommission = async ({ carType, percentage }) => {
+  // Validate input
+  if (!CAR_TYPES.includes(carType)) {
+    throw new Error(`Invalid carType. Allowed: ${CAR_TYPES.join(', ')}`);
+  }
+
+  if (percentage < 0) {
+    throw new Error('Percentage must be 0 or higher');
+  }
+
+  // Either update if exists, or insert new
+  const commission = await Commission.findOneAndUpdate(
+    { carType },
+    { carType, percentage },
+    { upsert: true, new: true },
+  );
+
+  return commission;
+};
+
+export const findAdminCommissions = async ({
+  page = 1,
+  limit = 10,
+  search = '',
+  fromDate,
+  toDate,
+}) => {
+  const safePage =
+    Number.isInteger(Number(page)) && Number(page) > 0 ? Number(page) : 1;
+  const safeLimit =
+    Number.isInteger(Number(limit)) && Number(limit) > 0 ? Number(limit) : 10;
+  const skip = (safePage - 1) * safeLimit;
+
+  // --- Build filter ---
+  const filter = {};
+
+  // --- Search filter ---
+  if (search && search.trim()) {
+    const regex = new RegExp(search.trim(), 'i');
+    filter.$or = [{ carType: regex }, { 'rideId.rideId': regex }];
+  }
+
+  // --- Date filter ---
+  const start = parseDateDMY(fromDate);
+  const end = parseDateDMY(toDate);
+
+  if (start || end) {
+    filter.createdAt = {};
+    if (start) filter.createdAt.$gte = start;
+    if (end) {
+      // set to end of day
+      end.setHours(23, 59, 59, 999);
+      filter.createdAt.$lte = end;
+    }
+  }
+
+  // --- Query ---
+  const commissions = await AdminCommission.find(filter)
+    .populate('rideId', 'rideId')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(safeLimit)
+    .lean();
+
+  const total = await AdminCommission.countDocuments(filter);
+
+  return {
+    data: commissions,
+    pagination: {
+      total,
+      page: safePage,
+      limit: safeLimit,
+      totalPages: Math.ceil(total / safeLimit),
+    },
+  };
+};
+
+export const findComissionStats = async () => {
+  // Total rides
+  const totalRides = await Booking.countDocuments({});
+
+  // Total commission
+  const commissionAgg = await AdminCommission.aggregate([
+    {
+      $group: {
+        _id: null,
+        totalCommission: { $sum: '$commissionAmount' },
+      },
+    },
+  ]);
+
+  const totalCommission =
+    commissionAgg.length > 0 ? commissionAgg[0].totalCommission : 0;
+
+  return {
+    totalRides,
+    totalCommission,
+  };
+};

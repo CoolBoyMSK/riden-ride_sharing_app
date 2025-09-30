@@ -28,7 +28,7 @@ export const onBoardDriverController = (req, res) =>
     {
       handler: onBoardDriver,
       validationFn: null,
-      handlerParams: [req.user, req.body],
+      handlerParams: [req.user, req.body, req.ip],
       successMessage: 'Driver onboard successfully',
     },
     req,
