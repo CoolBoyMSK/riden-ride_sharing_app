@@ -192,10 +192,8 @@ export const getWayBill = async (user, resp) => {
       resp.error_message = 'Driver not found';
       return resp;
     }
-    console.log(driver)
 
     const success = await findDriverWayBill(driver._id);
-    console.log(success)
     if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to fetch way bill';
