@@ -2195,3 +2195,86 @@ const _sendBatch = async (items, block) => {
 
   return result;
 };
+
+export const findAllPassengers = async () =>
+  Passenger.find()
+    .select('userId uniqueId')
+    .populate({ path: 'userId', select: 'name email profileImg phoneNumber' })
+    .lean();
+
+export const findAllDrivers = async () =>
+  Driver.find()
+    .select('userId uniqueId')
+    .populate({ path: 'userId', select: 'name email profileImg phoneNumber' })
+    .lean();
+
+export const findAllAlerts = async ({
+  page = 1,
+  limit = 10,
+  fromDate,
+  toDate,
+  search = "",
+}) => {
+  const safePage =
+    Number.isInteger(Number(page)) && Number(page) > 0 ? Number(page) : 1;
+  const safeLimit =
+    Number.isInteger(Number(limit)) && Number(limit) > 0 ? Number(limit) : 10;
+  const skip = (safePage - 1) * safeLimit;
+
+  // --- Build filter ---
+  const filter = {};
+
+  // helper to convert "30-09-2025" → Date
+  const parseDate = (dateStr, endOfDay = false) => {
+    const [day, month, year] = dateStr.split('-').map(Number);
+    return endOfDay
+      ? new Date(year, month - 1, day, 23, 59, 59, 999)
+      : new Date(year, month - 1, day, 0, 0, 0, 0);
+  };
+
+  // Date range filter
+  if (fromDate || toDate) {
+    filter.createdAt = {};
+    if (fromDate) filter.createdAt.$gte = parseDate(fromDate); // start of day
+    if (toDate) filter.createdAt.$lte = parseDate(toDate, true); // end of day
+  }
+
+  // Search filter (title, status, or createdAt as string)
+  if (search) {
+    const regex = new RegExp(search, 'i'); // case-insensitive
+    filter.$or = [
+      { title: regex },
+      { status: regex },
+      {
+        $expr: {
+          $regexMatch: {
+            input: {
+              $dateToString: { format: '%d-%m-%Y', date: '$createdAt' },
+            },
+            regex: search,
+            options: 'i',
+          },
+        },
+      },
+    ];
+  }
+
+  const [alerts, total] = await Promise.all([
+    Alert.find(filter)
+      .sort({ createdAt: -1 }) // newest first
+      .skip(skip)
+      .limit(safeLimit)
+      .lean(),
+    Alert.countDocuments(filter),
+  ]);
+
+  return {
+    data: alerts,
+    pagination: {
+      total,
+      page: safePage,
+      limit: safeLimit,
+      totalPages: Math.ceil(total / safeLimit),
+    },
+  };
+};
