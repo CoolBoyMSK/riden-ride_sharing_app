@@ -1922,42 +1922,36 @@ export const financialAnalytics = async (filter = 'today') => {
   }
 };
 
-export const prepareBlocks = async (textBlocks = [], files = [], userId) => {
-  const blocks = [];
+export const prepareBlocks = async (files = [], userId) => {
+  const images = [];
 
-  // Add text blocks safely
-  textBlocks.forEach((text) => {
-    if (typeof text === 'string' && text.trim()) {
-      blocks.push({ type: 'text', content: text.trim() });
-    }
-  });
-
-  // Upload images and add as blocks
   if (files && files.length > 0) {
     for (const file of files) {
       if (file.buffer && file.mimetype) {
         const url = await uploadAdminImage(userId, file);
-        blocks.push({ type: 'image', content: url });
+        images.push(url);
       }
     }
   }
 
-  return blocks;
+  return images;
 };
 
 // --- Find all CMS pages ---
 export const findPages = async () => CMS.find().select('page').lean();
 
 // --- Create CMS page ---
-export const createCMSPage = async (page, blocks) =>
-  CMS.create({ page, blocks });
+export const createCMSPage = async (page, cmsData) => {
+  return CMS.create({ page, ...cmsData });
+};
 
 // --- Find by ID ---
 export const findCMSPageById = async (id) => CMS.findById(id).lean();
 
 // --- Update CMS page ---
-export const findCMSPageByIdAndUpdate = async (id, blocks) =>
-  CMS.findByIdAndUpdate(id, { blocks }, { new: true }).lean();
+export const findCMSPageByIdAndUpdate = async (id, updateData) => {
+  return CMS.findByIdAndUpdate(id, updateData, { new: true }).lean();
+};
 
 export const findCommissions = async () => {
   const commissions = await Commission.find({

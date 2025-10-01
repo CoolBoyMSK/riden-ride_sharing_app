@@ -1,19 +1,18 @@
 import mongoose from 'mongoose';
 
-const contentBlockSchema = new mongoose.Schema(
+const faqSchema = new mongoose.Schema(
   {
-    type: {
+    question: {
       type: String,
-      enum: ['text', 'image'], // Add more types in the future: video, table, etc.
-      required: true,
+      trim: true,
     },
-    content: {
-      type: String, // For text: the actual text, for image: image URL
-      required: true,
+    answer: {
+      type: String,
+      trim: true,
     },
   },
   { _id: false },
-); // prevent nested _id
+);
 
 const cmsSchema = new mongoose.Schema(
   {
@@ -22,12 +21,18 @@ const cmsSchema = new mongoose.Schema(
       required: true,
       trim: true,
       unique: true,
+      index: true,
     },
-    blocks: {
-      type: [contentBlockSchema],
-      default: [],
-      validate: [(val) => val.length > 0, 'Content cannot be empty'],
+    content: {
+      type: String,
+      trim: true,
     },
+    faqs: [faqSchema],
+    images: [
+      {
+        type: String,
+      },
+    ],
   },
   { timestamps: true },
 );
