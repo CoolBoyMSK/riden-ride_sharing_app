@@ -5,6 +5,7 @@ import UserModel from '../../models/User.js';
 import DriverModel from '../../models/Driver.js';
 import PassengerModel from '../../models/Passenger.js';
 import UpdateRequest from '../../models/updateRequest.js';
+import CMS from '../../models/CMS.js';
 import { sendEmailUpdateVerificationOtp } from '../../templates/emails/user/index.js';
 import mongoose from 'mongoose';
 import {
@@ -252,3 +253,7 @@ export const update2FAStatus = async (userId) => {
 
   return { is2FAEnabled: user.is2FAEnabled };
 };
+
+export const findCMSPages = async () => CMS.find().select('page').lean();
+
+export const findCMSPageById = async (id) => CMS.findById(id).lean();

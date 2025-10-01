@@ -8,6 +8,7 @@ import supportRouter from './support/index.js';
 import callRouter from './Call/index.js';
 import notificationRouter from './Notification/index.js';
 import securityRouter from './Security/index.js';
+import cmsRouter from './CMS/index.js';
 
 const userRouter = express.Router();
 
@@ -20,5 +21,6 @@ userRouter.use('/support', supportRouter);
 userRouter.use('/call', callRouter);
 userRouter.use('/notification', notificationRouter);
 userRouter.use('/security', securityRouter);
+userRouter.use('/cms', cmsRouter);
 
 export default userRouter;
