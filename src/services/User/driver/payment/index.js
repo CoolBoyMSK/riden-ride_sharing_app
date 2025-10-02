@@ -38,7 +38,7 @@ export const addPayoutMethod = async (user, { bankDetails }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while adding payout method';
+    resp.error_message = error.message || 'Something went wrong';
     return resp;
   }
 };
@@ -51,8 +51,6 @@ export const onBoardDriver = async (user, { data }, ip, resp) => {
       resp.error_message = 'Failed to fetch driver';
       return resp;
     }
-
-    console.log(ip);
 
     const success = await onboardDriverStripeAccount(user, driver, data, ip);
     if (!success) {
@@ -135,8 +133,6 @@ export const sendLicenseFront = async (user, file, resp) => {
       return resp;
     }
 
-    console.log(file);
-
     const success = await uploadLicenseFront(driver.stripeAccountId, file);
     if (!success) {
       resp.error = true;
@@ -162,8 +158,6 @@ export const sendLicenseBack = async (user, file, resp) => {
       resp.error_message = 'Failed to fetch driver';
       return resp;
     }
-
-    console.log(file);
 
     const success = await uploadLicenseBack(driver.stripeAccountId, file);
     if (!success) {
@@ -285,7 +279,7 @@ export const getAllPayoutMethods = async (user, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while fetching payout methods';
+    resp.error_message = error.message || 'Something went wrong';
     return resp;
   }
 };
@@ -311,7 +305,7 @@ export const getPayoutMethodById = async (user, { id }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while fetching payout method';
+    resp.error_message = error.message || 'Something went wrong';
     return resp;
   }
 };
@@ -341,7 +335,7 @@ export const updatePayoutMethod = async (user, { id }, { payload }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while updating payout method';
+    resp.error_message = error.message || 'Something went wrong';
     return resp;
   }
 };
@@ -371,7 +365,7 @@ export const deletePayoutMethod = async (user, { id }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while deleting payout method';
+    resp.error_message = error.message || 'Something went wrong';
     return resp;
   }
 };
@@ -392,15 +386,12 @@ export const setDefaultPayoutMethod = async (user, { id }, resp) => {
       return resp;
     }
 
-    console.log(success);
-
     resp.data = success;
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message =
-      'Something went wrong while setting default payout method';
+    resp.error_message = error.message || 'Something went wrong';
     return resp;
   }
 };
