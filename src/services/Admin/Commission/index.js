@@ -37,7 +37,7 @@ export const getCommissions = async (user, resp) => {
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);
-    response.error = true;
+    resp.error = true;
     resp.error_message = error.message || 'something went wrong';
     return resp;
   }
@@ -66,7 +66,7 @@ export const getAdminCommissions = async (
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);
-    response.error = true;
+    resp.error = true;
     resp.error_message = error.message || 'something went wrong';
     return resp;
   }
