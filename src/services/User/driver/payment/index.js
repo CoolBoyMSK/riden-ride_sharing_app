@@ -3,6 +3,12 @@ import {
   createDriverStripeAccount,
   addDriverExternalAccount,
   onboardDriverStripeAccount,
+  createDriverVerification,
+  uploadAdditionalDocument,
+  uploadLicenseFront,
+  uploadLicenseBack,
+  findVerificationStatus,
+  checkConnectedAccountStatus,
   getAllExternalAccounts,
   getExternalAccountById,
   updateExternalAccount,
@@ -52,6 +58,173 @@ export const onBoardDriver = async (user, { data }, ip, resp) => {
     if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to onboard driver';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
+    return resp;
+  }
+};
+
+export const driverIdentityVerification = async (user, resp) => {
+  try {
+    const driver = await findDriverByUserId(user._id);
+    if (!driver) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch driver';
+      return resp;
+    }
+
+    const success = await createDriverVerification(driver);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to verify driver';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
+    return resp;
+  }
+};
+
+export const sendAdditionalDocument = async (user, file, resp) => {
+  try {
+    const driver = await findDriverByUserId(user._id);
+    if (!driver) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch driver';
+      return resp;
+    }
+
+    const success = await uploadAdditionalDocument(
+      driver.stripeAccountId,
+      file,
+    );
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to upload document';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
+    return resp;
+  }
+};
+
+export const sendLicenseFront = async (user, file, resp) => {
+  try {
+    const driver = await findDriverByUserId(user._id);
+    if (!driver) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch driver';
+      return resp;
+    }
+
+    console.log(file);
+
+    const success = await uploadLicenseFront(driver.stripeAccountId, file);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to upload front of license';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
+    return resp;
+  }
+};
+
+export const sendLicenseBack = async (user, file, resp) => {
+  try {
+    const driver = await findDriverByUserId(user._id);
+    if (!driver) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch driver';
+      return resp;
+    }
+
+    console.log(file);
+
+    const success = await uploadLicenseBack(driver.stripeAccountId, file);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to upload license back';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
+    return resp;
+  }
+};
+
+export const getConnectedAccountStatus = async (user, resp) => {
+  try {
+    const driver = await findDriverByUserId(user._id);
+    if (!driver) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch driver';
+      return resp;
+    }
+
+    const success = await checkConnectedAccountStatus(driver.stripeAccountId);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to check account status';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
+    return resp;
+  }
+};
+
+export const getIdentityVerificationStatus = async (
+  user,
+  { sessionId },
+  resp,
+) => {
+  try {
+    const driver = await findDriverByUserId(user._id);
+    if (!driver) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch driver';
+      return resp;
+    }
+
+    const success = await findVerificationStatus(sessionId);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch driver stripe verification status';
       return resp;
     }
 

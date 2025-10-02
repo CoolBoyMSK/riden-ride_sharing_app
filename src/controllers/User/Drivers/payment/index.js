@@ -2,6 +2,12 @@ import { handleResponse } from '../../../../utils/handleRespone.js';
 import {
   addPayoutMethod,
   onBoardDriver,
+  driverIdentityVerification,
+  sendAdditionalDocument,
+  sendLicenseFront,
+  sendLicenseBack,
+  getIdentityVerificationStatus,
+  getConnectedAccountStatus,
   getDriverStripeAccount,
   getAllPayoutMethods,
   getPayoutMethodById,
@@ -30,6 +36,79 @@ export const onBoardDriverController = (req, res) =>
       validationFn: null,
       handlerParams: [req.user, req.body, req.ip],
       successMessage: 'Driver onboard successfully',
+    },
+    req,
+    res,
+  );
+
+export const driverIdentityVerificationController = (req, res) =>
+  handleResponse(
+    {
+      handler: driverIdentityVerification,
+      validationFn: null,
+      handlerParams: [req.user],
+      successMessage: 'Driver Identitfy verification link sent successfully',
+    },
+    req,
+    res,
+  );
+
+export const sendAdditionalDocumentController = (req, res) =>
+  handleResponse(
+    {
+      handler: sendAdditionalDocument,
+      validationFn: null,
+      handlerParams: [req.user, req.file],
+      successMessage: 'Additional Document uploaded successfully',
+    },
+    req,
+    res,
+  );
+
+export const sendLicenseFrontController = (req, res) =>
+  handleResponse(
+    {
+      handler: sendLicenseFront,
+      validationFn: null,
+      handlerParams: [req.user, req.file],
+      successMessage: 'License front uploaded successfully',
+    },
+    req,
+    res,
+  );
+
+export const sendLicenseBackController = (req, res) =>
+  handleResponse(
+    {
+      handler: sendLicenseBack,
+      validationFn: null,
+      handlerParams: [req.user, req.file],
+      successMessage: 'License back uploaded successfully',
+    },
+    req,
+    res,
+  );
+
+export const getIdentityVerificationStatusController = (req, res) =>
+  handleResponse(
+    {
+      handler: getIdentityVerificationStatus,
+      validationFn: null,
+      handlerParams: [req.user, req.query],
+      successMessage:
+        'Driver stripe identity verification status fetched successfully',
+    },
+    req,
+    res,
+  );
+
+export const getConnectedAccountStatusController = (req, res) =>
+  handleResponse(
+    {
+      handler: getConnectedAccountStatus,
+      validationFn: null,
+      handlerParams: [req.user],
+      successMessage: 'Driver account status fetched successfully',
     },
     req,
     res,

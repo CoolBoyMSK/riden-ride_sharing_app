@@ -1,8 +1,15 @@
 import express from 'express';
 import { registerRoute } from '../../../../utils/registerRoute.js';
+import { uploadSingle } from '../../../../middlewares/upload.js';
 import {
   addPayoutMethodController,
   onBoardDriverController,
+  driverIdentityVerificationController,
+  sendAdditionalDocumentController,
+  sendLicenseFrontController,
+  sendLicenseBackController,
+  getIdentityVerificationStatusController,
+  getConnectedAccountStatusController,
   getDriverStripeAccountController,
   getAllPayoutMethodsController,
   getPayoutMethodByIdController,
@@ -26,6 +33,51 @@ registerRoute({
   route: '/onboard',
   driver_auth_enable: true,
   post_method: onBoardDriverController,
+});
+
+registerRoute({
+  router,
+  route: '/verify',
+  driver_auth_enable: true,
+  post_method: driverIdentityVerificationController,
+});
+
+registerRoute({
+  router,
+  route: '/upload',
+  driver_auth_enable: true,
+  post_middlewares: [uploadSingle],
+  post_method: sendAdditionalDocumentController,
+});
+
+registerRoute({
+  router,
+  route: '/license-front',
+  driver_auth_enable: true,
+  post_middlewares: [uploadSingle],
+  post_method: sendLicenseFrontController,
+});
+
+registerRoute({
+  router,
+  route: '/license-back',
+  driver_auth_enable: true,
+  post_middlewares: [uploadSingle],
+  post_method: sendLicenseBackController,
+});
+
+registerRoute({
+  router,
+  route: '/identity-status',
+  driver_auth_enable: true,
+  post_method: getIdentityVerificationStatusController,
+});
+
+registerRoute({
+  router,
+  route: '/status',
+  driver_auth_enable: true,
+  post_method: getConnectedAccountStatusController,
 });
 
 registerRoute({

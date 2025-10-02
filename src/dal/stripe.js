@@ -1,4 +1,6 @@
 import Stripe from 'stripe';
+import fs from 'fs';
+import path from 'path';
 import mongoose from 'mongoose';
 import PayoutRequestModel from '../models/InstantPayoutRequest.js';
 import TransactionModel from '../models/Transaction.js';
@@ -424,9 +426,6 @@ export const onboardDriverStripeAccount = async (
   data,
   userIP,
 ) => {
-  const required = await stripe.accounts.retrieve(driver.stripeAccountId);
-  console.log(required.requirements);
-
   const account = await stripe.accounts.update(driver.stripeAccountId, {
     business_type: 'individual',
     business_profile: {
@@ -440,7 +439,13 @@ export const onboardDriverStripeAccount = async (
       dob: data.dob,
       email: user.email,
       phone: '+14165550000',
-      address: data.address,
+      address: {
+        line1: data.address.line1,
+        city: data.address.city,
+        state: data.address.state,
+        postal_code: data.address.postal_code,
+        country: data.address.country,
+      },
       relationship: {
         title: 'Driver',
       },
@@ -458,6 +463,133 @@ export const onboardDriverStripeAccount = async (
   ).lean();
 
   return account.id;
+};
+
+export const uploadAdditionalDocument = async (accountId, file) => {
+  const stripeFile = await stripe.files.create({
+    purpose: 'identity_document',
+    file: {
+      data: file.buffer, // buffer from multer
+      name: file.originalname, // keep the uploaded filename
+      type: file.mimetype, // actual mimetype
+    },
+  });
+
+  // Attach to connected account
+  const account = await stripe.accounts.update(accountId, {
+    individual: {
+      verification: {
+        additional_document: {
+          // front: stripeFile.id,
+          front: 'file_identity_document_success',
+        },
+      },
+    },
+  });
+
+  return account;
+};
+
+export const uploadLicenseFront = async (accountId, file) => {
+  const stripeFile = await stripe.files.create({
+    purpose: 'identity_document',
+    file: {
+      data: file.buffer, // buffer from multer
+      name: file.originalname, // keep the uploaded filename
+      type: file.mimetype, // actual mimetype
+    },
+  });
+
+  // Attach to connected account
+  const account = await stripe.accounts.update(accountId, {
+    individual: {
+      verification: {
+        document: {
+          // front: stripeFile.id,
+          front: 'file_identity_document_success',
+        },
+      },
+    },
+  });
+
+  return account;
+};
+
+export const uploadLicenseBack = async (accountId, file) => {
+  const stripeFile = await stripe.files.create({
+    purpose: 'identity_document',
+    file: {
+      data: file.buffer, // buffer from multer
+      name: file.originalname, // keep the uploaded filename
+      type: file.mimetype, // actual mimetype
+    },
+  });
+
+  // Attach to connected account
+  const account = await stripe.accounts.update(accountId, {
+    individual: {
+      verification: {
+        document: {
+          // back: stripeFile.id,
+          back: 'file_identity_document_success',
+        },
+      },
+    },
+  });
+
+  return account;
+};
+
+export const createDriverVerification = async (driver) => {
+  const session = await stripe.identity.verificationSessions.create({
+    type: 'document',
+    options: {
+      document: {
+        require_id_number: true,
+        require_live_capture: true,
+      },
+    },
+    metadata: {
+      driverId: driver._id.toString(),
+      accountId: driver.stripeAccountId,
+    },
+  });
+
+  return {
+    sessionId: session.id,
+    url: session.url,
+  };
+};
+
+export const findVerificationStatus = async (sessionId) => {
+  const session =
+    await stripe.identity.verificationSessions.retrieve(sessionId);
+
+  return {
+    status: session.status,
+    verified: session.status === 'verified',
+    verifiedFiles: session.verified_outputs ?? null,
+    verifiedOutputs: session.verified_outputs ?? null,
+  };
+};
+
+export const checkConnectedAccountStatus = async (accountId) => {
+  const account = await stripe.accounts.retrieve(accountId);
+  console.log(account);
+
+  return {
+    accountId: account.id,
+    chargesEnabled: account.charges_enabled,
+    payoutsEnabled: account.payouts_enabled,
+    detailsSubmitted: account.details_submitted,
+    requirements: {
+      currentlyDue: account.requirements?.currently_due || [],
+      eventuallyDue: account.requirements?.eventually_due || [],
+      pastDue: account.requirements?.past_due || [],
+      pendingVerification: account.requirements?.pending_verification || [],
+      errors: account.requirements?.errors || [],
+    },
+  };
 };
 
 export const addDriverExternalAccount = async (driver, bankAccountData) => {
