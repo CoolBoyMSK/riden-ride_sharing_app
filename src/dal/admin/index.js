@@ -2285,24 +2285,33 @@ export const findCommissions = async () => {
   return result;
 };
 
-export const addOrUpdateCommission = async ({ carType, percentage }) => {
-  // Validate input
-  if (!CAR_TYPES.includes(carType)) {
-    throw new Error(`Invalid carType. Allowed: ${CAR_TYPES.join(', ')}`);
+export const addOrUpdateCommissions = async (commissions = []) => {
+  if (!Array.isArray(commissions)) {
+    throw new Error('Commissions must be an array');
   }
 
-  if (percentage < 0) {
-    throw new Error('Percentage must be 0 or higher');
+  const results = [];
+  for (const { carType, percentage } of commissions) {
+    // Validate input
+    if (!CAR_TYPES.includes(carType)) {
+      throw new Error(
+        `Invalid carType: ${carType}. Allowed: ${CAR_TYPES.join(', ')}`,
+      );
+    }
+    if (percentage < 0) {
+      throw new Error(`Percentage for ${carType} must be 0 or higher`);
+    }
+
+    const commission = await Commission.findOneAndUpdate(
+      { carType },
+      { carType, percentage },
+      { upsert: true, new: true },
+    );
+
+    results.push(commission);
   }
 
-  // Either update if exists, or insert new
-  const commission = await Commission.findOneAndUpdate(
-    { carType },
-    { carType, percentage },
-    { upsert: true, new: true },
-  );
-
-  return commission;
+  return results;
 };
 
 export const findAdminCommissions = async ({

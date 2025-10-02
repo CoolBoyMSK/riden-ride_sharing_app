@@ -1,14 +1,15 @@
 import {
   findCommissions,
-  addOrUpdateCommission,
+  addOrUpdateCommissions,
   findAdminCommissions,
   findComissionStats,
 } from '../../../dal/admin/index.js';
 
-export const setCommission = async (user, { carType, percentage }, resp) => {
+export const setCommission = async (user, { commissions }, resp) => {
   try {
-    const success = await addOrUpdateCommission({ carType, percentage });
-    if (!success) {
+    const success = await addOrUpdateCommissions(commissions);
+
+    if (!success || success.length === 0) {
       resp.error = true;
       resp.error_message = 'Failed to set commissions';
       return resp;
