@@ -1,6 +1,4 @@
 import Stripe from 'stripe';
-import fs from 'fs';
-import path from 'path';
 import mongoose from 'mongoose';
 import PayoutRequestModel from '../models/InstantPayoutRequest.js';
 import TransactionModel from '../models/Transaction.js';
