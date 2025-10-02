@@ -18,7 +18,7 @@ export const setCommission = async (user, { carType, percentage }, resp) => {
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);
-    response.error = true;
+    resp.error = true;
     resp.error_message = error.message || 'something went wrong';
     return resp;
   }

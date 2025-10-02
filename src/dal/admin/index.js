@@ -1194,6 +1194,252 @@ export const driversAnalytics = async (filter = 'today') => {
   };
 };
 
+// export const passengersAnalytics = async (filter = 'today') => {
+//   try {
+//     // --- Totals ---
+//     const [
+//       totalPassengers,
+//       totalActivePassengers,
+//       totalFeedbacks,
+//       totalReportedDrivers,
+//     ] = await Promise.all([
+//       Passenger.countDocuments({ isBlocked: false }),
+//       Passenger.countDocuments({ isBlocked: false, isActive: true }),
+//       Feedback.countDocuments({ type: 'by_driver' }),
+//       Report.countDocuments({ type: 'by_driver' }),
+//     ]);
+
+//     const reportedPassengersPercentage =
+//       totalPassengers > 0 ? (totalReportedDrivers / totalPassengers) * 100 : 0;
+
+//     const reviewedPassengersPercentage =
+//       totalPassengers > 0 ? (totalFeedbacks / totalPassengers) * 100 : 0;
+
+//     // --- Date range ---
+//     const now = new Date();
+//     let startDate, endDate, groupFormat;
+
+//     switch (filter) {
+//       case 'today':
+//         startDate = new Date(
+//           now.getFullYear(),
+//           now.getMonth(),
+//           now.getDate(),
+//           0,
+//           0,
+//           0,
+//         );
+//         endDate = new Date(
+//           now.getFullYear(),
+//           now.getMonth(),
+//           now.getDate(),
+//           23,
+//           59,
+//           59,
+//           999,
+//         );
+//         groupFormat = '%H';
+//         break;
+
+//       case 'this_week': {
+//         const firstDayOfWeek = new Date(now);
+//         firstDayOfWeek.setDate(now.getDate() - now.getDay());
+//         firstDayOfWeek.setHours(0, 0, 0, 0);
+//         startDate = firstDayOfWeek;
+//         endDate = new Date(firstDayOfWeek);
+//         endDate.setDate(firstDayOfWeek.getDate() + 6);
+//         endDate.setHours(23, 59, 59, 999);
+//         groupFormat = '%Y-%m-%d';
+//         break;
+//       }
+
+//       case 'this_month':
+//         startDate = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
+//         endDate = new Date(
+//           now.getFullYear(),
+//           now.getMonth() + 1,
+//           0,
+//           23,
+//           59,
+//           59,
+//           999,
+//         );
+//         groupFormat = '%Y-%m-%d';
+//         break;
+
+//       case 'last_year':
+//         startDate = new Date(now.getFullYear() - 1, 0, 1, 0, 0, 0);
+//         endDate = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
+//         groupFormat = '%Y-%m';
+//         break;
+
+//       default:
+//         startDate = new Date(
+//           now.getFullYear(),
+//           now.getMonth(),
+//           now.getDate(),
+//           0,
+//           0,
+//           0,
+//         );
+//         endDate = new Date(
+//           now.getFullYear(),
+//           now.getMonth(),
+//           now.getDate(),
+//           23,
+//           59,
+//           59,
+//           999,
+//         );
+//         groupFormat = '%Y-%m-%d';
+//     }
+
+//     // --- Aggregation ---
+//     const rideCounts = await Booking.aggregate([
+//       {
+//         $match: {
+//           createdAt: { $gte: startDate, $lte: endDate },
+//           isDeleted: { $ne: true },
+//         },
+//       },
+//       {
+//         $group: {
+//           _id: '$passengerId',
+//           rideCount: { $sum: 1 },
+//           firstBookingDate: { $min: '$createdAt' },
+//         },
+//       },
+//       {
+//         $project: {
+//           rideCount: 1,
+//           key: {
+//             $dateToString: { format: groupFormat, date: '$firstBookingDate' },
+//           },
+//         },
+//       },
+//       {
+//         $group: {
+//           _id: {
+//             key: '$key',
+//             type: { $cond: [{ $eq: ['$rideCount', 1] }, 'single', 'multiple'] },
+//           },
+//           count: { $sum: 1 },
+//         },
+//       },
+//       {
+//         $group: {
+//           _id: '$_id.key',
+//           data: { $push: { type: '$_id.type', count: '$count' } },
+//         },
+//       },
+//       { $sort: { _id: 1 } },
+//     ]);
+
+//     // --- Chart data ---
+//     const chartData = [];
+//     const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+//     const monthsOfYear = [
+//       'Jan',
+//       'Feb',
+//       'Mar',
+//       'Apr',
+//       'May',
+//       'Jun',
+//       'Jul',
+//       'Aug',
+//       'Sep',
+//       'Oct',
+//       'Nov',
+//       'Dec',
+//     ];
+
+//     // Helper to compute repeated ride ratio
+//     const calcRatio = (single, multiple) => {
+//       const total = single + multiple;
+//       return total > 0 ? Number(((multiple / total) * 100).toFixed(2)) : 0;
+//     };
+
+//     if (filter === 'today') {
+//       for (let h = 0; h < 24; h++) {
+//         const hourStr = h.toString().padStart(2, '0');
+//         const entry = rideCounts.find((r) => r._id === hourStr);
+//         const single = entry?.data.find((d) => d.type === 'single')?.count || 0;
+//         const multiple =
+//           entry?.data.find((d) => d.type === 'multiple')?.count || 0;
+//         chartData.push({
+//           hour: `${hourStr}:00`,
+//           single,
+//           multiple,
+//           repeatedRideRatio: calcRatio(single, multiple),
+//         });
+//       }
+//     } else if (filter === 'this_week') {
+//       const curDate = new Date(startDate);
+//       for (let i = 0; i < 7; i++) {
+//         const dayKey = curDate.toISOString().split('T')[0];
+//         const entry = rideCounts.find((r) => r._id === dayKey);
+//         const single = entry?.data.find((d) => d.type === 'single')?.count || 0;
+//         const multiple =
+//           entry?.data.find((d) => d.type === 'multiple')?.count || 0;
+//         chartData.push({
+//           day: dayKey,
+//           dayName: daysOfWeek[curDate.getDay()],
+//           single,
+//           multiple,
+//           repeatedRideRatio: calcRatio(single, multiple),
+//         });
+//         curDate.setDate(curDate.getDate() + 1);
+//       }
+//     } else if (filter === 'this_month') {
+//       const allDays = getAllDaysInMonth(now.getFullYear(), now.getMonth());
+//       allDays.forEach((date) => {
+//         const dayKey = date.toISOString().split('T')[0];
+//         const entry = rideCounts.find((r) => r._id === dayKey);
+//         const single = entry?.data.find((d) => d.type === 'single')?.count || 0;
+//         const multiple =
+//           entry?.data.find((d) => d.type === 'multiple')?.count || 0;
+//         chartData.push({
+//           day: dayKey,
+//           dayName: daysOfWeek[date.getDay()],
+//           single,
+//           multiple,
+//           repeatedRideRatio: calcRatio(single, multiple),
+//         });
+//       });
+//     } else if (filter === 'last_year') {
+//       for (let m = 0; m < 12; m++) {
+//         const monthKey = `${startDate.getFullYear()}-${(m + 1)
+//           .toString()
+//           .padStart(2, '0')}`;
+//         const entry = rideCounts.find((r) => r._id === monthKey);
+//         const single = entry?.data.find((d) => d.type === 'single')?.count || 0;
+//         const multiple =
+//           entry?.data.find((d) => d.type === 'multiple')?.count || 0;
+//         chartData.push({
+//           month: monthKey,
+//           monthName: monthsOfYear[m],
+//           single,
+//           multiple,
+//           repeatedRideRatio: calcRatio(single, multiple),
+//         });
+//       }
+//     }
+
+//     return {
+//       totalPassengers,
+//       totalActivePassengers,
+//       totalFeedbacks,
+//       totalReportedDrivers,
+//       reportedPassengersPercentage: reportedPassengersPercentage.toFixed(2),
+//       reviewedPassengersPercentage: reviewedPassengersPercentage.toFixed(2),
+//       passengerRideChart: chartData,
+//     };
+//   } catch (error) {
+//     console.error('Error in passengersAnalytics:', error);
+//     throw error;
+//   }
+// };
+
 export const passengersAnalytics = async (filter = 'today') => {
   try {
     // --- Totals ---
@@ -1294,7 +1540,7 @@ export const passengersAnalytics = async (filter = 'today') => {
         groupFormat = '%Y-%m-%d';
     }
 
-    // --- Aggregation ---
+    // --- Aggregation for rides ---
     const rideCounts = await Booking.aggregate([
       {
         $match: {
@@ -1335,7 +1581,78 @@ export const passengersAnalytics = async (filter = 'today') => {
       { $sort: { _id: 1 } },
     ]);
 
-    // --- Chart data ---
+    // --- Calculate last 30 days range ---
+    const today = new Date();
+    const last30DaysDate = new Date();
+    last30DaysDate.setDate(today.getDate() - 29); // including today
+
+    const complaintsAndRatings = await Promise.all([
+      // --- Complaints aggregation ---
+      Report.aggregate([
+        {
+          $match: {
+            createdAt: { $gte: last30DaysDate, $lte: today },
+            type: 'by_driver',
+          },
+        },
+        {
+          $group: {
+            _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+            reason: { $sum: 1 },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]),
+
+      // --- Reviews aggregation ---
+      Feedback.aggregate([
+        {
+          $match: {
+            createdAt: { $gte: last30DaysDate, $lte: today },
+            type: 'by_driver',
+          },
+        },
+        {
+          $group: {
+            _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+            feedback: { $sum: 1 },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]),
+    ]);
+
+    const complaintsData = complaintsAndRatings[0];
+    const ratingsData = complaintsAndRatings[1];
+
+    // Generate array of last 30 days
+    const getLast30Days = () => {
+      const days = [];
+      for (let i = 29; i >= 0; i--) {
+        const d = new Date(today);
+        d.setDate(today.getDate() - i);
+        days.push(new Date(d));
+      }
+      return days;
+    };
+
+    const last30Days = getLast30Days();
+
+    // Final chart data
+    const monthlyComplaintsAndRatingsChart = [];
+    last30Days.forEach((date) => {
+      const dayKey = date.toISOString().split('T')[0];
+      const complaintsEntry = complaintsData.find((c) => c._id === dayKey);
+      const ratingsEntry = ratingsData.find((r) => r._id === dayKey);
+
+      monthlyComplaintsAndRatingsChart.push({
+        day: dayKey,
+        complaints: complaintsEntry?.complaints || 0,
+        reviews: ratingsEntry?.reviews || 0,
+      });
+    });
+
+    // --- Chart data for rides ---
     const chartData = [];
     const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const monthsOfYear = [
@@ -1353,7 +1670,6 @@ export const passengersAnalytics = async (filter = 'today') => {
       'Dec',
     ];
 
-    // Helper to compute repeated ride ratio
     const calcRatio = (single, multiple) => {
       const total = single + multiple;
       return total > 0 ? Number(((multiple / total) * 100).toFixed(2)) : 0;
@@ -1408,9 +1724,7 @@ export const passengersAnalytics = async (filter = 'today') => {
       });
     } else if (filter === 'last_year') {
       for (let m = 0; m < 12; m++) {
-        const monthKey = `${startDate.getFullYear()}-${(m + 1)
-          .toString()
-          .padStart(2, '0')}`;
+        const monthKey = `${startDate.getFullYear()}-${(m + 1).toString().padStart(2, '0')}`;
         const entry = rideCounts.find((r) => r._id === monthKey);
         const single = entry?.data.find((d) => d.type === 'single')?.count || 0;
         const multiple =
@@ -1433,6 +1747,7 @@ export const passengersAnalytics = async (filter = 'today') => {
       reportedPassengersPercentage: reportedPassengersPercentage.toFixed(2),
       reviewedPassengersPercentage: reviewedPassengersPercentage.toFixed(2),
       passengerRideChart: chartData,
+      monthlyComplaintsAndRatingsChart, // 👈 new chart added here
     };
   } catch (error) {
     console.error('Error in passengersAnalytics:', error);
@@ -2213,7 +2528,7 @@ export const findAllAlerts = async ({
   limit = 10,
   fromDate,
   toDate,
-  search = "",
+  search = '',
 }) => {
   const safePage =
     Number.isInteger(Number(page)) && Number(page) > 0 ? Number(page) : 1;
