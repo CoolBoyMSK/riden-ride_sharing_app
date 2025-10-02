@@ -30,6 +30,7 @@ import {
   handleDriverResponse,
   findActiveRide,
   createFeedback,
+  deductRidenCommission,
 } from '../dal/ride.js';
 import {
   findDriverByUserId,
@@ -1605,7 +1606,7 @@ export const initSocket = (server) => {
           driver.isBlocked ||
           driver.isSuspended ||
           driver.backgroundCheckStatus !== 'approved' ||
-          !['on_ride'].includes(driver.status)
+          !['on_ride', 'online'].includes(driver.status)
         ) {
           return socket.emit('ride:driver_join_ride', {
             success: false,
@@ -1662,7 +1663,10 @@ export const initSocket = (server) => {
             code: 'ALREADY_CANCELLED',
             message: 'Ride already cancelled by system',
           });
-        } else if (ride.status === 'RIDE_COMPLETED') {
+        } else if (
+          ride.status === 'RIDE_COMPLETED' &&
+          ride.paymentStatus === 'COMPLETED'
+        ) {
           await session.abortTransaction();
           session.endSession();
           return socket.emit('ride:driver_join_ride', {
@@ -1787,7 +1791,10 @@ export const initSocket = (server) => {
             code: 'ALREADY_CANCELLED',
             message: 'Ride already cancelled by system',
           });
-        } else if (ride.status === 'RIDE_COMPLETED') {
+        } else if (
+          ride.status === 'RIDE_COMPLETED' &&
+          ride.paymentStatus === 'COMPLETED'
+        ) {
           await session.abortTransaction();
           session.endSession();
           return socket.emit('ride:passenger_join_ride', {
@@ -2355,10 +2362,18 @@ export const initSocket = (server) => {
 
         socket.join(`ride:${ride._id}`);
         if (ride.paymentMethod === 'WALLET') {
+          const adminCommission = await deductRidenCommission(
+            ride.carType,
+            ride.actualFare,
+            ride.fareBreakdown?.promoDiscount,
+            ride._id,
+          );
+
           const fare = await payDriverFromWallet(
             passenger,
             driver,
             ride,
+            ride.actualFare - adminCommission,
             ride.actualFare,
             'RIDE',
           );
@@ -2384,10 +2399,18 @@ export const initSocket = (server) => {
         }
 
         if (ride.paymentMethod === 'CARD') {
+          const adminCommission = await deductRidenCommission(
+            ride.carType,
+            ride.actualFare,
+            ride.fareBreakdown?.promoDiscount,
+            ride._id,
+          );
+
           const fare = await passengerPaysDriver(
             passenger,
             driver,
             ride,
+            ride.actualFare - adminCommission,
             ride.actualFare,
             passenger.defaultCardId,
             'RIDE',
@@ -2401,7 +2424,10 @@ export const initSocket = (server) => {
             });
           }
 
-          await updateRideById(ride._id, { paymentStatus: 'COMPLETED' });
+          await updateRideById(ride._id, {
+            paymentStatus: 'COMPLETED',
+            driverPaidAt: new Date(),
+          });
           io.to(`ride:${ride._id}`).emit('ride:pay_driver', {
             success: true,
             objectType,
@@ -2410,7 +2436,7 @@ export const initSocket = (server) => {
               payment: fare.payment,
               transaction: fare.transaction,
             },
-            message: 'Tip successfully send to driver',
+            message: 'Driver Paid Successfully',
           });
         }
       } catch (error) {

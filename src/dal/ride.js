@@ -9,6 +9,8 @@ import { RESTRICTED_AREA } from '../enums/restrictedArea.js';
 import ParkingQueue from '../models/ParkingQueue.js';
 import mongoose from 'mongoose';
 import Feedback from '../models/Feedback.js';
+import Commission from '../models/Commission.js';
+import AdminCommission from '../models/AdminCommission.js';
 
 // Ride Operations
 export const createRide = async (rideData) => {
@@ -811,4 +813,25 @@ export const findActiveRide = async (id, role) => {
     .lean();
 
   return ride;
+};
+
+export const deductRidenCommission = async (
+  carType,
+  actualFare,
+  discount,
+  rideId,
+) => {
+  const commission = await Commission.findOne({ carType }).lean();
+
+  await AdminCommission.create({
+    date: new Date(),
+    rideId,
+    carType,
+    totalAmount: actualFare,
+    discount,
+    commission: commission.percentage,
+    commissionAmount: Math.floor((actualFare / 100) * commission.percentage),
+  });
+
+  return Math.floor((actualFare / 100) * commission.percentage);
 };

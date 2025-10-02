@@ -5,6 +5,7 @@ const PayoutRequestSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Driver',
     required: true,
+    index: true,
   },
   amount: {
     type: Number,
@@ -13,8 +14,9 @@ const PayoutRequestSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['PENDING', 'APPROVED', 'REJECTED', 'SUCCESS'],
+    enum: ['PENDING', 'APPROVED', 'REJECTED'],
     default: 'PENDING',
+    index: true,
   },
   rides: [
     {

@@ -238,6 +238,9 @@ const rideSchema = new mongoose.Schema(
     rideCompletedAt: {
       type: Date,
     },
+    driverPaidAt: {
+      type: Date,
+    },
 
     // Additional Information
     specialRequests: {

@@ -235,6 +235,11 @@ const driverSchema = new mongoose.Schema(
       default: false,
       index: true,
     },
+    balance: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     payoutMethodIds: [
       {
         type: String,

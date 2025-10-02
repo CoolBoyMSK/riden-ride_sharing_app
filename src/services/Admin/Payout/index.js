@@ -94,19 +94,35 @@ export const getInstantPayoutRequests = async (
 
 export const editInstantPayoutRequest = async (user, { id, status }, resp) => {
   try {
-    const data = await updateInstatnPayoutRequest({
-      id,
-      status,
-    });
-    if (!data) {
-      resp.error = true;
-      resp.error_message = 'Failed to update instant payout request status';
-      return resp;
-    }
-
     let success;
     if (status === 'APPROVED') {
+      const data = await updateInstatnPayoutRequest({
+        id,
+        status,
+        approvedAt: new Date(),
+      });
+      if (!data) {
+        resp.error = true;
+        resp.error_message = 'Failed to update instant payout request status';
+        return resp;
+      }
+      
       success = await instantPayoutDriver(data.driverId, data._id);
+      if (!success) {
+        resp.error = true;
+        resp.error_message = 'Failed to pay driver';
+        return resp;
+      }
+    } else {
+      success = await updateInstatnPayoutRequest({
+        id,
+        status: 'REJECTED',
+      });
+      if (!success) {
+        resp.error = true;
+        resp.error_message = 'Failed to update instant payout request status';
+        return resp;
+      }
     }
 
     resp.data = success;
