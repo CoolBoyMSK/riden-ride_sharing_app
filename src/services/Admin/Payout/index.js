@@ -136,7 +136,8 @@ export const editInstantPayoutRequest = async (user, { id, status }, resp) => {
 export const getInstantPayoutRequestsCount = async (user, resp) => {
   try {
     const success = await countTotalPendingRequests();
-    if (!success) {
+
+    if (success === null || success === undefined || isNaN(success)) {
       resp.error = true;
       resp.error_message = 'Failed to fetch pending requests count';
       return resp;

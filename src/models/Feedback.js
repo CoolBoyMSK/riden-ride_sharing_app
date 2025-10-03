@@ -34,7 +34,7 @@ const feedbackSchema = new mongoose.Schema(
       maxlength: 500,
     },
   },
-  { timestanps: true },
+  { timestamps: true },
 );
 
 export default mongoose.model('Feedback', feedbackSchema);

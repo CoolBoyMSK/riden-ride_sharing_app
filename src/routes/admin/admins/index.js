@@ -5,6 +5,7 @@ import {
   updateAdminController,
   getSearchAdminsController,
   deleteAdminByIdController,
+  getAdminByIdController,
 } from '../../../controllers/Admin/Admins/index.js';
 import { registerRoute } from '../../../utils/registerRoute.js';
 
@@ -40,6 +41,15 @@ registerRoute({
   delete_permission: 'admin_roles',
   delete_super_enable: true,
   delete_method: deleteAdminByIdController,
+});
+
+registerRoute({
+  router,
+  route: '/admin/:id',
+  admin_auth_enable: true,
+  get_permission: 'admin_roles',
+  get_super_enable: true,
+  get_method: getAdminByIdController,
 });
 
 export default router;

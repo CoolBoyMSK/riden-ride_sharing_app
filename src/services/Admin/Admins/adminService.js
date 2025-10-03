@@ -12,6 +12,7 @@ import {
   createAdminAccess,
   findAdminAccesses,
   upsertAdminAccess,
+  findAdminAccessById,
 } from '../../../dal/admin/adminAccess/index.js';
 import { hashPassword } from '../../../utils/auth.js';
 import { emailQueue } from '../../../queues/emailQueue.js';
@@ -176,6 +177,32 @@ export const deleteAdminById = async ({ id }, resp) => {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
     resp.error_message = 'Something went wrong while deleting admin';
+    return resp;
+  }
+};
+
+export const getAdminById = async ({ id }, resp) => {
+  try {
+    const success = await findAdminById(id);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to find admin';
+      return resp;
+    }
+
+    const accessModules = await findAdminAccessById(success._id);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to find admin access modules';
+      return resp;
+    }
+
+    resp.data = { admin: success, accessModules: accessModules.modules };
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Somrthing went wrong';
     return resp;
   }
 };

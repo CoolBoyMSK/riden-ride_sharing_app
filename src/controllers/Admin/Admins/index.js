@@ -4,6 +4,7 @@ import {
   updateAdmin,
   getSearchAdmins,
   deleteAdminById,
+  getAdminById,
 } from '../../../services/Admin/Admins/adminService.js';
 import { handleResponse } from '../../../utils/handleRespone.js';
 import {
@@ -68,6 +69,19 @@ export const deleteAdminByIdController = (req, res) => {
     {
       handler: deleteAdminById,
       // validationFn: validateUpdateAdmin,
+      handlerParams: [req.params],
+      successMessage: 'Admin deleted successfully',
+    },
+    req,
+    res,
+  );
+};
+
+export const getAdminByIdController = (req, res) => {
+  return handleResponse(
+    {
+      handler: getAdminById,
+      validationFn: null,
       handlerParams: [req.params],
       successMessage: 'Admin deleted successfully',
     },

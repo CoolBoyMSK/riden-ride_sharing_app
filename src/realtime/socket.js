@@ -1495,6 +1495,18 @@ export const initSocket = (server) => {
             ),
           );
 
+          const isRide = await findActiveRide(driver._id, 'driver');
+          if (isRide) {
+            return io
+              .to(`ride:${isRide._id}`)
+              .emit('ride:driver_update_location', {
+                success: true,
+                objectType,
+                data: driverLocation.location,
+                message: 'Location updated successfully',
+              });
+          }
+
           socket.emit('ride:driver_update_location', {
             success: true,
             objectType,

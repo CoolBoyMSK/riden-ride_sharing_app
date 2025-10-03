@@ -14,6 +14,7 @@ import {
   countCanceledBookingsByPassengerId,
   countCompletedBookingsByPassengerId,
 } from '../../../dal/booking.js';
+import { getPassengerCards } from '../../../dal/stripe.js';
 
 export const getAllPassengers = async (
   { search, page = 1, limit = 10, fromDate, toDate },
@@ -53,8 +54,11 @@ export const getPassengerById = async ({ passengerId }, resp) => {
       return resp;
     }
 
+    const paymentMethods = await getPassengerCards(passenger);
+
     resp.data = {
       ...(passenger.toObject?.() || passenger),
+      paymentMethods,
       bookings: (await findAllBookingsByPassengerId(passengerId)) || null,
       totalbookings: (await countPassengerBookings(passengerId)) || 0,
       completedBookings:
@@ -62,6 +66,7 @@ export const getPassengerById = async ({ passengerId }, resp) => {
       canceledBookings:
         (await countCanceledBookingsByPassengerId(passengerId)) || 0,
     };
+
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);

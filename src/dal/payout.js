@@ -251,5 +251,8 @@ export const updateInstatnPayoutRequest = async ({ id, status }) =>
     { new: true },
   ).populate('driverId');
 
-export const countTotalPendingRequests = async () =>
-  InstantPayoutRequest.countDocuments({ status: 'PENDING' });
+export const countTotalPendingRequests = async () =>{
+  const count = await InstantPayoutRequest.countDocuments({ status: 'PENDING' });
+  console.log(count)
+  return count
+}

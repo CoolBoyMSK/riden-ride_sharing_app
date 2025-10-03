@@ -14,6 +14,7 @@ import {
   verifyRefreshToken,
 } from '../../../utils/auth.js';
 import { emailQueue } from '../../../queues/emailQueue.js';
+import { findAdminAccessById } from '../../../dal/admin/adminAccess/index.js';
 
 export const loginService = async ({ email, password }, resp) => {
   const admin = await findAdminByEmail(email);
@@ -30,9 +31,12 @@ export const loginService = async ({ email, password }, resp) => {
     return resp;
   }
 
+  const adminAccess = await findAdminAccessById(admin._id);
+
   const payload = { id: admin._id, type: admin.type };
   resp.data = {
     user: admin,
+    modules: adminAccess ? adminAccess.modules : [],
     accessToken: generateAccessToken(payload),
     refreshToken: generateRefreshToken(payload),
   };
@@ -82,12 +86,13 @@ export const initiateAdminPasswordReset = async (email, resp) => {
   const token = nanoid(32);
   await upsertResetOtp(admin._id.toString(), token);
 
-  await emailQueue.add('adminPasswordReset', {
+  const success = await emailQueue.add('adminPasswordReset', {
     email,
     token,
     adminName: admin.name,
   });
 
+  resp.data = success;
   return resp;
 };
 

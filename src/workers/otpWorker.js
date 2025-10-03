@@ -14,13 +14,19 @@ const otpWorker = new Worker(
   {
     connection: redisClient,
     concurrency: 5,
-  }
+  },
 );
 
+otpWorker.on('ready', () => {
+  console.log(`🔌 OTP worker connected`);
+});
+
 otpWorker.on('completed', (job) =>
-  console.log(`✅ OTP job ${job.id} completed for ${job.data.phoneNumber}`)
+  console.log(`✅ OTP job ${job.id} completed for ${job.data.phoneNumber}`),
 );
 
 otpWorker.on('failed', (job, err) =>
-  console.error(`❌ OTP job ${job.id} failed for ${job?.data?.phoneNumber}: ${err?.message}`)
+  console.error(
+    `❌ OTP job ${job.id} failed for ${job?.data?.phoneNumber}: ${err?.message}`,
+  ),
 );

@@ -15,6 +15,7 @@ import {
   findWayBill,
   updateDriverByUserId,
 } from '../../../dal/driver.js';
+import { getAllExternalAccounts } from '../../../dal/stripe.js';
 import { uploadDriverDocumentToS3 } from '../../../utils/s3Uploader.js';
 
 export const getAllDrivers = async (
@@ -123,16 +124,20 @@ export const findDriverById = async ({ driverId }, resp) => {
     const driver = await findDriver(driverId);
     if (!driver) {
       resp.error = true;
-      resp.error_message = 'Failed to fond driver';
+      resp.error_message = 'Failed to found driver';
       return resp;
     }
+
+    driver.paymentMethods = await getAllExternalAccounts(
+      driver.driver?.stripeAccountId,
+    );
 
     resp.data = driver;
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while fetching driver';
+    resp.error_message = error.message || 'Something went wrong';
     return resp;
   }
 };

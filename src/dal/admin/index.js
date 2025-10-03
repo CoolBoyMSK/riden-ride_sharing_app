@@ -128,6 +128,17 @@ export const searchAdmins = async (search, page = 1, limit = 10) => {
 
 export const deleteAdmin = (id) => AdminModel.findByIdAndDelete(id);
 
+// --- helper for dd-mm-yyyy parsing ---
+const parseDate = (dateStr, endOfDay = false) => {
+  if (!dateStr) return null;
+  const [day, month, year] = dateStr.split('-').map(Number);
+  if (!day || !month || !year) return null;
+
+  return endOfDay
+    ? new Date(year, month - 1, day, 23, 59, 59, 999)
+    : new Date(year, month - 1, day, 0, 0, 0, 0);
+};
+
 export const findFinishedBookings = async ({
   page = 1,
   limit = 10,
@@ -145,16 +156,23 @@ export const findFinishedBookings = async ({
     'CANCELLED_BY_SYSTEM',
   ];
 
-  // Build initial date/status match
+  // --- base match ---
   const match = { status: { $in: finishedStatuses } };
+
+  // --- date filter ---
   if (fromDate || toDate) {
     match.createdAt = {};
-    if (fromDate) match.createdAt.$gte = new Date(fromDate);
-    if (toDate) match.createdAt.$lte = new Date(`${toDate}T23:59:59.999Z`);
+    if (fromDate) match.createdAt.$gte = parseDate(fromDate);
+    if (toDate) match.createdAt.$lte = parseDate(toDate, true);
   }
 
-  // Load everything with passenger/driver populated
-  const allBookings = await Booking.find(match)
+  // --- safe search ---
+  const safeSearch = typeof search === 'string' ? search.trim() : '';
+  const escapedSearch = safeSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = safeSearch ? new RegExp(escapedSearch, 'i') : null;
+
+  // --- query ---
+  const query = Booking.find(match)
     .populate({
       path: 'passengerId',
       populate: { path: 'userId', select: 'name email phoneNumber' },
@@ -163,14 +181,12 @@ export const findFinishedBookings = async ({
       path: 'driverId',
       populate: { path: 'userId', select: 'name email phoneNumber' },
     })
+    .sort({ createdAt: -1 }) // newest first
     .lean();
 
-  // Escape regex safely
-  const safeSearch = typeof search === 'string' ? search.trim() : '';
-  const escapedSearch = safeSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const regex = safeSearch ? new RegExp(escapedSearch, 'i') : null;
+  const allBookings = await query;
 
-  // Filter in JS for guaranteed accuracy
+  // --- apply search in-memory (safe + flexible) ---
   const filtered = regex
     ? allBookings.filter((b) => {
         const passenger = b.passengerId?.userId || {};
@@ -181,19 +197,17 @@ export const findFinishedBookings = async ({
           regex.test(passenger.phoneNumber || '') ||
           regex.test(driver.name || '') ||
           regex.test(driver.email || '') ||
-          regex.test(driver.phoneNumber || '')
+          regex.test(driver.phoneNumber || '') ||
+          regex.test(b.rideId || '')
         );
       })
     : allBookings;
-
-  // Sort newest first
-  filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
   const total = filtered.length;
   const start = (safePage - 1) * safeLimit;
   const paged = filtered.slice(start, start + safeLimit);
 
-  // Map to desired shape
+  // --- map result ---
   const data = paged.map((b) => ({
     _id: b._id,
     rideId: b.rideId,
@@ -222,6 +236,105 @@ export const findFinishedBookings = async ({
   };
 };
 
+// export const findOngoingBookings = async ({
+//   page = 1,
+//   limit = 10,
+//   search = '',
+//   fromDate,
+//   toDate,
+// }) => {
+//   const safePage = Number(page) > 0 ? Number(page) : 1;
+//   const safeLimit = Number(limit) > 0 ? Number(limit) : 10;
+
+//   const ongoingStatuses = [
+//     'REQUESTED',
+//     'DRIVER_ASSIGNED',
+//     'DRIVER_ARRIVING',
+//     'DRIVER_ARRIVED',
+//     'RIDE_STARTED',
+//     'RIDE_IN_PROGRESS',
+//   ];
+
+//   // ✅ Fixed date filter using DD-MM-YYYY safe parser
+//   const match = { status: { $in: ongoingStatuses } };
+//   if (fromDate || toDate) {
+//     match.createdAt = {};
+//     if (fromDate) match.createdAt.$gte = parseDate(fromDate, false);
+//     if (toDate) match.createdAt.$lte = parseDate(toDate, true);
+//   }
+
+//   // Load everything with passenger/driver populated
+//   const allBookings = await Booking.find(match)
+//     .populate({
+//       path: 'passengerId',
+//       populate: { path: 'userId', select: 'name email phoneNumber' },
+//     })
+//     .populate({
+//       path: 'driverId',
+//       populate: { path: 'userId', select: 'name email phoneNumber' },
+//     })
+//     .lean();
+
+//   // ✅ Fixed search (escape regex safely)
+//   const safeSearch = typeof search === 'string' ? search.trim() : '';
+//   const escapedSearch = safeSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+//   const regex = safeSearch ? new RegExp(escapedSearch, 'i') : null;
+
+//   // Filter in JS for guaranteed accuracy
+//   const filtered = regex
+//     ? allBookings.filter((b) => {
+//         const passenger = b.passengerId?.userId || {};
+//         const driver = b.driverId?.userId || {};
+//         const driverUniqueId = b.driverId?.uniqueId || ''; // ✅ include driver uniqueId
+//         return (
+//           regex.test(passenger.name || '') ||
+//           regex.test(passenger.email || '') ||
+//           regex.test(passenger.phoneNumber || '') ||
+//           regex.test(driver.name || '') ||
+//           regex.test(driver.email || '') ||
+//           regex.test(driver.phoneNumber || '') ||
+//           regex.test(driverUniqueId || '')
+//         );
+//       })
+//     : allBookings;
+
+//   // Sort newest first
+//   filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+//   const total = filtered.length;
+//   const start = (safePage - 1) * safeLimit;
+//   const paged = filtered.slice(start, start + safeLimit);
+
+//   // Map to desired shape
+//   const data = paged.map((b) => ({
+//     _id: b._id,
+//     rideId: b.rideId,
+//     status: b.status,
+//     createdAt: b.createdAt,
+//     updatedAt: b.updatedAt,
+//     estimatedFare: b.estimatedFare,
+//     passenger: {
+//       name: b.passengerId?.userId?.name || '',
+//       email: b.passengerId?.userId?.email || '',
+//       phoneNumber: b.passengerId?.userId?.phoneNumber || '',
+//     },
+//     driver: {
+//       uniqueId: b.driverId?.uniqueId || '', // ✅ include in response
+//       name: b.driverId?.userId?.name || '',
+//       email: b.driverId?.userId?.email || '',
+//       phoneNumber: b.driverId?.userId?.phoneNumber || '',
+//     },
+//   }));
+
+//   return {
+//     data,
+//     total,
+//     page: safePage,
+//     limit: safeLimit,
+//     totalPages: Math.ceil(total / safeLimit) || 0,
+//   };
+// };
+
 export const findOngoingBookings = async ({
   page = 1,
   limit = 10,
@@ -241,16 +354,23 @@ export const findOngoingBookings = async ({
     'RIDE_IN_PROGRESS',
   ];
 
-  // Build initial date/status match
+  // --- base match ---
   const match = { status: { $in: ongoingStatuses } };
+
+  // --- date filter ---
   if (fromDate || toDate) {
     match.createdAt = {};
-    if (fromDate) match.createdAt.$gte = new Date(fromDate);
-    if (toDate) match.createdAt.$lte = new Date(`${toDate}T23:59:59.999Z`);
+    if (fromDate) match.createdAt.$gte = parseDate(fromDate);
+    if (toDate) match.createdAt.$lte = parseDate(toDate, true);
   }
 
-  // Load everything with passenger/driver populated
-  const allBookings = await Booking.find(match)
+  // --- safe search ---
+  const safeSearch = typeof search === 'string' ? search.trim() : '';
+  const escapedSearch = safeSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = safeSearch ? new RegExp(escapedSearch, 'i') : null;
+
+  // --- query ---
+  const query = Booking.find(match)
     .populate({
       path: 'passengerId',
       populate: { path: 'userId', select: 'name email phoneNumber' },
@@ -259,37 +379,35 @@ export const findOngoingBookings = async ({
       path: 'driverId',
       populate: { path: 'userId', select: 'name email phoneNumber' },
     })
+    .sort({ createdAt: -1 }) // newest first
     .lean();
 
-  // Escape regex safely
-  const safeSearch = typeof search === 'string' ? search.trim() : '';
-  const escapedSearch = safeSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const regex = safeSearch ? new RegExp(escapedSearch, 'i') : null;
+  const allBookings = await query;
 
-  // Filter in JS for guaranteed accuracy
+  // --- apply search in-memory (safe + flexible) ---
   const filtered = regex
     ? allBookings.filter((b) => {
         const passenger = b.passengerId?.userId || {};
         const driver = b.driverId?.userId || {};
+        const driverUniqueId = b.driverId?.uniqueId || '';
         return (
           regex.test(passenger.name || '') ||
           regex.test(passenger.email || '') ||
           regex.test(passenger.phoneNumber || '') ||
           regex.test(driver.name || '') ||
           regex.test(driver.email || '') ||
-          regex.test(driver.phoneNumber || '')
+          regex.test(driver.phoneNumber || '') ||
+          regex.test(driverUniqueId || '') ||
+          regex.test(b.rideId || '')
         );
       })
     : allBookings;
-
-  // Sort newest first
-  filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
   const total = filtered.length;
   const start = (safePage - 1) * safeLimit;
   const paged = filtered.slice(start, start + safeLimit);
 
-  // Map to desired shape
+  // --- map result ---
   const data = paged.map((b) => ({
     _id: b._id,
     rideId: b.rideId,
@@ -298,11 +416,13 @@ export const findOngoingBookings = async ({
     updatedAt: b.updatedAt,
     estimatedFare: b.estimatedFare,
     passenger: {
+      uniqueId: b.passengerId?.uniqueId || '',
       name: b.passengerId?.userId?.name || '',
       email: b.passengerId?.userId?.email || '',
       phoneNumber: b.passengerId?.userId?.phoneNumber || '',
     },
     driver: {
+      uniqueId: b.driverId?.uniqueId || '',
       name: b.driverId?.userId?.name || '',
       email: b.driverId?.userId?.email || '',
       phoneNumber: b.driverId?.userId?.phoneNumber || '',
@@ -471,8 +591,8 @@ export const findDriverFeedbacks = async ({
 
   // --- Date filter ---
   const dateFilter = {};
-  const startDate = parseDateDMYDMY(fromDate);
-  const endDate = parseDateDMYDMY(toDate, true);
+  const startDate = parseDateDMY(fromDate);
+  const endDate = parseDateDMY(toDate, true);
 
   if (startDate) dateFilter.$gte = startDate;
   if (endDate) dateFilter.$lte = endDate;
@@ -1116,6 +1236,77 @@ export const driversAnalytics = async (filter = 'today') => {
     { $sort: { _id: 1 } },
   ]);
 
+  // --- Calculate last 30 days range ---
+  const today = new Date();
+  const last30DaysDate = new Date();
+  last30DaysDate.setDate(today.getDate() - 29); // including today
+
+  const complaintsAndRatings = await Promise.all([
+    // --- Complaints aggregation ---
+    Report.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: last30DaysDate, $lte: today },
+          type: 'by_passenger',
+        },
+      },
+      {
+        $group: {
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+          complaints: { $sum: 1 }, // 👈 renamed field to "complaints"
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]),
+
+    // --- Reviews aggregation ---
+    Feedback.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: last30DaysDate, $lte: today },
+          type: 'by_passenger',
+        },
+      },
+      {
+        $group: {
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+          reviews: { $sum: 1 }, // 👈 renamed field to "reviews"
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]),
+  ]);
+
+  const complaintsData = complaintsAndRatings[0];
+  const ratingsData = complaintsAndRatings[1];
+
+  // Generate array of last 30 days
+  const getLast30Days = () => {
+    const days = [];
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      days.push(new Date(d));
+    }
+    return days;
+  };
+
+  const last30Days = getLast30Days();
+
+  // Final chart data
+  const monthlyComplaintsAndRatingsChart = [];
+  last30Days.forEach((date) => {
+    const dayKey = date.toISOString().split('T')[0];
+    const complaintsEntry = complaintsData.find((c) => c._id === dayKey);
+    const ratingsEntry = ratingsData.find((r) => r._id === dayKey);
+
+    monthlyComplaintsAndRatingsChart.push({
+      day: dayKey,
+      complaints: complaintsEntry?.complaints || 0,
+      reviews: ratingsEntry?.reviews || 0,
+    });
+  });
+
   // --- Format helper ---
   const formatHours = (hours) => Number(hours.toFixed(2)); // 2 decimals
 
@@ -1191,254 +1382,9 @@ export const driversAnalytics = async (filter = 'today') => {
     reportedDriversPercentage: formatHours(reportedDriversPercentage),
     reviewedDriversPercentage: formatHours(reviewedDriversPercentage),
     rideHoursChart: chartData,
+    monthlyComplaintsAndRatingsChart,
   };
 };
-
-// export const passengersAnalytics = async (filter = 'today') => {
-//   try {
-//     // --- Totals ---
-//     const [
-//       totalPassengers,
-//       totalActivePassengers,
-//       totalFeedbacks,
-//       totalReportedDrivers,
-//     ] = await Promise.all([
-//       Passenger.countDocuments({ isBlocked: false }),
-//       Passenger.countDocuments({ isBlocked: false, isActive: true }),
-//       Feedback.countDocuments({ type: 'by_driver' }),
-//       Report.countDocuments({ type: 'by_driver' }),
-//     ]);
-
-//     const reportedPassengersPercentage =
-//       totalPassengers > 0 ? (totalReportedDrivers / totalPassengers) * 100 : 0;
-
-//     const reviewedPassengersPercentage =
-//       totalPassengers > 0 ? (totalFeedbacks / totalPassengers) * 100 : 0;
-
-//     // --- Date range ---
-//     const now = new Date();
-//     let startDate, endDate, groupFormat;
-
-//     switch (filter) {
-//       case 'today':
-//         startDate = new Date(
-//           now.getFullYear(),
-//           now.getMonth(),
-//           now.getDate(),
-//           0,
-//           0,
-//           0,
-//         );
-//         endDate = new Date(
-//           now.getFullYear(),
-//           now.getMonth(),
-//           now.getDate(),
-//           23,
-//           59,
-//           59,
-//           999,
-//         );
-//         groupFormat = '%H';
-//         break;
-
-//       case 'this_week': {
-//         const firstDayOfWeek = new Date(now);
-//         firstDayOfWeek.setDate(now.getDate() - now.getDay());
-//         firstDayOfWeek.setHours(0, 0, 0, 0);
-//         startDate = firstDayOfWeek;
-//         endDate = new Date(firstDayOfWeek);
-//         endDate.setDate(firstDayOfWeek.getDate() + 6);
-//         endDate.setHours(23, 59, 59, 999);
-//         groupFormat = '%Y-%m-%d';
-//         break;
-//       }
-
-//       case 'this_month':
-//         startDate = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
-//         endDate = new Date(
-//           now.getFullYear(),
-//           now.getMonth() + 1,
-//           0,
-//           23,
-//           59,
-//           59,
-//           999,
-//         );
-//         groupFormat = '%Y-%m-%d';
-//         break;
-
-//       case 'last_year':
-//         startDate = new Date(now.getFullYear() - 1, 0, 1, 0, 0, 0);
-//         endDate = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
-//         groupFormat = '%Y-%m';
-//         break;
-
-//       default:
-//         startDate = new Date(
-//           now.getFullYear(),
-//           now.getMonth(),
-//           now.getDate(),
-//           0,
-//           0,
-//           0,
-//         );
-//         endDate = new Date(
-//           now.getFullYear(),
-//           now.getMonth(),
-//           now.getDate(),
-//           23,
-//           59,
-//           59,
-//           999,
-//         );
-//         groupFormat = '%Y-%m-%d';
-//     }
-
-//     // --- Aggregation ---
-//     const rideCounts = await Booking.aggregate([
-//       {
-//         $match: {
-//           createdAt: { $gte: startDate, $lte: endDate },
-//           isDeleted: { $ne: true },
-//         },
-//       },
-//       {
-//         $group: {
-//           _id: '$passengerId',
-//           rideCount: { $sum: 1 },
-//           firstBookingDate: { $min: '$createdAt' },
-//         },
-//       },
-//       {
-//         $project: {
-//           rideCount: 1,
-//           key: {
-//             $dateToString: { format: groupFormat, date: '$firstBookingDate' },
-//           },
-//         },
-//       },
-//       {
-//         $group: {
-//           _id: {
-//             key: '$key',
-//             type: { $cond: [{ $eq: ['$rideCount', 1] }, 'single', 'multiple'] },
-//           },
-//           count: { $sum: 1 },
-//         },
-//       },
-//       {
-//         $group: {
-//           _id: '$_id.key',
-//           data: { $push: { type: '$_id.type', count: '$count' } },
-//         },
-//       },
-//       { $sort: { _id: 1 } },
-//     ]);
-
-//     // --- Chart data ---
-//     const chartData = [];
-//     const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-//     const monthsOfYear = [
-//       'Jan',
-//       'Feb',
-//       'Mar',
-//       'Apr',
-//       'May',
-//       'Jun',
-//       'Jul',
-//       'Aug',
-//       'Sep',
-//       'Oct',
-//       'Nov',
-//       'Dec',
-//     ];
-
-//     // Helper to compute repeated ride ratio
-//     const calcRatio = (single, multiple) => {
-//       const total = single + multiple;
-//       return total > 0 ? Number(((multiple / total) * 100).toFixed(2)) : 0;
-//     };
-
-//     if (filter === 'today') {
-//       for (let h = 0; h < 24; h++) {
-//         const hourStr = h.toString().padStart(2, '0');
-//         const entry = rideCounts.find((r) => r._id === hourStr);
-//         const single = entry?.data.find((d) => d.type === 'single')?.count || 0;
-//         const multiple =
-//           entry?.data.find((d) => d.type === 'multiple')?.count || 0;
-//         chartData.push({
-//           hour: `${hourStr}:00`,
-//           single,
-//           multiple,
-//           repeatedRideRatio: calcRatio(single, multiple),
-//         });
-//       }
-//     } else if (filter === 'this_week') {
-//       const curDate = new Date(startDate);
-//       for (let i = 0; i < 7; i++) {
-//         const dayKey = curDate.toISOString().split('T')[0];
-//         const entry = rideCounts.find((r) => r._id === dayKey);
-//         const single = entry?.data.find((d) => d.type === 'single')?.count || 0;
-//         const multiple =
-//           entry?.data.find((d) => d.type === 'multiple')?.count || 0;
-//         chartData.push({
-//           day: dayKey,
-//           dayName: daysOfWeek[curDate.getDay()],
-//           single,
-//           multiple,
-//           repeatedRideRatio: calcRatio(single, multiple),
-//         });
-//         curDate.setDate(curDate.getDate() + 1);
-//       }
-//     } else if (filter === 'this_month') {
-//       const allDays = getAllDaysInMonth(now.getFullYear(), now.getMonth());
-//       allDays.forEach((date) => {
-//         const dayKey = date.toISOString().split('T')[0];
-//         const entry = rideCounts.find((r) => r._id === dayKey);
-//         const single = entry?.data.find((d) => d.type === 'single')?.count || 0;
-//         const multiple =
-//           entry?.data.find((d) => d.type === 'multiple')?.count || 0;
-//         chartData.push({
-//           day: dayKey,
-//           dayName: daysOfWeek[date.getDay()],
-//           single,
-//           multiple,
-//           repeatedRideRatio: calcRatio(single, multiple),
-//         });
-//       });
-//     } else if (filter === 'last_year') {
-//       for (let m = 0; m < 12; m++) {
-//         const monthKey = `${startDate.getFullYear()}-${(m + 1)
-//           .toString()
-//           .padStart(2, '0')}`;
-//         const entry = rideCounts.find((r) => r._id === monthKey);
-//         const single = entry?.data.find((d) => d.type === 'single')?.count || 0;
-//         const multiple =
-//           entry?.data.find((d) => d.type === 'multiple')?.count || 0;
-//         chartData.push({
-//           month: monthKey,
-//           monthName: monthsOfYear[m],
-//           single,
-//           multiple,
-//           repeatedRideRatio: calcRatio(single, multiple),
-//         });
-//       }
-//     }
-
-//     return {
-//       totalPassengers,
-//       totalActivePassengers,
-//       totalFeedbacks,
-//       totalReportedDrivers,
-//       reportedPassengersPercentage: reportedPassengersPercentage.toFixed(2),
-//       reviewedPassengersPercentage: reviewedPassengersPercentage.toFixed(2),
-//       passengerRideChart: chartData,
-//     };
-//   } catch (error) {
-//     console.error('Error in passengersAnalytics:', error);
-//     throw error;
-//   }
-// };
 
 export const passengersAnalytics = async (filter = 'today') => {
   try {
@@ -1598,7 +1544,7 @@ export const passengersAnalytics = async (filter = 'today') => {
         {
           $group: {
             _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
-            reason: { $sum: 1 },
+            complaints: { $sum: 1 }, // 👈 renamed field to "complaints"
           },
         },
         { $sort: { _id: 1 } },
@@ -1615,7 +1561,7 @@ export const passengersAnalytics = async (filter = 'today') => {
         {
           $group: {
             _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
-            feedback: { $sum: 1 },
+            reviews: { $sum: 1 }, // 👈 renamed field to "reviews"
           },
         },
         { $sort: { _id: 1 } },

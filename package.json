@@ -14,9 +14,15 @@
     "start:production": "cross-env NODE_ENV=production nodemon index.js",
     "seed:staging:superadmin": "cross-env NODE_ENV=staging node src/seeders/superAdmin.js",
     "seed:production:superadmin": "cross-env NODE_ENV=production node src/seeders/superAdmin.js",
-    "worker": "node src/workers/emailWorker.js",
-    "worker:staging": "cross-env NODE_ENV=staging nodemon src/workers/emailWorker.js",
-    "worker:production": "cross-env NODE_ENV=production nodemon src/workers/emailWorker.js"
+    "email-worker": "node src/workers/emailWorker.js",
+    "email-worker:staging": "cross-env NODE_ENV=staging nodemon src/workers/emailWorker.js",
+    "email-worker:production": "cross-env NODE_ENV=production nodemon src/workers/emailWorker.js",
+    "otp-worker": "node src/workers/otpWorker.js",
+    "otp-worker:staging": "cross-env NODE_ENV=staging nodemon src/workers/otpWorker.js",
+    "otp-worker:production": "cross-env NODE_ENV=production nodemon src/workers/otpWorker.js",
+    "alert-worker": "node src/workers/alertWorker.js",
+    "alert-worker:staging": "cross-env NODE_ENV=staging nodemon src/workers/alertWorker.js",
+    "alert-worker:production": "cross-env NODE_ENV=production nodemon src/workers/alertWorker.js"
   },
   "repository": {
     "type": "git",
@@ -45,7 +51,7 @@
     "agora-access-token": "^2.0.4",
     "agora-rtc-sdk-ng": "^4.24.0",
     "bcrypt": "^6.0.0",
-    "bullmq": "^5.56.0",
+    "bullmq": "^5.60.0",
     "cors": "^2.8.5",
     "crypto": "^1.0.1",
     "date-fns": "^4.1.0",
