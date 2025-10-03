@@ -1468,13 +1468,22 @@ export const initSocket = (server) => {
             await updateDriverByUserId(userId, { isRestricted: false });
           }
 
-          const driverLocation = await saveDriverLocation(driver._id, {
+          await saveDriverLocation(driver._id, {
             lng: location.coordinates[0],
             lat: location.coordinates[1],
             isAvailable,
             speed,
             heading,
           });
+
+          const driverLocation = await persistDriverLocationToDB(
+            driver._id.toString(),
+          ).catch((err) =>
+            console.error(
+              `Failed to persist driver location for driver ${driver._id}:`,
+              err,
+            ),
+          );
 
           if (driverLocation.currentRideId) {
             io.to(`ride:${driverLocation.currentRideId}`).emit(
@@ -1486,25 +1495,6 @@ export const initSocket = (server) => {
                 message: 'Location updated successfully',
               },
             );
-          }
-
-          await persistDriverLocationToDB(driver._id.toString()).catch((err) =>
-            console.error(
-              `Failed to persist driver location for driver ${driver._id}:`,
-              err,
-            ),
-          );
-
-          const isRide = await findActiveRide(driver._id, 'driver');
-          if (isRide) {
-            return io
-              .to(`ride:${isRide._id}`)
-              .emit('ride:driver_update_location', {
-                success: true,
-                objectType,
-                data: driverLocation.location,
-                message: 'Location updated successfully',
-              });
           }
 
           socket.emit('ride:driver_update_location', {
