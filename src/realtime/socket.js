@@ -31,6 +31,7 @@ import {
   findActiveRide,
   createFeedback,
   deductRidenCommission,
+  updateDriverRideHistory,
 } from '../dal/ride.js';
 import {
   findDriverByUserId,
@@ -1156,6 +1157,21 @@ export const initSocket = (server) => {
               objectType,
               code: 'DRIVER_UPDATE_FAILED',
               message: 'Failed to update driver status',
+            });
+          }
+
+          const updatedDriverHistory = await updateDriverRideHistory(
+            driver._id,
+            ride._id,
+          );
+          if (!updatedDriverHistory) {
+            await session.abortTransaction();
+            session.endSession();
+            return socket.emit('ride:driver_complete_ride', {
+              success: false,
+              objectType,
+              code: 'DRIVER_UPDATE_FAILED',
+              message: 'Failed to update driver History',
             });
           }
 

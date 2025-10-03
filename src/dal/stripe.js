@@ -204,6 +204,18 @@ const updateInstantPayoutStatuses = async (driverId) => {
   );
 };
 
+export const findDriverHistory = async (driverId) => {
+  return await DriverModel.findById(driverId).select('rideIds');
+};
+
+export const deleteDriverHistory = async (driverId) => {
+  return await DriverModel.findByIdAndUpdate(
+    driverId,
+    { $set: { rideIds: [] } },
+    { new: true },
+  );
+};
+
 // Passenger Flow
 export const createPassengerStripeCustomer = async (user, passenger) => {
   const customer = await stripe.customers.create({
@@ -355,9 +367,6 @@ export const payDriverFromWallet = async (
     const wallet = await getWallet(passenger._id);
     if (!wallet) throw new Error('Wallet not found');
 
-    console.log(amount);
-    console.log(typeof amount);
-
     const parsedAmount = Number(amount);
     if (isNaN(parsedAmount) || parsedAmount <= 0) {
       throw new Error('Invalid amount provided');
@@ -421,6 +430,8 @@ export const passengerPaysDriver = async (
     off_session: true,
     confirm: true,
   });
+
+  await increaseDriverBalance(driver._id, amount);
 
   const transaction = await createTransaction({
     passengerId: passenger._id,
@@ -722,7 +733,6 @@ export const setDefaultExternalAccount = async (
 };
 
 export const instantPayoutDriver = async (driver, requestId) => {
-  // const balance = await getDriverUnpaidBalance(driver._id);
   const balance = driver.balance;
   if (balance <= 10) throw new Error('Payout must be greater than $10');
 
@@ -743,12 +753,21 @@ export const instantPayoutDriver = async (driver, requestId) => {
     },
   );
 
+  const rides = await findDriverHistory(driver._id);
   await updateRequestedPayoutStatus(requestId);
   await updateInstantPayoutStatuses(driver._id);
 
-  await createPayout(driver._id, balance, 'INSTANT', [], requestId, 'SUCCESS');
+  await createPayout(
+    driver._id,
+    balance,
+    'INSTANT',
+    rides.rideIds.length,
+    requestId,
+    'SUCCESS',
+  );
 
   await Promise.all([
+    deleteDriverHistory(driver._id),
     decreaseDriverBalance(driver._id, balance),
     createTransaction({
       driverId: driver._id,
@@ -776,8 +795,8 @@ export const instantPayoutDriver = async (driver, requestId) => {
 };
 
 export const createPayoutRequest = async (driverId) => {
-  // const { unpaidBalance, rideIds } = await getDriverUnpaidBalance(driverId);
   const driverBalance = await getDriverBalance(driverId);
+  const rides = await findDriverHistory(driverId);
 
   if (driverBalance.balance <= 9.99) {
     throw new Error('Unpaid balance must be at least $10');
@@ -786,7 +805,7 @@ export const createPayoutRequest = async (driverId) => {
   const payoutRequest = await createInstantPayoutRequest(
     driverId,
     driverBalance.balance,
-    // rideIds,
+    rides.rideIds.length,
   );
 
   return payoutRequest;

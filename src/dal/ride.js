@@ -835,3 +835,10 @@ export const deductRidenCommission = async (
 
   return Math.floor((actualFare / 100) * commission.percentage);
 };
+
+export const updateDriverRideHistory = async (driverId, rideId) =>
+  DriverModel.findByIdAndUpdate(
+    driverId,
+    { $push: { rideIds: rideId } },
+    { new: true },
+  );

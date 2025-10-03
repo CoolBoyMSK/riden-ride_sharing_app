@@ -1,5 +1,5 @@
+import Driver from '../models/Driver.js';
 import Payout from '../models/Payout.js';
-import Transaction from '../models/Transaction.js';
 import InstantPayoutRequest from '../models/InstantPayoutRequest.js';
 
 const parseDate = (dateStr, endOfDay = false) => {
@@ -16,109 +16,40 @@ export const findUpcomingPayouts = async ({
   page = 1,
   limit = 10,
   search = '',
-  fromDate,
-  toDate,
 }) => {
-  // --- Safe pagination ---
-  const safePage =
-    Number.isInteger(Number(page)) && Number(page) > 0 ? Number(page) : 1;
-  const safeLimit =
-    Number.isInteger(Number(limit)) && Number(limit) > 0 ? Number(limit) : 10;
-  const skip = (safePage - 1) * safeLimit;
+  const skip = (page - 1) * limit;
 
-  // --- Normalize search ---
-  const safeSearch = typeof search === 'string' ? search.trim() : '';
-  const escapedSearch = safeSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const searchMatch =
-    safeSearch.length > 0
-      ? {
-          $or: [
-            { 'user.name': { $regex: escapedSearch, $options: 'i' } },
-            { 'driver.uniqueId': { $regex: escapedSearch, $options: 'i' } },
-          ],
-        }
-      : {};
-
-  // --- Date filter (DD-MM-YYYY) ---
-  const dateFilter = {};
-  const from = parseDate(fromDate, false);
-  const to = parseDate(toDate, true);
-  if (from) dateFilter.$gte = from;
-  if (to) dateFilter.$lte = to;
-
-  // --- Base filters ---
-  const matchFilter = {
+  // Base filter: balance > 0 and at least 1 ride
+  const query = {
     balance: { $gt: 0 },
-    rides: { $gt: 0 },
-    ...(Object.keys(dateFilter).length ? { createdAt: dateFilter } : {}),
+    rideIds: { $exists: true, $not: { $size: 0 } },
   };
 
-  // --- Aggregation pipeline ---
-  const [result] = await Payout.aggregate([
-    { $match: matchFilter },
+  // Add search filter if provided
+  if (search.trim()) {
+    query['$or'] = [
+      { uniqueId: { $regex: search, $options: 'i' } }, // search in Driver uniqueId
+      { 'userId.name': { $regex: search, $options: 'i' } }, // search in populated User name
+    ];
+  }
 
-    // Join driver
-    {
-      $lookup: {
-        from: 'drivers',
-        localField: 'driverId',
-        foreignField: '_id',
-        as: 'driver',
-      },
-    },
-    { $unwind: '$driver' },
+  const drivers = await Driver.find(query)
+    .populate({
+      path: 'userId',
+      select: 'name email profileImg', // only include name and email
+    })
+    .skip(skip)
+    .limit(limit)
+    .lean();
 
-    // Join user
-    {
-      $lookup: {
-        from: 'users',
-        localField: 'driver.userId',
-        foreignField: '_id',
-        as: 'user',
-      },
-    },
-    { $unwind: '$user' },
-
-    // Apply search
-    ...(Object.keys(searchMatch).length ? [{ $match: searchMatch }] : []),
-
-    { $sort: { createdAt: -1 } },
-
-    {
-      $facet: {
-        metadata: [{ $count: 'total' }],
-        data: [
-          { $skip: skip },
-          { $limit: safeLimit },
-          {
-            $project: {
-              _id: 1,
-              balance: 1,
-              rides: 1,
-              createdAt: 1,
-              driver: { _id: 1, uniqueId: 1 },
-              user: {
-                _id: 1,
-                name: 1,
-                email: 1,
-                phoneNumber: 1,
-                profileImg: 1,
-              },
-            },
-          },
-        ],
-      },
-    },
-  ]);
-
-  const total = result?.metadata?.[0]?.total || 0;
+  const total = await Driver.countDocuments(query);
 
   return {
-    data: result?.data || [],
+    data: drivers,
+    page: page ? parseInt(page) : null,
+    limit: limit ? parseInt(limit) : null,
     total,
-    page: safePage,
-    limit: safeLimit,
-    totalPages: Math.ceil(total / safeLimit) || 0,
+    totalPages: Math.ceil(total / limit),
   };
 };
 
@@ -129,47 +60,21 @@ export const findPreviousPayouts = async ({
   fromDate,
   toDate,
 }) => {
-  // --- Safe pagination ---
-  const safePage =
-    Number.isInteger(Number(page)) && Number(page) > 0 ? Number(page) : 1;
-  const safeLimit =
-    Number.isInteger(Number(limit)) && Number(limit) > 0 ? Number(limit) : 10;
-  const skip = (safePage - 1) * safeLimit;
+  const pageNumber = Number(page) || 1;
+  const limitNumber = Number(limit) || 10;
+  const skip = (pageNumber - 1) * limitNumber;
 
-  // --- Normalize search ---
-  const safeSearch = typeof search === 'string' ? search.trim() : '';
-  const escapedSearch = safeSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const searchMatch =
-    safeSearch.length > 0
-      ? {
-          $or: [
-            { 'user.name': { $regex: escapedSearch, $options: 'i' } },
-            { 'driver.uniqueId': { $regex: escapedSearch, $options: 'i' } },
-          ],
-        }
-      : {};
+  const match = {};
 
-  // --- Date filter ---
-  const dateFilter = {};
-  const from = parseDate(fromDate, false);
-  const to = parseDate(toDate, true);
-  if (from) dateFilter.$gte = from;
-  if (to) dateFilter.$lte = to;
+  // Date filter
+  if (fromDate || toDate) {
+    match.payoutDate = {};
+    if (fromDate) match.payoutDate.$gte = parseDate(fromDate);
+    if (toDate) match.payoutDate.$lte = parseDate(toDate, true);
+  }
 
-  // --- Base filters ---
-  const matchFilter = {
-    category: 'TRANSFER',
-    type: 'DEBIT',
-    rides: { $gt: 0 },
-    amount: { $gt: 0 },
-    ...(Object.keys(dateFilter).length ? { createdAt: dateFilter } : {}),
-  };
-
-  // --- Aggregation pipeline ---
-  const [result] = await Transaction.aggregate([
-    { $match: matchFilter },
-
-    // Join driver
+  const pipeline = [
+    { $match: match },
     {
       $lookup: {
         from: 'drivers',
@@ -179,63 +84,67 @@ export const findPreviousPayouts = async ({
       },
     },
     { $unwind: '$driver' },
-
-    // Join user (from driver.userId)
     {
       $lookup: {
         from: 'users',
         localField: 'driver.userId',
         foreignField: '_id',
-        as: 'user',
+        as: 'driver.user',
       },
     },
-    { $unwind: '$user' },
+    { $unwind: '$driver.user' },
+  ];
 
-    // Apply search
-    ...(Object.keys(searchMatch).length ? [{ $match: searchMatch }] : []),
-
-    { $sort: { createdAt: -1 } },
-
-    {
-      $facet: {
-        metadata: [{ $count: 'total' }],
-        data: [
-          { $skip: skip },
-          { $limit: safeLimit },
-          {
-            $project: {
-              _id: 1,
-              amount: 1,
-              rides: 1,
-              type: 1,
-              category: 1,
-              createdAt: 1,
-              referenceId: 1,
-              receiptUrl: 1,
-              status: 1,
-              driver: { _id: 1, uniqueId: 1 },
-              user: {
-                _id: 1,
-                name: 1,
-                email: 1,
-                phoneNumber: 1,
-                profileImg: 1,
-              },
-            },
-          },
+  // Search
+  if (search.trim()) {
+    pipeline.push({
+      $match: {
+        $or: [
+          { 'driver.user.name': { $regex: search, $options: 'i' } },
+          { 'driver.uniqueId': { $regex: search, $options: 'i' } },
         ],
       },
-    },
-  ]);
+    });
+  }
 
-  const total = result?.metadata?.[0]?.total || 0;
+  // Project fields
+  pipeline.push({
+    $project: {
+      _id: 1,
+      amount: 1,
+      payoutType: 1,
+      status: 1,
+      payoutDate: 1,
+      rideCount: { $size: '$rides' },
+      driver: {
+        _id: '$driver._id',
+        uniqueId: '$driver.uniqueId',
+        balance: '$driver.balance',
+        user: {
+          _id: '$driver.user._id',
+          name: '$driver.user.name',
+          email: '$driver.user.email',
+        },
+      },
+    },
+  });
+
+  // Count total documents
+  const countPipeline = [...pipeline, { $count: 'total' }];
+  const countResult = await Payout.aggregate(countPipeline);
+  const total = countResult[0]?.total || 0;
+
+  // Pagination
+  pipeline.push({ $skip: skip }, { $limit: limitNumber });
+
+  const payouts = await Payout.aggregate(pipeline);
 
   return {
-    data: result?.data || [],
+    data: payouts,
+    page: pageNumber,
+    limit: limitNumber,
     total,
-    page: safePage,
-    limit: safeLimit,
-    totalPages: Math.ceil(total / safeLimit) || 0,
+    totalPages: Math.ceil(total / limitNumber),
   };
 };
 
@@ -246,42 +155,21 @@ export const findInstantPayoutRequests = async ({
   fromDate,
   toDate,
 }) => {
-  // --- Safe pagination ---
-  const safePage =
-    Number.isInteger(Number(page)) && Number(page) > 0 ? Number(page) : 1;
-  const safeLimit =
-    Number.isInteger(Number(limit)) && Number(limit) > 0 ? Number(limit) : 10;
-  const skip = (safePage - 1) * safeLimit;
+  const pageNumber = Number(page) || 1;
+  const limitNumber = Number(limit) || 10;
+  const skip = (pageNumber - 1) * limitNumber;
 
-  // --- Normalize search ---
-  const safeSearch = typeof search === 'string' ? search.trim() : '';
-  const escapedSearch = safeSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const searchMatch =
-    safeSearch.length > 0
-      ? {
-          $or: [
-            { 'driver.uniqueId': { $regex: escapedSearch, $options: 'i' } },
-            { 'user.name': { $regex: escapedSearch, $options: 'i' } },
-          ],
-        }
-      : {};
+  const match = {};
 
-  // --- Date filter ---
-  const dateFilter = {};
-  if (fromDate) dateFilter.$gte = new Date(fromDate);
-  if (toDate) dateFilter.$lte = new Date(toDate);
+  // Filter by date range (requestedAt)
+  if (fromDate || toDate) {
+    match.requestedAt = {};
+    if (fromDate) match.requestedAt.$gte = parseDate(fromDate);
+    if (toDate) match.requestedAt.$lte = parseDate(toDate, true);
+  }
 
-  // --- Base filters ---
-  const matchFilter = {
-    status: { $in: ['PENDING', 'APPROVED'] }, // ignore rejected
-    ...(Object.keys(dateFilter).length ? { createdAt: dateFilter } : {}),
-  };
-
-  // --- Aggregation pipeline ---
-  const [result] = await InstantPayoutRequest.aggregate([
-    { $match: matchFilter },
-
-    // Join driver
+  const pipeline = [
+    { $match: match },
     {
       $lookup: {
         from: 'drivers',
@@ -291,75 +179,68 @@ export const findInstantPayoutRequests = async ({
       },
     },
     { $unwind: '$driver' },
-
-    // Join user (from driver.userId)
     {
       $lookup: {
         from: 'users',
         localField: 'driver.userId',
         foreignField: '_id',
-        as: 'user',
+        as: 'driver.user',
       },
     },
-    { $unwind: '$user' },
+    { $unwind: '$driver.user' },
+  ];
 
-    // Apply search
-    ...(Object.keys(searchMatch).length ? [{ $match: searchMatch }] : []),
-
-    // Add totalRides field
-    {
-      $addFields: {
-        totalRides: { $size: { $ifNull: ['$rides', []] } },
+  // Search only on driver name and uniqueId
+  if (search.trim()) {
+    pipeline.push({
+      $match: {
+        $or: [
+          { 'driver.user.name': { $regex: search, $options: 'i' } },
+          { 'driver.uniqueId': { $regex: search, $options: 'i' } },
+        ],
       },
-    },
+    });
+  }
 
-    // Sort: pending first, approved after, then newest first
-    {
-      $addFields: {
-        sortOrder: {
-          $cond: [{ $eq: ['$status', 'PENDING'] }, 0, 1],
+  // Project desired fields + ride count
+  pipeline.push({
+    $project: {
+      _id: 1,
+      amount: 1,
+      status: 1,
+      requestedAt: 1,
+      approvedAt: 1,
+      paidAt: 1,
+      rideCount: { $size: '$rides' },
+      driver: {
+        _id: '$driver._id',
+        uniqueId: '$driver.uniqueId',
+        balance: '$driver.balance',
+        user: {
+          _id: '$driver.user._id',
+          name: '$driver.user.name',
+          email: '$driver.user.email',
         },
       },
     },
-    { $sort: { sortOrder: 1, createdAt: -1 } },
+  });
 
-    {
-      $facet: {
-        metadata: [{ $count: 'total' }],
-        data: [
-          { $skip: skip },
-          { $limit: safeLimit },
-          {
-            $project: {
-              _id: 1,
-              amount: 1,
-              rides: 1,
-              totalRides: 1, // ✅ include totalRides
-              status: 1,
-              createdAt: 1,
-              driver: { _id: 1, uniqueId: 1 },
-              user: {
-                _id: 1,
-                name: 1,
-                email: 1,
-                phoneNumber: 1,
-                profileImg: 1,
-              },
-            },
-          },
-        ],
-      },
-    },
-  ]);
+  // Count total documents for pagination
+  const countPipeline = [...pipeline, { $count: 'total' }];
+  const countResult = await InstantPayoutRequest.aggregate(countPipeline);
+  const total = countResult[0]?.total || 0;
 
-  const total = result?.metadata?.[0]?.total || 0;
+  // Apply pagination
+  pipeline.push({ $skip: skip }, { $limit: limitNumber });
+
+  const requests = await InstantPayoutRequest.aggregate(pipeline);
 
   return {
-    data: result?.data || [],
+    data: requests,
+    page: pageNumber,
+    limit: limitNumber,
     total,
-    page: safePage,
-    limit: safeLimit,
-    totalPages: Math.ceil(total / safeLimit) || 0,
+    totalPages: Math.ceil(total / limitNumber),
   };
 };
 

@@ -9,7 +9,7 @@ import { instantPayoutDriver } from '../../../dal/stripe.js';
 
 export const getUpcomingPayouts = async (
   user,
-  { page, limit, search, toDate, fromDate },
+  { page, limit, search },
   resp,
 ) => {
   try {
@@ -17,8 +17,6 @@ export const getUpcomingPayouts = async (
       page,
       limit,
       search,
-      toDate,
-      fromDate,
     });
     if (!success) {
       resp.error = true;
@@ -106,7 +104,7 @@ export const editInstantPayoutRequest = async (user, { id, status }, resp) => {
         resp.error_message = 'Failed to update instant payout request status';
         return resp;
       }
-      
+
       success = await instantPayoutDriver(data.driverId, data._id);
       if (!success) {
         resp.error = true;

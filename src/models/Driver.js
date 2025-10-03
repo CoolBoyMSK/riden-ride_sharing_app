@@ -240,6 +240,13 @@ const driverSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    rideIds: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Ride',
+        unique: true,
+      },
+    ],
     payoutMethodIds: [
       {
         type: String,
