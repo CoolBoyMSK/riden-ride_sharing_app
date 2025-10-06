@@ -29,12 +29,14 @@ import {
   createWallet,
   createPayout,
 } from '../../../dal/stripe.js';
+import { createAdminNotification } from '../../../dal/notification.js';
 // import { otpQueue } from '../../../queues/otpQueue.js';
 import { verifyOtp, sendOtp } from '../../../utils/otpUtils.js';
 import {
   getPasskeyLoginOptions,
   verifyPasskeyLogin,
 } from '../../../utils/auth.js';
+import env from '../../../config/envConfig.js';
 
 export const signupUser = async (
   users,
@@ -138,6 +140,20 @@ export const signupUser = async (
     if (!wallet) {
       resp.error = true;
       resp.error_message = 'Failed to create In-App wallet';
+      return resp;
+    }
+
+    const notify = await createAdminNotification({
+      title: 'New Passenger Registered',
+      message: `${user.name} registered as passenger successfully, Their Phone No: ${user.phoneNumber} and Email: ${user.email}`,
+      metadata: user,
+      module: 'passenger_management',
+      type: 'ALERT',
+      actionLink: `${env.FRONTEND_URL}/api/admin/passengers/fetch-passenger/${passengerProfile._id}`,
+    });
+    if (!notify) {
+      resp.error = true;
+      resp.error_message = 'Failed to send notification';
       return resp;
     }
 

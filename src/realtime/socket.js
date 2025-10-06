@@ -1007,21 +1007,16 @@ export const initSocket = (server) => {
       'ride:driver_complete_ride',
       async ({ rideId, actualDistance }) => {
         const objectType = 'driver-complete-ride';
-        const session = await mongoose.startSession();
         try {
-          session.startTransaction();
-
           const driver = await findDriverByUserId(userId);
           if (
             !driver ||
             driver.isBlocked ||
             driver.isSuspended ||
             driver.backgroundCheckStatus !== 'approved' ||
-            driver.status !== 'on_ride'
+            !['online', 'on_ride'].includes(driver.status)
           ) {
-            await session.abortTransaction();
-            session.endSession();
-            return socket.emit('ride:driver_complete_ride', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
@@ -1032,18 +1027,14 @@ export const initSocket = (server) => {
           const ride = await findRideById(rideId);
           const driverId = ride?.driverId?._id;
           if (!ride) {
-            await session.abortTransaction();
-            session.endSession();
-            return socket.emit('ride:driver_complete_ride', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'NOT_FOUND',
               message: 'Ride not found',
             });
           } else if (driverId.toString() !== driver._id.toString()) {
-            await session.abortTransaction();
-            session.endSession();
-            return socket.emit('ride:driver_complete_ride', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'NOT_ASSIGNED',
@@ -1055,9 +1046,7 @@ export const initSocket = (server) => {
             ride.status !== 'RIDE_STARTED' &&
             ride.status !== 'RIDE_IN_PROGRESS'
           ) {
-            await session.abortTransaction();
-            session.endSession();
-            return socket.emit('ride:driver_complete_ride', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'INVALID_STATUS',
@@ -1066,9 +1055,7 @@ export const initSocket = (server) => {
           }
 
           if (!actualDistance || Math.ceil(actualDistance) < 0) {
-            await session.abortTransaction();
-            session.endSession();
-            return socket.emit('ride:driver_complete_ride', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'INVALID_DISTANCE',
@@ -1103,13 +1090,10 @@ export const initSocket = (server) => {
               actualFare: Math.floor(fareResult.actualFare),
               actualDistance,
               actualDuration,
-            },
-            { session }, // transaction session
+            }, // transaction session
           );
           if (!updatedRide) {
-            await session.abortTransaction();
-            session.endSession();
-            return socket.emit('ride:driver_complete_ride', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'RIDE_UPDATE_FAILED',
@@ -1121,12 +1105,9 @@ export const initSocket = (server) => {
             driver._id,
             true,
             null,
-            { session },
           );
           if (!updateAvailability) {
-            await session.abortTransaction();
-            session.endSession();
-            return socket.emit('ride:driver_complete_ride', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'DRIVER AVAILABILITY_FAILED',
@@ -1137,7 +1118,6 @@ export const initSocket = (server) => {
           const updatedDriver = await updateDriverByUserId(
             userId,
             { status: 'online' },
-            { session },
           );
           if (!updatedDriver) {
             // Rollback ride update
@@ -1148,11 +1128,8 @@ export const initSocket = (server) => {
                 rideCompletedAt: null,
                 paymentStatus: 'PENDING',
               },
-              { session },
             );
-            await session.abortTransaction();
-            session.endSession();
-            return socket.emit('ride:driver_complete_ride', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'DRIVER_UPDATE_FAILED',
@@ -1165,9 +1142,7 @@ export const initSocket = (server) => {
             ride._id,
           );
           if (!updatedDriverHistory) {
-            await session.abortTransaction();
-            session.endSession();
-            return socket.emit('ride:driver_complete_ride', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'DRIVER_UPDATE_FAILED',
@@ -1175,19 +1150,14 @@ export const initSocket = (server) => {
             });
           }
 
-          await session.commitTransaction();
-          session.endSession();
-
           socket.join(`ride:${updatedRide._id}`);
-          io.to(`ride:${ride._id}`).emit('ride:driver_complete_ride', {
+          io.to(`ride:${updatedRide._id}`).emit('ride:driver_complete_ride', {
             success: true,
             objectType,
             data: updatedRide,
             message: 'Ride status updated to RIDE_COMPLETED',
           });
         } catch (error) {
-          await session.abortTransaction();
-          session.endSession();
           console.error(`SOCKET ERROR: ${error}`);
           return socket.emit('error', {
             success: false,
@@ -1211,7 +1181,7 @@ export const initSocket = (server) => {
             driver.isBlocked ||
             driver.isSuspended ||
             driver.backgroundCheckStatus !== 'approved' ||
-            driver.status !== 'online'
+            !['online', 'on_ride'].includes(driver.status)
           ) {
             return socket.emit('ride:driver_rate_passenger', {
               success: false,
@@ -1366,7 +1336,7 @@ export const initSocket = (server) => {
             driver.backgroundCheckStatus !== 'approved' ||
             !['online', 'on_ride'].includes(driver.status)
           ) {
-            return socket.emit('ride:driver_update_location', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
@@ -1380,7 +1350,7 @@ export const initSocket = (server) => {
             location.coordinates.length !== 2 ||
             location.coordinates.some((c) => typeof c !== 'number')
           ) {
-            return socket.emit('ride:driver_update_location', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'INVALID_LOCATION',
@@ -1390,7 +1360,7 @@ export const initSocket = (server) => {
           }
 
           if (typeof speed !== 'number' || !speed || speed < 0 || speed > 100) {
-            return socket.emit('ride:driver_update_location', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'INVALID_SPEED',
@@ -1404,7 +1374,7 @@ export const initSocket = (server) => {
             heading > 360 ||
             heading < 0
           ) {
-            return socket.emit('ride:driver_update_location', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'INVALID_HEADING',
@@ -1413,7 +1383,7 @@ export const initSocket = (server) => {
           }
 
           if (typeof isAvailable !== 'boolean') {
-            return socket.emit('ride:driver_update_location', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'INVALID_AVAILABILITY',
