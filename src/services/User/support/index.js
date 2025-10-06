@@ -73,7 +73,6 @@ export const createComplainTicket = async (
       type,
       attachments: uploadedUrls,
     });
-
     if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to create complaint';

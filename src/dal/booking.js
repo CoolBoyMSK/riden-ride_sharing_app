@@ -1,6 +1,10 @@
 import bookingModel from '../models/Ride.js';
 import Report from '../models/Report.js';
+import Driver from '../models/Driver.js';
+import Passenger from '../models/Passenger.js';
 import { generateUniqueId } from '../utils/auth.js';
+import { notifyUser } from '../dal/notification.js';
+import env from '../config/envConfig.js';
 
 export const findMyBookingsByPassengerId = (passengerId) => {
   return bookingModel
@@ -116,9 +120,28 @@ export const createBookingReportByDriverId = async (
     type: 'by_driver',
     reason,
   });
+
   if (!report) return false;
+
   report.uniqueId = generateUniqueId('report', report._id);
   await report.save();
+
+  // Notification Logic Start
+  const user = await Driver.findById(driverId).select('userId').lean();
+  const notify = await notifyUser({
+    userId: user.userId,
+    title: 'Ride Report ⚠️',
+    message:
+      'Thanks for reporting this ride. We’ll investigate and update you.',
+    module: 'support',
+    metadata: report,
+    type: 'ALERT',
+    actionLink: `${env.FRONTEND_URL}/api/user/driver/booking-management/get?id=${report._id}`,
+  });
+  if (!notify) {
+    throw new Error('Failed to send notification');
+  }
+  // Notification Logic End
 
   return report;
 };
@@ -203,6 +226,23 @@ export const createBookingReportByPassengerId = async (
 
   report.uniqueId = generateUniqueId('report', report._id);
   await report.save();
+
+  // Notification Logic Start
+  const user = await Passenger.findById(passengerId).select('userId').lean();
+  const notify = await notifyUser({
+    userId: user.userId,
+    title: 'Ride Report ⚠️',
+    message:
+      'Thanks for reporting this ride. We’ll investigate and update you.',
+    module: 'support',
+    metadata: report,
+    type: 'ALERT',
+    actionLink: `${env.FRONTEND_URL}/api/user/passenger/booking-management/get?id=${report._id}`,
+  });
+  if (!notify) {
+    throw new Error('Failed to send notification');
+  }
+  // Notification Logic End
 
   return report;
 };

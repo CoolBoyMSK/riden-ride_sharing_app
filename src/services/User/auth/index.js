@@ -90,6 +90,20 @@ export const signupUser = async (
       return resp;
     }
 
+    const notify = await createAdminNotification({
+      title: 'New Driver Registered',
+      message: `${user.name} registered as drive successfully, Their Phone No: ${user.phoneNumber} and Email: ${user.email}`,
+      metadata: user,
+      module: 'passenger_management',
+      type: 'ALERT',
+      actionLink: `${env.FRONTEND_URL}/api/admin/passengers/fetch/${driverProfile._id}`,
+    });
+    if (!notify) {
+      resp.error = true;
+      resp.error_message = 'Failed to send notification';
+      return resp;
+    }
+
     const userObj = user.toObject();
     delete userObj.password;
     resp.data = userObj;

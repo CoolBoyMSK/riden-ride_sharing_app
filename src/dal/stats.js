@@ -298,3 +298,49 @@ export const findDailyStatsForWeek = async (driverId, year, week) => {
 
   return dailyStats;
 };
+
+export const findDrivingHours = async (driverId) => {
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+
+  const endOfDay = new Date();
+  endOfDay.setHours(23, 59, 59, 999);
+
+  // Fetch today's completed & paid rides for this driver
+  const rides = await Ride.find({
+    driverId,
+    passengerId: { $exists: true },
+    status: 'RIDE_COMPLETED',
+    paymentStatus: 'COMPLETED',
+    driverAssignedAt: { $gte: startOfDay, $lte: endOfDay },
+    driverPaidAt: { $exists: true },
+  }).select('driverAssignedAt driverPaidAt');
+
+  if (!rides.length) {
+    return {
+      success: true,
+      totalHoursDriven: 0,
+      remainingHours: 13,
+      message: 'No completed rides for today.',
+    };
+  }
+
+  // Calculate total hours
+  const totalHours = rides.reduce((acc, ride) => {
+    if (ride.driverAssignedAt && ride.driverPaidAt) {
+      const diffMs =
+        new Date(ride.driverPaidAt) - new Date(ride.driverAssignedAt);
+      const diffHours = diffMs / (1000 * 60 * 60);
+      return acc + (diffHours > 0 ? diffHours : 0);
+    }
+    return acc;
+  }, 0);
+
+  const remainingHours = Math.max(13 - totalHours, 0);
+
+  return {
+    success: true,
+    totalHoursDriven: Number(totalHours.toFixed(2)),
+    remainingHours: Number(remainingHours.toFixed(2)),
+  };
+};

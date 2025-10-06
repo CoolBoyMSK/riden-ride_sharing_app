@@ -1,11 +1,11 @@
 import mongoose from 'mongoose';
-import { ADMIN_MODULES } from '../enums/adminModules.js';
+import { ALLOWED_SETTINGS } from '../enums/userSettings.js';
 
 const recipientSchema = new mongoose.Schema(
   {
-    adminId: {
+    userId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Admin',
+      ref: 'User',
       index: true,
     },
     isRead: {
@@ -54,15 +54,16 @@ const notificationSchema = new mongoose.Schema(
     },
     module: {
       type: String,
-      enum: ADMIN_MODULES,
+      enum: ALLOWED_SETTINGS,
+      required: true,
       index: true,
     },
     actionLink: {
       type: String,
     },
-    recipients: [recipientSchema],
+    recipient: recipientSchema,
   },
   { timestamps: true },
 );
 
-export default mongoose.model('AdminNotification', notificationSchema);
+export default mongoose.model('Notification', notificationSchema);

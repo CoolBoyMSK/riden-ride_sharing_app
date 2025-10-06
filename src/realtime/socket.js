@@ -1115,20 +1115,16 @@ export const initSocket = (server) => {
             });
           }
 
-          const updatedDriver = await updateDriverByUserId(
-            userId,
-            { status: 'online' },
-          );
+          const updatedDriver = await updateDriverByUserId(userId, {
+            status: 'online',
+          });
           if (!updatedDriver) {
             // Rollback ride update
-            await updateRideById(
-              ride._id,
-              {
-                status: 'RIDE_STARTED',
-                rideCompletedAt: null,
-                paymentStatus: 'PENDING',
-              },
-            );
+            await updateRideById(ride._id, {
+              status: 'RIDE_STARTED',
+              rideCompletedAt: null,
+              paymentStatus: 'PENDING',
+            });
             return socket.emit('error', {
               success: false,
               objectType,
@@ -2303,7 +2299,7 @@ export const initSocket = (server) => {
     });
 
     socket.on('ride:pay_driver', async ({ rideId }) => {
-      const objectType = 'tip-driver';
+      const objectType = 'pay-driver';
       try {
         const ride = await findRideById(rideId);
         if (!ride) {

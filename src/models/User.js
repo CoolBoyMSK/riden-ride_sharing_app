@@ -24,6 +24,10 @@ const notificationSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    support: {
+      type: Boolean,
+      default: true,
+    },
   },
   { _id: false },
 );

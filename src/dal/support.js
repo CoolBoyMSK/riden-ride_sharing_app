@@ -1,11 +1,14 @@
 import ComplainModel from '../models/ComplainTicket.js';
+import User from '../models/User.js';
 import Passenger from '../models/Passenger.js';
 import Driver from '../models/Driver.js';
 import Ride from '../models/Ride.js';
 import Report from '../models/Report.js';
-import mongoose from 'mongoose';
+import mongoose, { Error } from 'mongoose';
 import { generateUniqueId } from '../utils/auth.js';
 import { COMPLAIN_TYPES } from '../enums/complainTypes.js';
+import env from '../config/envConfig.js';
+import { notifyUser } from '../dal/notification.js';
 
 export const findComplainTypes = () => {
   return COMPLAIN_TYPES;
@@ -14,12 +17,13 @@ export const findComplainTypes = () => {
 export const createComplain = async (payload) => {
   const ride = await Ride.findOne({ _id: payload.bookingId }).lean();
   if (!ride) return false;
+  let complain = null;
 
   if (payload.user.roles.includes('driver')) {
     const driver = await Driver.findById(ride.driverId);
     if (!driver) return false;
 
-    const complain = await ComplainModel.create({
+    complain = await ComplainModel.create({
       userId: driver.userId,
       bookingId: ride._id,
       category: 'by_driver',
@@ -30,14 +34,12 @@ export const createComplain = async (payload) => {
 
     complain.uniqueId = generateUniqueId('complain', complain._id);
     await complain.save();
-
-    return complain;
   }
   if (payload.user.roles.includes('passenger')) {
     const passenger = await Passenger.findById(ride.passengerId);
     if (!passenger) return false;
 
-    const complain = await ComplainModel.create({
+    complain = await ComplainModel.create({
       userId: passenger.userId,
       bookingId: ride._id,
       category: 'by_passenger',
@@ -48,9 +50,25 @@ export const createComplain = async (payload) => {
 
     complain.uniqueId = generateUniqueId('complain', complain._id);
     await complain.save();
-
-    return complain;
   }
+
+  // Notification Logic Start
+  const notify = await notifyUser({
+    userId: complain.userId,
+    title: 'Ticket Submitted 📩',
+    message:
+      'Your support request has been submitted — our team will get back to you soon.',
+    module: 'support',
+    metadata: complain,
+    type: 'ALERT',
+    actionLink: `${env.FRONTEND_URL}/api/user/support/${complain._id}`,
+  });
+  if (!notify) {
+    throw new Error('Failed to send notification');
+  }
+  // Notification Logic End
+
+  return complain;
 };
 
 export const findComplains = async (userId, { page = 1, limit = 10 } = {}) => {
@@ -203,14 +221,36 @@ export const updateComplaniStatusById = async (id, status) =>
     .populate('userId')
     .lean();
 
-export const adminComplainReply = async (id, text, attachments) =>
-  ComplainModel.findByIdAndUpdate(
+export const adminComplainReply = async (id, text, attachments) => {
+  const reply = await ComplainModel.findByIdAndUpdate(
     id,
     { $push: { chat: { isSupportReply: true, text, attachments } } },
     { new: true },
   )
     .populate('userId')
     .lean();
+
+  if (!reply) {
+    throw new Error('Complain not found');
+  }
+
+  // Notification Logic Start
+  const notify = await notifyUser({
+    userId: reply.userId?._id,
+    title: 'Support Reply ✅',
+    message: 'You’ve got a new response from Riden Support — tap to view.',
+    module: 'support',
+    metadata: reply,
+    type: 'ALERT',
+    actionLink: `${env.FRONTEND_URL}/api/admin/support/reply?id=${reply._id}`,
+  });
+  if (!notify) {
+    throw new Error('Failed to send notification');
+  }
+  // Notification Logic End
+
+  return reply;
+};
 
 export const getAllReports = async ({
   type,

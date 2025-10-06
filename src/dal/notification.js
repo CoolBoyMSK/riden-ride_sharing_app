@@ -1,7 +1,10 @@
+import mongoose from 'mongoose';
 import User from '../models/User.js';
-import Admin from '../models/Admin.js';
 import AdminNotification from '../models/AdminNotification.js';
 import AdminAccess from '../models/AdminAccess.js';
+import Notification from '../models/Notification.js';
+import { ALLOWED_SETTINGS } from '../enums/userSettings.js';
+import firebaseAdmin from '../config/firebaseAdmin.js';
 
 export const findNotificationSettings = (id) =>
   User.findById(id).select('notifications').lean();
@@ -241,6 +244,301 @@ export const createAdminNotification = async ({
     return {
       success: false,
       message: 'An error occurred while creating the notification.',
+      error: error.message,
+    };
+  }
+};
+
+export const findUserNotifications = async (userId) => {
+  if (!userId) {
+    throw new Error('User ID is required to fetch notifications.');
+  }
+
+  const notifications = await Notification.find({
+    'recipient.userId': userId,
+    'recipient.isDeleted': false,
+  })
+    .sort({ createdAt: -1 })
+    .lean();
+
+  return notifications;
+};
+
+export const toggleUserNotificationReadStatus = async (
+  userId,
+  notificationId,
+) => {
+  if (!mongoose.Types.ObjectId.isValid(notificationId)) {
+    throw new Error('Invalid notification ID.');
+  }
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    throw new Error('Invalid user ID.');
+  }
+
+  const notification = await Notification.findOne({
+    _id: notificationId,
+    'recipient.userId': userId,
+    'recipient.isDeleted': false,
+  });
+
+  if (!notification) {
+    throw new Error('Notification not found or access denied.');
+  }
+
+  const isCurrentlyRead = notification.recipient.isRead;
+  notification.recipient.isRead = !isCurrentlyRead;
+  notification.recipient.readAt = isCurrentlyRead ? null : new Date();
+
+  await notification.save();
+
+  return notification;
+};
+
+export const deleteUserNotificationById = async (userId, notificationId) => {
+  if (!mongoose.Types.ObjectId.isValid(notificationId)) {
+    throw new Error('Invalid notification ID.');
+  }
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    throw new Error('Invalid user ID.');
+  }
+
+  const notification = await Notification.findOne({
+    _id: notificationId,
+    'recipient.userId': userId,
+    'recipient.isDeleted': false,
+  });
+
+  if (!notification) {
+    throw new Error('Notification not found or already deleted.');
+  }
+
+  notification.recipient.isDeleted = true;
+  await notification.save();
+
+  return notification;
+};
+
+export const deleteAllNotificationsForUser = async (userId) => {
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    throw new Error('Invalid user ID.');
+  }
+
+  const result = await Notification.updateMany(
+    {
+      'recipient.userId': userId,
+      'recipient.isDeleted': false,
+    },
+    {
+      $set: { 'recipient.isDeleted': true },
+    },
+  );
+
+  return {
+    acknowledged: result.acknowledged,
+    modifiedCount: result.modifiedCount,
+    message: result.modifiedCount
+      ? `${result.modifiedCount} notifications marked as deleted for user ${userId}.`
+      : 'Notifications not available',
+  };
+};
+
+export const createUserNotification = async ({
+  title,
+  message,
+  module,
+  userId,
+  metadata = {},
+  type = 'ALERT',
+  actionLink = null,
+}) => {
+  if (!title || !message || !module || !userId) {
+    return {
+      success: false,
+      message: 'Title, message, module, and userId are required.',
+    };
+  }
+
+  if (!ALLOWED_SETTINGS.includes(module)) {
+    return {
+      success: false,
+      message: `Invalid module. Allowed values: ${ALLOWED_SETTINGS.join(', ')}`,
+    };
+  }
+
+  // --- 3️⃣ Validate User ID ---
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    return {
+      success: false,
+      message: 'Invalid userId. Must be a valid MongoDB ObjectId.',
+    };
+  }
+
+  // --- 4️⃣ Construct Recipient ---
+  const recipient = {
+    userId: new mongoose.Types.ObjectId(userId),
+    isRead: false,
+    isDeleted: false,
+    readAt: null,
+  };
+
+  // --- 5️⃣ Create Notification ---
+  const notification = await Notification.create({
+    title,
+    message,
+    module,
+    type,
+    actionLink,
+    metadata,
+    recipient,
+  });
+
+  return {
+    success: true,
+    message: 'Notification created successfully.',
+    data: notification,
+  };
+};
+
+export const sendPushNotification = async ({
+  deviceToken,
+  title,
+  body,
+  data = {},
+  imageUrl = null,
+}) => {
+  try {
+    if (!deviceToken) {
+      throw new Error('Device token is required to send notification');
+    }
+
+    const message = {
+      token: deviceToken,
+      notification: {
+        title,
+        body,
+        ...(imageUrl && { image: imageUrl }),
+      },
+      data: Object.keys(data).reduce((acc, key) => {
+        acc[key] = String(data[key]); // FCM requires all data to be string
+        return acc;
+      }, {}),
+      android: {
+        priority: 'high',
+        notification: {
+          sound: 'default',
+          channelId: 'high_importance_channel',
+        },
+      },
+      apns: {
+        payload: {
+          aps: {
+            sound: 'default',
+          },
+        },
+      },
+    };
+
+    const response = await firebaseAdmin.messaging().send(message);
+
+    console.log(`Push notification sent successfully: ${response}`);
+    return { success: true, response };
+  } catch (error) {
+    console.error(`Error sending push notification: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+};
+
+export const notifyUser = async ({
+  userId,
+  title,
+  message,
+  module,
+  metadata = {},
+  type = 'ALERT',
+  actionLink = null,
+}) => {
+  try {
+    if (!userId || !title || !message || !module) {
+      return {
+        success: false,
+        message: 'userId, title, message, and module are required.',
+      };
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return {
+        success: false,
+        message: 'Invalid userId. Must be a valid MongoDB ObjectId.',
+      };
+    }
+
+    if (!ALLOWED_SETTINGS.includes(module)) {
+      return {
+        success: false,
+        message: `Invalid module. Allowed values: ${ALLOWED_SETTINGS.join(', ')}`,
+      };
+    }
+
+    // --- Fetch User and Notification Preferences ---
+    const user = await User.findById(userId).lean();
+    if (!user) {
+      return { success: false, message: 'User not found.' };
+    }
+
+    // --- Create Notification in DB ---
+    const createdNotification = await createUserNotification({
+      title,
+      message,
+      module,
+      userId,
+      metadata,
+      type,
+      actionLink,
+    });
+
+    if (!createdNotification.success) {
+      return createdNotification;
+    }
+
+    const notificationDoc = createdNotification.data;
+
+    // --- Check User Notification Preferences + Token ---
+    if (
+      user.userDeviceToken &&
+      user.notifications &&
+      user.notifications[module] === true
+    ) {
+      const pushResponse = await sendPushNotification({
+        deviceToken: user.userDeviceToken,
+        title,
+        body: message,
+        data: {
+          module,
+          type,
+          ...metadata,
+        },
+        imageUrl: actionLink || undefined,
+      });
+
+      return {
+        success: true,
+        message: 'Notification created and push sent successfully.',
+        dbNotification: notificationDoc,
+        pushNotification: pushResponse,
+      };
+    }
+
+    return {
+      success: true,
+      message:
+        'Notification created but not sent (user disabled or missing device token).',
+      dbNotification: notificationDoc,
+    };
+  } catch (error) {
+    console.error('❌ Error in notifyUser:', error);
+    return {
+      success: false,
+      message: 'Failed to send notification.',
       error: error.message,
     };
   }

@@ -4,6 +4,7 @@ import {
   getLifeTimeHighlights,
   getWeeklyStats,
   getDailyStatsForWeek,
+  getDrivingHours,
 } from '../../../../services/User/driver/Stats/index.js';
 
 export const getStatsController = (req, res) =>
@@ -49,6 +50,18 @@ export const getDailyStatsForWeekController = (req, res) =>
       validationFn: null,
       handlerParams: [req.user, req.query],
       successMessage: 'Stats fetched successfully',
+    },
+    req,
+    res,
+  );
+
+export const getDrivingHoursController = (req, res) =>
+  handleResponse(
+    {
+      handler: getDrivingHours,
+      validationFn: null,
+      handlerParams: [req.user],
+      successMessage: 'Driving hours fetched successfully',
     },
     req,
     res,

@@ -8,6 +8,7 @@ import WalletModel from '../models/Wallet.js';
 import PayoutModel from '../models/Payout.js';
 import RideModel from '../models/Ride.js';
 import env from '../config/envConfig.js';
+import { notifyUser } from '../dal/notification.js';
 
 const stripe = new Stripe(env.STRIPE_SECRET_KEY);
 
@@ -340,7 +341,7 @@ export const addFundsToWallet = async (
 
   const wallet = await increaseWalletBalance(passenger._id, amount);
 
-  await createTransaction({
+  const transaction = await createTransaction({
     passengerId: passenger._id,
     walletId: wallet._id,
     type: 'CREDIT',
@@ -351,6 +352,21 @@ export const addFundsToWallet = async (
     referenceId: paymentIntent.id,
     receiptUrl: paymentIntent.id,
   });
+
+  // Notification Logic Start
+  const notify = await notifyUser({
+    userId: passenger.userId,
+    title: 'Payment Done 🎉',
+    message: `Payment successful! $${amount} has been added to your Riden wallet.`,
+    module: 'payment',
+    metadata: transaction,
+    type: 'ALERT',
+    actionLink: `${env.FRONTEND_URL}/api/user/passenger/payment-method/wallet`,
+  });
+  if (!notify) {
+    throw new Error('Failed to send notification');
+  }
+  // Notification Logic End
 
   return paymentIntent;
 };
@@ -372,8 +388,9 @@ export const payDriverFromWallet = async (
       throw new Error('Invalid amount provided');
     }
 
-    if (wallet.balance < parsedAmount)
+    if (wallet.balance < parsedAmount) {
       throw new Error('Insufficient wallet balance');
+    }
 
     await decreaseWalletBalance(passenger._id, parsedAmount);
     await increaseDriverBalance(driver._id, parsedAmount);
@@ -406,9 +423,52 @@ export const payDriverFromWallet = async (
       receiptUrl: wallet._id,
     });
 
+    const notify = await notifyUser({
+      userId: passenger.userId,
+      title: '✅ Payment Successful!',
+      message: `Thanks for riding with RIDEN. Your payment of $${amount} was completed successfully. Receipt is available in your ride history.`,
+      module: 'payment',
+      metadata: ride,
+      type: 'ALERT',
+      actionLink: `${env.FRONTEND_URL}/ride?rideId=${ride._id}`,
+    });
+
+    const notifyDriver = await notifyUser({
+      userId: driver.userId,
+      title: '💰 Payment Received',
+      message: `You’ve received ${amount} for your recent ride.`,
+      module: 'payment',
+      metadata: ride,
+      type: 'ALERT',
+      actionLink: `${env.FRONTEND_URL}/ride?rideId=${ride._id}`,
+    });
+
+    if (!notify || !notifyDriver) {
+      console.log('Failed to send notification');
+    }
+
     return { success: true, transaction };
   } catch (error) {
-    console.error(`ERROR in payDriverFromWallet: ${error}`);
+    console.error(`Payment Failed: ${error.message}`);
+
+    // 🔔 Failure Notification
+    try {
+      await notifyUser({
+        userId: passenger.userId,
+        title: '❌ Payment Failed',
+        message: `We couldn’t complete your wallet payment of PKR ${amount}. ${error.message}. Please try again.`,
+        module: 'payment',
+        metadata: { rideId: ride?._id, error: error.message },
+        type: 'ALERT',
+        actionLink: `${env.FRONTEND_URL}/wallet`,
+      });
+    } catch (notifyErr) {
+      console.error(
+        '❌ Failed to send payment failure notification:',
+        notifyErr,
+      );
+    }
+
     return { error: error.message };
   }
 };
@@ -422,44 +482,97 @@ export const passengerPaysDriver = async (
   paymentMethodId,
   category,
 ) => {
-  const payment = await stripe.paymentIntents.create({
-    amount: amount * 100,
-    currency: 'cad',
-    customer: passenger.stripeCustomerId,
-    payment_method: paymentMethodId,
-    off_session: true,
-    confirm: true,
-  });
+  try {
+    const payment = await stripe.paymentIntents.create({
+      amount: amount * 100,
+      currency: 'cad',
+      customer: passenger.stripeCustomerId,
+      payment_method: paymentMethodId,
+      off_session: true,
+      confirm: true,
+    });
 
-  await increaseDriverBalance(driver._id, amount);
+    await increaseDriverBalance(driver._id, amount);
 
-  const transaction = await createTransaction({
-    passengerId: passenger._id,
-    driverId: driver._id,
-    rideId: ride._id,
-    type: 'DEBIT',
-    category,
-    amount: actualAmount,
-    metadata: payment,
-    status: payment.status || 'failed',
-    referenceId: payment.id,
-    receiptUrl: payment.id,
-  });
+    const transaction = await createTransaction({
+      passengerId: passenger._id,
+      driverId: driver._id,
+      rideId: ride._id,
+      type: 'DEBIT',
+      category,
+      amount: actualAmount,
+      metadata: payment,
+      status: payment.status || 'failed',
+      referenceId: payment.id,
+      receiptUrl: payment.id,
+    });
 
-  await createTransaction({
-    passengerId: passenger._id,
-    driverId: driver._id,
-    rideId: ride._id,
-    type: 'CREDIT',
-    category: 'PAYOUT',
-    amount,
-    metadata: payment,
-    status: payment.status || 'failed',
-    referenceId: payment.id,
-    receiptUrl: payment.id,
-  });
+    await createTransaction({
+      passengerId: passenger._id,
+      driverId: driver._id,
+      rideId: ride._id,
+      type: 'CREDIT',
+      category: 'PAYOUT',
+      amount,
+      metadata: payment,
+      status: payment.status || 'failed',
+      referenceId: payment.id,
+      receiptUrl: payment.id,
+    });
 
-  return { payment, transaction };
+    // --- Notification Logic Start (Success) ---
+    const notify = await notifyUser({
+      userId: passenger.userId,
+      title: '✅ Payment Successful!',
+      message: `Thanks for riding with RIDEN. Your payment of $${amount} was completed successfully. Receipt is available in your ride history.`,
+      module: 'payment',
+      metadata: ride,
+      type: 'ALERT',
+      actionLink: `${env.FRONTEND_URL}/ride?rideId=${ride._id}`,
+    });
+
+    const notifyDriver = await notifyUser({
+      userId: driver.userId,
+      title: '💰 Payment Received',
+      message: `You’ve received ${amount} for your recent ride.`,
+      module: 'payment',
+      metadata: ride,
+      type: 'ALERT',
+      actionLink: `${env.FRONTEND_URL}/ride?rideId=${ride._id}`,
+    });
+
+    if (!notify || !notifyDriver) {
+      console.log('Failed to send notification');
+    }
+
+    return { success: true, payment, transaction };
+  } catch (error) {
+    console.error('Payment failed:', error.message);
+
+    try {
+      await notifyUser({
+        userId: passenger.userId,
+        title: '⚠️ Payment Failed',
+        message:
+          'We couldn’t process your payment. Please check your card details or try again later.',
+        module: 'payment',
+        metadata: { error: error.message, rideId: ride?._id },
+        type: 'ALERT',
+        actionLink: `${env.FRONTEND_URL}/ride?rideId=${ride?._id}`,
+      });
+    } catch (notifyError) {
+      console.error(
+        '⚠️ Failed to send payment failure notification:',
+        notifyError.message,
+      );
+    }
+
+    return {
+      success: false,
+      message: 'Payment processing failed.',
+      error: error.message,
+    };
+  }
 };
 
 // Driver Flow
@@ -809,4 +922,43 @@ export const createPayoutRequest = async (driverId) => {
   );
 
   return payoutRequest;
+};
+
+export const refundPayment = async ({
+  paymentIntentId,
+  amount,
+  passenger,
+  driver,
+  ride,
+  reason = 'requested_by_customer',
+}) => {
+  if (!paymentIntentId) throw new Error('Payment Intent ID is required');
+  if (!passenger || !driver || !ride) throw new Error('Missing refund context');
+
+  // 💰 Perform refund (partial if `amount` is passed)
+  const refund = await stripe.refunds.create({
+    payment_intent: paymentIntentId,
+    ...(amount && { amount: Math.round(amount * 100) }), // convert to cents if provided
+    reason,
+  });
+
+  const transaction = await createTransaction({
+    passengerId: passenger._id,
+    driverId: driver._id,
+    rideId: ride._id,
+    type: 'REFUND',
+    category: 'REFUND',
+    amount: amount || refund.amount / 100,
+    metadata: refund,
+    status: refund.status || 'failed',
+    referenceId: refund.id,
+    receiptUrl: refund.receipt_url || null,
+  });
+
+  return {
+    success: true,
+    message: 'Refund processed successfully',
+    refund,
+    transaction,
+  };
 };

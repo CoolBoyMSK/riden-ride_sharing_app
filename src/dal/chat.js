@@ -1,6 +1,9 @@
 import ChatMessage from '../models/ChatMessage.js';
 import ChatRoom from '../models/ChatRoom.js';
+import Ride from '../models/Ride.js';
 import mongoose from 'mongoose';
+import { notifyUser } from '../dal/notification.js';
+import env from '../config/envConfig.js';
 
 export const findChatRoomByRideId = async (rideId) => {
   const chatRoom = await ChatRoom.aggregate([
@@ -209,6 +212,56 @@ export const createMessage = async ({
 
     // Populate sender information
     await savedMessage.populate('senderId', 'name profileImg');
+
+    // Notification Logic Start
+    let recipientUserId = null;
+    let role = null;
+
+    const ride = await Ride.findById(rideId)
+      .populate('passengerId driverId', 'userId')
+      .select('passengerId driverId')
+      .lean();
+
+    if (!ride || !ride.passengerId || !ride.driverId) {
+      throw new Error('Ride, driver, or passenger not found.');
+    }
+
+    const driverUserId = ride.driverId?.userId;
+    const passengerUserId = ride.passengerId?.userId;
+
+    if (!driverUserId || !passengerUserId) {
+      throw new Error('Driver or passenger userId missing.');
+    }
+
+    // Determine recipient (the opposite of the sender)
+    if (String(senderId) === String(driverUserId)) {
+      recipientUserId = passengerUserId;
+      role = 'Passenger';
+    } else if (String(senderId) === String(passengerUserId)) {
+      recipientUserId = driverUserId;
+      role = 'Driver';
+    } else {
+      throw new Error('Sender does not belong to this ride.');
+    }
+
+    const notify = await notifyUser({
+      userId: recipientUserId,
+      title:
+        role === 'Driver' ? 'New Message 💬' : '🚗 Your Driver Wants to Chat',
+      message:
+        role === 'Driver'
+          ? `Your Passenger just sent you a message.`
+          : 'Your driver has sent you a message. Open the chat to respond quickly.',
+      module: 'chat',
+      metadata: message,
+      type: 'ALERT',
+      actionLink: `${env.FRONTEND_URL}/chat?rideId=${rideId}`,
+    });
+
+    if (!notify) {
+      throw new Error('Failed to send notification');
+    }
+    // Notification Logic End
 
     return savedMessage.toObject();
   } catch (error) {
