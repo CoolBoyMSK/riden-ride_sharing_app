@@ -1,6 +1,6 @@
 import {
   findAdminNotifications,
-  updateNotificationAsRead,
+  toggleNotificationReadStatus,
   updateNotificationsAsDeleted,
   updateNotificationsAsDeletedById,
 } from '../../../dal/notification.js';
@@ -24,9 +24,9 @@ export const getAllNotifications = async (user, resp) => {
   }
 };
 
-export const readNotifications = async (user, resp) => {
+export const readNotifications = async (user, { id }, resp) => {
   try {
-    const success = await updateNotificationAsRead(user._id);
+    const success = await toggleNotificationReadStatus(user._id, id);
     if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to read notifications';

@@ -31,35 +31,71 @@ export const findAdminNotifications = async (adminId) => {
   return notifications;
 };
 
-export const updateNotificationAsRead = async (adminId) => {
-  const access = await AdminAccess.findOne({ admin: adminId })
-    .select('modules')
-    .lean();
+export const toggleNotificationReadStatus = async (adminId, notificationId) => {
+  try {
+    if (!adminId || !notificationId) {
+      return {
+        success: false,
+        message: 'Admin ID and Notification ID are required.',
+      };
+    }
 
-  if (!access || !access.modules?.length) {
-    return { modifiedCount: 0, message: 'No modules found for this admin.' };
-  }
-
-  const result = await AdminNotification.updateMany(
-    {
-      module: { $in: access.modules },
+    // --- Fetch the notification first ---
+    const notification = await AdminNotification.findOne({
+      _id: notificationId,
       'recipients.adminId': adminId,
       'recipients.isDeleted': false,
-      'recipients.isRead': false,
-    },
-    {
-      $set: {
-        'recipients.$.isRead': true,
-        'recipients.$.readAt': new Date(),
-      },
-    },
-  );
+    }).lean();
 
-  return {
-    acknowledged: result.acknowledged,
-    modifiedCount: result.modifiedCount,
-    message: `${result.modifiedCount} notifications marked as read for admin ${adminId}.`,
-  };
+    if (!notification) {
+      return {
+        success: false,
+        message: 'Notification not found for this admin.',
+      };
+    }
+
+    // --- Find the recipient record for this admin ---
+    const recipient = notification.recipients.find(
+      (r) => r.adminId.toString() === adminId.toString(),
+    );
+
+    if (!recipient) {
+      return {
+        success: false,
+        message: 'Recipient not found in this notification.',
+      };
+    }
+
+    // --- Toggle the read status ---
+    const newIsRead = !recipient.isRead;
+
+    const result = await AdminNotification.updateOne(
+      { _id: notificationId },
+      {
+        $set: {
+          'recipients.$[r].isRead': newIsRead,
+          'recipients.$[r].readAt': newIsRead ? new Date() : null,
+        },
+      },
+      {
+        arrayFilters: [{ 'r.adminId': adminId }],
+      },
+    );
+
+    return {
+      success: true,
+      modifiedCount: result.modifiedCount,
+      message: `Notification ${notificationId} marked as ${newIsRead ? 'read' : 'unread'} for admin ${adminId}.`,
+      newStatus: newIsRead,
+    };
+  } catch (error) {
+    console.error('Error toggling notification read status:', error);
+    return {
+      success: false,
+      message: 'An error occurred while updating the notification.',
+      error: error.message,
+    };
+  }
 };
 
 export const updateNotificationsAsDeleted = async (adminId) => {

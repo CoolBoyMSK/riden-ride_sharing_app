@@ -18,7 +18,7 @@ registerRoute({
 
 registerRoute({
   router,
-  route: '/read',
+  route: '/read/:id',
   admin_auth_enable: true,
   post_method: readNotificationsController,
 });

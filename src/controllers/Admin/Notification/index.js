@@ -23,7 +23,7 @@ export const readNotificationsController = (req, res) =>
     {
       handler: readNotifications,
       validationFn: null,
-      handlerParams: [req.user],
+      handlerParams: [req.user, req.params],
       successMessage: 'Admin notifications read successfully',
     },
     req,
