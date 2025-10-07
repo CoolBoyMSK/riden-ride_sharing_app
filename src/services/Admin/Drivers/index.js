@@ -220,7 +220,6 @@ export const getAllUpdateRequests = async (
 ) => {
   try {
     const result = await findDriverUpdateRequests(
-      {},
       page,
       limit,
       search,
@@ -233,14 +232,7 @@ export const getAllUpdateRequests = async (
       return resp;
     }
 
-    resp.data = {
-      requests: result.data,
-      total: result.total,
-      page: result.page,
-      limit: result.limit,
-      totalPages: result.totalPages,
-    };
-
+    resp.data = result;
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);

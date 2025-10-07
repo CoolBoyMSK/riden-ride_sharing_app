@@ -13,7 +13,8 @@ import {
   verifyRegistrationResponse,
 } from '@simplewebauthn/server';
 
-export const findUserByEmail = async (email) => UserModel.findOne({ email }).lean();
+export const findUserByEmail = async (email) =>
+  UserModel.findOne({ email }).lean();
 
 export const findUserByPhone = async (phoneNumber) =>
   UserModel.findOne({ phoneNumber }).lean();
@@ -219,8 +220,8 @@ export const verifyPasskeyRegistration = async (userId, credential) => {
   const verification = await verifyRegistrationResponse({
     response: credential,
     expectedChallenge: user.passkeyChallenge,
-    expectedOrigin: 'https://your-frontend-domain.com',
-    expectedRPID: 'your-domain.com',
+    expectedOrigin: 'https://api.riden.online',
+    expectedRPID: 'https://api.riden.online',
   });
 
   if (!verification.verified) {

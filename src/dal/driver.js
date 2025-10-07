@@ -28,7 +28,7 @@ export const updateDriverByUserId = async (id, update, options = {}) => {
     const updatedDriver = await DriverModel.findOneAndUpdate(
       { userId: objectId },
       update,
-      { new: true, session: options.session }
+      { new: true, session: options.session },
     );
 
     console.log('🧾 Updated Driver:', updatedDriver);
@@ -39,7 +39,6 @@ export const updateDriverByUserId = async (id, update, options = {}) => {
     throw error;
   }
 };
-
 
 export const countDrivers = () => DriverModel.countDocuments();
 
@@ -411,7 +410,6 @@ export const createDriverUpdateRequest = (
   });
 
 export const findDriverUpdateRequests = async (
-  filter = {},
   page = 1,
   limit = 10,
   search = '',
@@ -442,11 +440,13 @@ export const findDriverUpdateRequests = async (
   // --- Date filter ---
   const dateFilter = {};
   if (fromDate) {
-    const start = new Date(fromDate);
+    const [day, month, year] = fromDate.split('-');
+    const start = new Date(`${year}-${month}-${day}T00:00:00.000Z`);
     if (!isNaN(start)) dateFilter.$gte = start;
   }
   if (toDate) {
-    const end = new Date(`${toDate}T23:59:59.999Z`);
+    const [day, month, year] = toDate.split('-');
+    const end = new Date(`${year}-${month}-${day}T23:59:59.999Z`);
     if (!isNaN(end)) dateFilter.$lte = end;
   }
 
@@ -460,17 +460,13 @@ export const findDriverUpdateRequests = async (
       },
     },
     { $unwind: '$user' },
-
-    // Merge search, roles, and other filters
     {
       $match: {
         'user.roles': { $regex: /^driver$/i },
-        ...filter,
         ...(Object.keys(searchMatch).length ? searchMatch : {}),
         ...(Object.keys(dateFilter).length ? { createdAt: dateFilter } : {}),
       },
     },
-
     {
       $facet: {
         metadata: [{ $count: 'total' }],
@@ -484,8 +480,19 @@ export const findDriverUpdateRequests = async (
               status: 1,
               request: 1,
               vehicleRequest: 1,
-              createdAt: 1,
-              updatedAt: 1,
+              // ✅ Format date as DD-MM-YYYY
+              createdAt: {
+                $dateToString: {
+                  format: '%d-%m-%Y',
+                  date: '$createdAt',
+                },
+              },
+              updatedAt: {
+                $dateToString: {
+                  format: '%d-%m-%Y',
+                  date: '$updatedAt',
+                },
+              },
               'user._id': 1,
               'user.name': 1,
               'user.email': 1,

@@ -42,7 +42,10 @@ import {
 import { calculateActualFare } from '../services/User/ride/fareCalculationService.js';
 import { findPassengerByUserId, findPassengerById } from '../dal/passenger.js';
 import { passengerPaysDriver, payDriverFromWallet } from '../dal/stripe.js';
+import { createCallLog, findCallById, updateCallLogById } from '../dal/call.js';
 import { findDashboardData } from '../dal/admin/index.js';
+import { notifyUser } from '../dal/notification.js';
+import { generateAgoraToken } from '../utils/agoraTokenGenerator.js';
 import mongoose from 'mongoose';
 
 let ioInstance = null;
@@ -2434,7 +2437,7 @@ export const initSocket = (server) => {
       }
     });
 
-    // chat Events
+    // Chat Events
     socket.on('ride:get_chat', async ({ rideId }) => {
       const objectType = 'ride-chat';
       try {
@@ -2930,6 +2933,881 @@ export const initSocket = (server) => {
           objectType,
           data: deletedMsg,
           message: 'Message deleted successfully',
+        });
+      } catch (error) {
+        console.error(`SOCKET ERROR: ${error}`);
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: `${error.code || 'SOCKET_ERROR'}`,
+          message: `SOCKET ERROR: ${error.message}`,
+        });
+      }
+    });
+
+    // Call Events
+    socket.on(
+      'ride:start_call',
+      async ({ rideId, callType = 'audio', metadata = {} }) => {
+        const objectType = 'start-call';
+        try {
+          let caller;
+          let role;
+          if (socket.user.roles.includes('driver')) {
+            caller = await findDriverByUserId(userId);
+            role = 'driver';
+
+            if (
+              !caller ||
+              caller.isBlocked ||
+              caller.isSuspended ||
+              caller.backgroundCheckStatus !== 'approved' ||
+              !['online', 'on_ride'].includes(caller.status)
+            ) {
+              return socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'FORBIDDEN',
+                message: 'Forbidden: Driver not eligible',
+              });
+            }
+          } else if (socket.user.roles.includes('passenger')) {
+            caller = await findPassengerByUserId(userId);
+            role = 'passenger';
+
+            if (!caller || caller.isBlocked || caller.isSuspended) {
+              return socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'FORBIDDEN',
+                message: 'Forbidden: Passenger not eligible',
+              });
+            }
+          }
+
+          const ride = await findRideById(rideId);
+          if (
+            !ride ||
+            ![
+              'DRIVER_ASSIGNED',
+              'DRIVER_ARRIVING',
+              'DRIVER_ARRIVED',
+              'RIDE_STARTED',
+              'RIDE_IN_PROGRESS',
+              'RIDE_COMPLETED',
+            ].includes(ride.status) ||
+            !['PENDING', 'PROCESSING'].includes(ride.paymentStatus)
+          ) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'INVALID_CALL',
+              message: 'This call is not eligible',
+            });
+          }
+
+          const receiverId =
+            role === 'driver'
+              ? ride.passengerId?.userId
+              : ride.driverId?.userId;
+
+          const channelName =
+            role === 'driver'
+              ? `call_${caller.userId}_${receiverId}_${rideId}_${Date.now()}`
+              : `call_${caller.userId}_${receiverId}_${rideId}_${Date.now()}`;
+
+          // generate agora token (short lived)
+          const { token: rtcToken, expiresAt } = generateAgoraToken({
+            channelName,
+            uid: 0,
+            role: 'publisher',
+            expireSeconds: 60 * 10, // 10 min
+          });
+
+          // persist initial call log
+          const callLog = await createCallLog({
+            callerId: caller.userId,
+            receiverId,
+            rideId,
+            channelName,
+            rtcToken,
+            callType,
+            status: 'ringing',
+            metadata,
+          });
+
+          // try to find receiver socket ids
+          const receiverSockets = await getSocketIds(receiverId);
+          const dataForReceiver = {
+            callerId: caller.userId,
+            channelName,
+            callType,
+            rtcToken,
+            callLogId: callLog._id.toString(),
+            startedAt: new Date(),
+            metadata,
+          };
+
+          if (receiverSockets.length > 0) {
+            // receiver is online — notify all their sockets
+            receiverSockets.forEach((sid) =>
+              io.to(sid).emit('ride:incoming_call', {
+                success: true,
+                objectType,
+                data: dataForReceiver,
+                message: `${caller._id} is calling you`,
+              }),
+            );
+            socket.emit('ride:start_call', {
+              success: true,
+              objectType,
+              data: callLog,
+              message: 'Call initiated successfully',
+            });
+          } else {
+            // receiver offline — fallback to push notification
+            const notify = await notifyUser({
+              userId: receiverId,
+              title: 'Incoming Call 📞',
+              message: `Incoming call from your ${role} — tap to answer!`,
+              module: 'call',
+              type: 'ALERT',
+              metadata: callLog,
+              actionLink: '',
+            });
+
+            if (!notify) {
+              socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'NOTIFICATION_FAILED',
+                message: 'Failed to send notification',
+              });
+            }
+
+            socket.emit('ride:start_call', {
+              success: true,
+              objectType,
+              data: callLog,
+              message: 'Call notification sent successfully',
+            });
+          }
+        } catch (error) {
+          console.error(`SOCKET ERROR: ${error}`);
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: `${error.code || 'SOCKET_ERROR'}`,
+            message: `SOCKET ERROR: ${error.message}`,
+          });
+        }
+      },
+    );
+
+    socket.on('ride:accept_call', async ({ callLogId }) => {
+      const objectType = 'accept-ride';
+      try {
+        let receiver;
+        let role;
+        if (socket.user.roles.includes('driver')) {
+          receiver = await findDriverByUserId(userId);
+          role = 'driver';
+
+          if (
+            !receiver ||
+            receiver.isBlocked ||
+            receiver.isSuspended ||
+            receiver.backgroundCheckStatus !== 'approved' ||
+            !['online', 'on_ride'].includes(receiver.status)
+          ) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Driver not eligible',
+            });
+          }
+        } else if (socket.user.roles.includes('passenger')) {
+          receiver = await findPassengerByUserId(userId);
+          role = 'passenger';
+
+          if (!receiver || receiver.isBlocked || receiver.isSuspended) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Passenger not eligible',
+            });
+          }
+        }
+
+        const call = await findCallById(callLogId);
+        if (!call) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: `NOT_FOUND`,
+            message: `Call not found`,
+          });
+        }
+
+        if (String(call.receiverId) !== String(receiver.userId)) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: `INVALID_USER`,
+            message: `You are not allowed to receive the call`,
+          });
+        }
+
+        const ride = await findRideById(call.rideId);
+        if (
+          !ride ||
+          ![
+            'DRIVER_ASSIGNED',
+            'DRIVER_ARRIVING',
+            'DRIVER_ARRIVED',
+            'RIDE_STARTED',
+            'RIDE_IN_PROGRESS',
+            'RIDE_COMPLETED',
+          ].includes(ride.status) ||
+          !['PENDING', 'PROCESSING'].includes(ride.paymentStatus)
+        ) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'INVALID_CALL',
+            message: 'This call is not eligible',
+          });
+        }
+
+        const updateCall = await updateCallLogById(callLogId, {
+          status: 'accepted',
+          startedAt: new Date(),
+        });
+        if (!updateCall) {
+          socket.emit('ride:decline_call', {
+            success: false,
+            objectType,
+            code: 'FAILED_UPDATE',
+            message: `Failed to update the call log`,
+          });
+        }
+
+        // notify caller
+        const callerSockets = await getSocketIds(call.callerId);
+        callerSockets.forEach((sid) =>
+          io.to(sid).emit('ride:call_accepted', {
+            success: true,
+            objectType,
+            data: updateCall,
+            message: `Call successfully accepted by ${role}`,
+          }),
+        );
+
+        socket.emit('ride:accept_call', {
+          success: true,
+          objectType,
+          data: updateCall,
+          message: `Call Accepted successfully`,
+        });
+      } catch (error) {
+        console.error(`SOCKET ERROR: ${error}`);
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: `${error.code || 'SOCKET_ERROR'}`,
+          message: `SOCKET ERROR: ${error.message}`,
+        });
+      }
+    });
+
+    socket.on('ride:decline_call', async ({ callLogId }) => {
+      const objectType = 'decline-call';
+      try {
+        let receiver;
+        let role;
+        if (socket.user.roles.includes('driver')) {
+          receiver = await findDriverByUserId(userId);
+          role = 'driver';
+
+          if (
+            !receiver ||
+            receiver.isBlocked ||
+            receiver.isSuspended ||
+            receiver.backgroundCheckStatus !== 'approved' ||
+            !['online', 'on_ride'].includes(receiver.status)
+          ) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Driver not eligible',
+            });
+          }
+        } else if (socket.user.roles.includes('passenger')) {
+          receiver = await findPassengerByUserId(userId);
+          role = 'passenger';
+
+          if (!receiver || receiver.isBlocked || receiver.isSuspended) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Passenger not eligible',
+            });
+          }
+        }
+
+        const call = await findCallById(callLogId);
+        if (!call) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: `NOT_FOUND`,
+            message: `Call not found`,
+          });
+        }
+
+        if (String(call.receiverId) !== String(receiver.userId)) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: `INVALID_USER`,
+            message: `You are not allowed to receive the call`,
+          });
+        }
+
+        const ride = await findRideById(call.rideId);
+        if (
+          !ride ||
+          ![
+            'DRIVER_ASSIGNED',
+            'DRIVER_ARRIVING',
+            'DRIVER_ARRIVED',
+            'RIDE_STARTED',
+            'RIDE_IN_PROGRESS',
+            'RIDE_COMPLETED',
+          ].includes(ride.status) ||
+          !['PENDING', 'PROCESSING'].includes(ride.paymentStatus)
+        ) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'INVALID_CALL',
+            message: 'This call is not eligible',
+          });
+        }
+
+        const updatedCall = await updateCallLogById(callLogId, {
+          status: 'declined',
+          endedAt: new Date(),
+        });
+        if (!updatedCall) {
+          socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FAILED_UPDATE',
+            message: `Failed to update the call log`,
+          });
+        }
+
+        const callerSockets = await getSocketIds(call.callerId);
+        callerSockets.forEach((sid) =>
+          io.to(sid).emit('ride:call_declined', {
+            success: true,
+            objectType,
+            data: updatedCall,
+            message: `Called declined by ${role}`,
+          }),
+        );
+
+        const notify = await notifyUser({
+          userId: call.callerId,
+          title: 'Call Declined',
+          message: `The call was declined by ${role}`,
+          module: 'call',
+          type: 'ALERT',
+          metadata: updatedCall,
+        });
+        if (!notify) {
+          socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'NOTIFICATION_FAILED',
+            message: 'Failed to send notification',
+          });
+        }
+
+        socket.emit('ride:decline_call', {
+          success: true,
+          objectType,
+          data: updatedCall,
+          message: `Call declined successfully`,
+        });
+      } catch (error) {
+        console.error(`SOCKET ERROR: ${error}`);
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: `${error.code || 'SOCKET_ERROR'}`,
+          message: `SOCKET ERROR: ${error.message}`,
+        });
+      }
+    });
+
+    socket.on('ride:cancel_call', async ({ callLogId }) => {
+      const objectType = 'cancel-call';
+      try {
+        let caller;
+        let role;
+        if (socket.user.roles.includes('driver')) {
+          caller = await findDriverByUserId(userId);
+          role = 'driver';
+
+          if (
+            !caller ||
+            caller.isBlocked ||
+            caller.isSuspended ||
+            caller.backgroundCheckStatus !== 'approved' ||
+            !['online', 'on_ride'].includes(caller.status)
+          ) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Driver not eligible',
+            });
+          }
+        } else if (socket.user.roles.includes('passenger')) {
+          caller = await findPassengerByUserId(userId);
+          role = 'passenger';
+
+          if (!caller || caller.isBlocked || caller.isSuspended) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Passenger not eligible',
+            });
+          }
+        }
+
+        const call = await findCallById(callLogId);
+        if (!call) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: `NOT_FOUND`,
+            message: `Call not found`,
+          });
+        }
+
+        if (String(call.callerId) !== String(caller.userId)) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: `INVALID_USER`,
+            message: `You are not allowed to receive the call`,
+          });
+        }
+
+        const ride = await findRideById(call.rideId);
+        if (
+          !ride ||
+          ![
+            'DRIVER_ASSIGNED',
+            'DRIVER_ARRIVING',
+            'DRIVER_ARRIVED',
+            'RIDE_STARTED',
+            'RIDE_IN_PROGRESS',
+            'RIDE_COMPLETED',
+          ].includes(ride.status) ||
+          !['PENDING', 'PROCESSING'].includes(ride.paymentStatus)
+        ) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'INVALID_CALL',
+            message: 'This call is not eligible',
+          });
+        }
+
+        const updatedCall = await updateCallLogById(callLogId, {
+          status: 'cancelled',
+          endedAt: new Date(),
+        });
+        if (!updatedCall) {
+          socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FAILED_UPDATE',
+            message: `Failed to update the call log`,
+          });
+        }
+
+        const receiverSockets = await getSocketIds(call.receiverId);
+        receiverSockets.forEach((sid) =>
+          io.to(sid).emit('ride:call_cancelled', {
+            success: true,
+            objectType,
+            data: updatedCall,
+            message: `You missed a call from ${role}`,
+          }),
+        );
+
+        const notify = await notifyUser({
+          userId: call.receiverId,
+          title: 'Missed Call',
+          message: `You missed a call from ${role}`,
+          module: 'call',
+          type: 'ALERT',
+          metadata: updatedCall,
+        });
+        if (!notify) {
+          socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'NOTIFICATION_FAILED',
+            message: 'Failed to send notification',
+          });
+        }
+
+        socket.emit('ride:cancel_call', {
+          success: true,
+          objectType,
+          data: updatedCall,
+          message: `You cancelled the call`,
+        });
+      } catch (error) {
+        console.error(`SOCKET ERROR: ${error}`);
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: `${error.code || 'SOCKET_ERROR'}`,
+          message: `SOCKET ERROR: ${error.message}`,
+        });
+      }
+    });
+
+    socket.on('ride:end_call', async ({ callLogId }) => {
+      const objectType = 'end-call';
+      try {
+        let member;
+        let role;
+        if (socket.user.roles.includes('driver')) {
+          member = await findDriverByUserId(userId);
+          role = 'driver';
+
+          if (
+            !member ||
+            member.isBlocked ||
+            member.isSuspended ||
+            member.backgroundCheckStatus !== 'approved' ||
+            !['online', 'on_ride'].includes(member.status)
+          ) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Driver not eligible',
+            });
+          }
+        } else if (socket.user.roles.includes('passenger')) {
+          member = await findPassengerByUserId(userId);
+          role = 'passenger';
+
+          if (!member || member.isBlocked || member.isSuspended) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Passenger not eligible',
+            });
+          }
+        }
+
+        const call = await findCallById(callLogId);
+        if (!call) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: `NOT_FOUND`,
+            message: `Call not found`,
+          });
+        }
+
+        if (
+          String(call.callerId) !== String(member.userId) &&
+          String(call.receiverId) !== String(member.userId)
+        ) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: `INVALID_USER`,
+            message: `You are not allowed to receive the call`,
+          });
+        }
+
+        const ride = await findRideById(call.rideId);
+        if (
+          !ride ||
+          ![
+            'DRIVER_ASSIGNED',
+            'DRIVER_ARRIVING',
+            'DRIVER_ARRIVED',
+            'RIDE_STARTED',
+            'RIDE_IN_PROGRESS',
+            'RIDE_COMPLETED',
+          ].includes(ride.status) ||
+          !['PENDING', 'PROCESSING'].includes(ride.paymentStatus)
+        ) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'INVALID_CALL',
+            message: 'This call is not eligible',
+          });
+        }
+
+        const updatedCall = await updateCallLogById(callLogId, {
+          status: 'ended',
+          endedAt: new Date(),
+        });
+        if (!updatedCall) {
+          socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FAILED_UPDATE',
+            message: `Failed to update the call log`,
+          });
+        }
+
+        const otherUser =
+          String(member.userId) === String(call.callerId)
+            ? call.receiverId
+            : call.callerId;
+
+        // notify other user(s)
+        const otherSockets = await getSocketIds(otherUser);
+        otherSockets.forEach((sid) =>
+          io.to(sid).emit('ride:call_ended', {
+            success: true,
+            objectType,
+            data: updatedCall,
+            message: `Call successfully ended by ${role}`,
+          }),
+        );
+
+        socket.emit('ride:end_call', {
+          success: true,
+          objectType,
+          data: updatedCall,
+          message: `You ended the call`,
+        });
+        socket.leave(call.channelName)
+      } catch (error) {
+        console.error(`SOCKET ERROR: ${error}`);
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: `${error.code || 'SOCKET_ERROR'}`,
+          message: `SOCKET ERROR: ${error.message}`,
+        });
+      }
+    });
+
+    socket.on('ride:join_call', async ({ callLogId }) => {
+      const objectType = 'join-call';
+      try {
+        let member;
+        let role;
+        if (socket.user.roles.includes('driver')) {
+          member = await findDriverByUserId(userId);
+          role = 'driver';
+
+          if (
+            !member ||
+            member.isBlocked ||
+            member.isSuspended ||
+            member.backgroundCheckStatus !== 'approved' ||
+            !['online', 'on_ride'].includes(member.status)
+          ) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Driver not eligible',
+            });
+          }
+        } else if (socket.user.roles.includes('passenger')) {
+          member = await findPassengerByUserId(userId);
+          role = 'passenger';
+
+          if (!member || member.isBlocked || member.isSuspended) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Passenger not eligible',
+            });
+          }
+        }
+
+        const call = await findCallById(callLogId);
+        if (!call) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: `NOT_FOUND`,
+            message: `Call not found`,
+          });
+        } else if (call.endedAt) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: `CALL_ENDED`,
+            message: `This call is ended`,
+          });
+        }
+
+        const ride = await findRideById(call.rideId);
+        if (
+          !ride ||
+          ![
+            'DRIVER_ASSIGNED',
+            'DRIVER_ARRIVING',
+            'DRIVER_ARRIVED',
+            'RIDE_STARTED',
+            'RIDE_IN_PROGRESS',
+            'RIDE_COMPLETED',
+          ].includes(ride.status) ||
+          !['PENDING', 'PROCESSING'].includes(ride.paymentStatus)
+        ) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'INVALID_CALL',
+            message: 'This call is not eligible',
+          });
+        }
+
+        if (
+          String(ride.driverId) !== String(member._id) &&
+          String(call.passengerId) !== String(member._id)
+        ) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: `INVALID_USER`,
+            message: `You are not allowed to receive the call`,
+          });
+        }
+
+        socket.join(call.channelName);
+        io.to(call.channelName).emit('ride:join_call', {
+          success: true,
+          objectType,
+          data: call,
+          message: `${role} joind the call`,
+        });
+      } catch (error) {
+        console.error(`SOCKET ERROR: ${error}`);
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: `${error.code || 'SOCKET_ERROR'}`,
+          message: `SOCKET ERROR: ${error.message}`,
+        });
+      }
+    });
+
+    socket.on('ride:leave_call', async ({ callLogId }) => {
+      const objectType = 'leave-call';
+      try {
+        let member;
+        let role;
+        if (socket.user.roles.includes('driver')) {
+          member = await findDriverByUserId(userId);
+          role = 'driver';
+
+          if (
+            !member ||
+            member.isBlocked ||
+            member.isSuspended ||
+            member.backgroundCheckStatus !== 'approved' ||
+            !['online', 'on_ride'].includes(member.status)
+          ) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Driver not eligible',
+            });
+          }
+        } else if (socket.user.roles.includes('passenger')) {
+          member = await findPassengerByUserId(userId);
+          role = 'passenger';
+
+          if (!member || member.isBlocked || member.isSuspended) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Passenger not eligible',
+            });
+          }
+        }
+
+        const call = await findCallById(callLogId);
+        if (!call) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: `NOT_FOUND`,
+            message: `Call not found`,
+          });
+        }
+
+        const ride = await findRideById(call.rideId);
+        if (
+          !ride ||
+          ![
+            'DRIVER_ASSIGNED',
+            'DRIVER_ARRIVING',
+            'DRIVER_ARRIVED',
+            'RIDE_STARTED',
+            'RIDE_IN_PROGRESS',
+            'RIDE_COMPLETED',
+          ].includes(ride.status) ||
+          !['PENDING', 'PROCESSING'].includes(ride.paymentStatus)
+        ) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'INVALID_CALL',
+            message: 'This call is not eligible',
+          });
+        }
+
+        if (
+          String(ride.driverId) !== String(member._id) &&
+          String(call.passengerId) !== String(member._id)
+        ) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: `INVALID_USER`,
+            message: `You are not allowed to receive the call`,
+          });
+        }
+
+        socket.leave(call.channelName);
+        io.to(call.channelName).emit('ride:leave_call', {
+          success: true,
+          objectType,
+          data: call,
+          message: `${role} left the call`,
         });
       } catch (error) {
         console.error(`SOCKET ERROR: ${error}`);

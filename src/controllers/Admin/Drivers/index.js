@@ -124,7 +124,7 @@ export const getAllUpdateRequestsController = (req, res) =>
       validationFn: () =>
         validatePagination({ page: req.query.page, limit: req.query.limit }),
       handlerParams: [req.query],
-      successMessage: 'Update requests detched successfully',
+      successMessage: 'Update requests fetched successfully',
     },
     req,
     res,
