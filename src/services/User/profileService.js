@@ -42,25 +42,6 @@ export const updateUserProfile = async (user, body, file, resp) => {
     const isDriver = rolesNorm.includes('driver');
     const isPassenger = rolesNorm.includes('passenger');
 
-    console.log(
-      'RolesNorm:',
-      rolesNorm,
-      'isPassenger:',
-      isPassenger,
-      'isDriver:',
-      isDriver,
-    );
-    console.log(
-      'Multer file object:',
-      file?.originalname
-        ? {
-            originalname: file.originalname,
-            size: file.size,
-            mimetype: file.mimetype,
-          }
-        : file,
-    );
-
     // --- NAME ---
     if (update.name?.trim() && update.name.trim() !== myUser.name?.trim()) {
       const requestPayload = {
@@ -95,7 +76,6 @@ export const updateUserProfile = async (user, body, file, resp) => {
       } else {
         // Compare existing (URL) with the new image (buffer or path)
         const same = await isSameImage(myUser.profileImg, newImageSource);
-        console.log('isSameImage result:', same);
 
         if (!same) {
           // Try uploading directly (most uploadToS3 implementations accept buffer within file)
@@ -138,7 +118,6 @@ export const updateUserProfile = async (user, body, file, resp) => {
           if (isPassenger) {
             // Passengers can directly update
             update.profileImg = url;
-            console.log('Passenger profileImg set for update:', url);
           } else if (isDriver) {
             // Drivers require admin approval
             const requestPayload = {
@@ -156,7 +135,6 @@ export const updateUserProfile = async (user, body, file, resp) => {
             );
             if (!requestResult)
               throw new Error('Failed to send image update request.');
-            console.log('Driver image update request created, url:', url);
           }
         } else {
           console.log('Uploaded image is same as existing; no action taken.');
@@ -177,7 +155,6 @@ export const updateUserProfile = async (user, body, file, resp) => {
     ) {
       // const otpSent = await sendOtp(update.phoneNumber);
       // if (!otpSent) throw new Error('Failed to send phone verification Otp.');
-      console.log('OTP sent (Testing)');
       delete update.phoneNumber;
     }
 
@@ -193,8 +170,6 @@ export const updateUserProfile = async (user, body, file, resp) => {
         obj[key] = update[key];
         return obj;
       }, {});
-
-    console.log('safeUpdate to apply:', safeUpdate);
 
     // --- PERFORM UPDATE ---
     let updated = null;
@@ -215,13 +190,12 @@ export const updateUserProfile = async (user, body, file, resp) => {
       updatedProfile: updated || null,
     };
     return resp;
-  } catch (err) {
+  } catch (error) {
     await session.abortTransaction();
     session.endSession();
-    console.error('API ERROR:', err);
+    console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message =
-      err.message || 'Something went wrong while updating the profile.';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -229,10 +203,9 @@ export const updateUserProfile = async (user, body, file, resp) => {
 export const verifyEmailUpdate = async (body, resp) => {
   try {
   } catch (error) {
-    console.error('API ERROR:', err);
+    console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message =
-      err.message || 'Something went wrong while verifying email update';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };

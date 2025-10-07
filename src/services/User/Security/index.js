@@ -30,8 +30,7 @@ export const createRecoveryNumber = async (user, { phoneNumber }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message =
-      'Something went wrong while adding recovery phone number';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -45,7 +44,9 @@ export const getRecoveryNumbers = async (user, resp) => {
       return resp;
     }
 
-    const recoveryNumbers = await findRecovertNumbersbyUserId(isUser.userId._id);
+    const recoveryNumbers = await findRecovertNumbersbyUserId(
+      isUser.userId._id,
+    );
     if (!recoveryNumbers) {
       resp.error = true;
       resp.error_message = 'Failed to fetch recovery phone numbers';
@@ -57,8 +58,7 @@ export const getRecoveryNumbers = async (user, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message =
-      'Something went wrong while fetching recovery phone numbers';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -93,8 +93,7 @@ export const editRecoveryNumber = async (
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message =
-      'Something went wrong while updating recovery phone number';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -120,8 +119,7 @@ export const removeRecoveryNumber = async (user, { numberId }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message =
-      'Something went wrong while deleting recovery phone number';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -147,8 +145,7 @@ export const fetchPasskeyRegisterOptions = async (user, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message =
-      'Something went wrong while registering passkey options';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -174,7 +171,7 @@ export const verifyAndSavePasskeyInDb = async (user, { payload }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while registering passkey';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -200,7 +197,7 @@ export const toggle2FAStatus = async (user, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while toggling 2FA';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };

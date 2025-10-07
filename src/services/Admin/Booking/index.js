@@ -36,8 +36,7 @@ export const getCompletedBookings = async (
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message =
-      'Something went wrong while setting fetching finished bookings';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -73,8 +72,7 @@ export const getOngoingBookings = async (
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message =
-      'Something went wrong while setting fetching ongoing bookings';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -100,7 +98,7 @@ export const getBookingById = async (user, { id }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while setting fetching booking';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };

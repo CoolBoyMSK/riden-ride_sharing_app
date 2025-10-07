@@ -42,7 +42,7 @@ export const getAllDrivers = async (
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while fetching drivers';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -64,7 +64,7 @@ export const suspendDriver = async (driverId, { reason, endDate }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while suspending driver';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -82,7 +82,7 @@ export const unsuspendDriver = async (driverId, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while unsuspending driver';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -114,7 +114,7 @@ export const deleteDriverByIdAPI = async ({ driverId }, resp) => {
 
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while deleting driver';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -172,7 +172,7 @@ export const updateDriverDocumentStatus = async (
 
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_messagte = 'Something went wrong while updating document status';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -190,7 +190,7 @@ export const blockDriver = async ({ driverId }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while blocking driver';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -209,7 +209,7 @@ export const unblockDriver = async ({ driverId }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while unblocking driver';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -237,7 +237,7 @@ export const getAllUpdateRequests = async (
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while Fetching update requests';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -268,8 +268,7 @@ export const toggleUpdateRequest = async ({ status, id }, resp) => {
 
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message =
-      'Something went wrong while toggling the update request';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -303,7 +302,7 @@ export const approveRequestedDriver = async ({ id }, resp) => {
 
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while approving driver';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };

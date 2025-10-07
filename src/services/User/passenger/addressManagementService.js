@@ -17,7 +17,7 @@ export const getAddresses = async (user, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while fetching addresses';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -40,7 +40,7 @@ export const addAddress = async (user, { long, lat, title }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while adding address';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -73,7 +73,7 @@ export const updateAddress = async (
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while updating address';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -99,7 +99,7 @@ export const deleteAddress = async (user, { addressId }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while deleting address';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };

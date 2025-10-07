@@ -204,9 +204,6 @@ export const initSocket = (server) => {
           { limit: 10, session },
         );
 
-        console.log('availableRides');
-        console.log(availableRides);
-
         await session.commitTransaction();
         session.endSession();
 
@@ -220,9 +217,6 @@ export const initSocket = (server) => {
           10,
           1,
         );
-
-        console.log('filteredRides');
-        console.log(filteredRides);
 
         socket.emit('ride:find', {
           success: true,
@@ -247,10 +241,6 @@ export const initSocket = (server) => {
     socket.on('ride:response', async ({ rideId, driverResponse }) => {
       const objectType = 'airport-parking-offer-response';
       try {
-        console.log(
-          `Response from driver ${userId} for ride ${rideId}: ${driverResponse}`,
-        );
-
         const driver = await findDriverByUserId(userId);
         if (
           !driver ||
@@ -1731,7 +1721,6 @@ export const initSocket = (server) => {
         }
 
         const ride = await findRideByRideId(rideId, { session });
-        console.log(ride);
         const passengerId = ride?.passengerId?._id;
         if (!ride) {
           await session.abortTransaction();
@@ -3605,7 +3594,7 @@ export const initSocket = (server) => {
           data: updatedCall,
           message: `You ended the call`,
         });
-        socket.leave(call.channelName)
+        socket.leave(call.channelName);
       } catch (error) {
         console.error(`SOCKET ERROR: ${error}`);
         return socket.emit('error', {

@@ -26,7 +26,7 @@ export const getAllBookings = async (user, { page, limit }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while fetching bookings';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -52,7 +52,7 @@ export const getBookingById = async (user, { id }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while fetching booking';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -67,7 +67,6 @@ export const addBookingReport = async (user, { id }, { reason }, resp) => {
     }
 
     const success = await createBookingReportByDriverId(driver._id, id, reason);
-    console.log(success);
     if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to report booking';
@@ -79,7 +78,7 @@ export const addBookingReport = async (user, { id }, { reason }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while reporting booking';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };

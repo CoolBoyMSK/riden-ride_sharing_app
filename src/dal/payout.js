@@ -253,6 +253,5 @@ export const updateInstatnPayoutRequest = async ({ id, status }) =>
 
 export const countTotalPendingRequests = async () =>{
   const count = await InstantPayoutRequest.countDocuments({ status: 'PENDING' });
-  console.log(count)
   return count
 }

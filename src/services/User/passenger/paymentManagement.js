@@ -44,7 +44,7 @@ export const addPaymentMethod = async (
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while adding stripe card';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -85,8 +85,7 @@ export const setDefaultPaymentMethod = async (
 
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message =
-      'Something went wrong while setting default Payment method';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -112,7 +111,7 @@ export const getPaymentMethods = async (user, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while fetching Payment methods';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -138,7 +137,7 @@ export const getPaymentMethodById = async (user, { paymentMethodId }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while fetching Payment methods';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -176,7 +175,7 @@ export const updatePaymentMethod = async (
     session.endSession();
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while updating payment method';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -213,8 +212,7 @@ export const deletePaymentMethod = async (user, { paymentMethodId }, resp) => {
 
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message =
-      'Something went wrong while deleting the payment method';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -252,8 +250,7 @@ export const topUpInAppWallet = async (
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message =
-      'Something went wrong while adding funds to in-app wallet';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -279,7 +276,7 @@ export const getInAppWallet = async (user, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while fetching wallet';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };

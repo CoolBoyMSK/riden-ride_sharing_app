@@ -756,7 +756,6 @@ export const findVerificationStatus = async (sessionId) => {
 
 export const checkConnectedAccountStatus = async (accountId) => {
   const account = await stripe.accounts.retrieve(accountId);
-  console.log(account);
 
   return {
     accountId: account.id,

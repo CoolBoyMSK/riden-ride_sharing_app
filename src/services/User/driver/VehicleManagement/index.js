@@ -49,7 +49,7 @@ export async function updateDriverVehicleRequest(userId, vehicle, resp) {
 
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while sending update request.';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 }

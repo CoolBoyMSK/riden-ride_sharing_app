@@ -111,8 +111,7 @@ export const updateDriverDocument = async (user, file, docType, resp) => {
 
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message =
-      'Something went wrong while sending doucment update request';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -154,7 +153,7 @@ export const updateLegalAgreement = async (user, { status }, resp) => {
 
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while updating legal agreement';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };

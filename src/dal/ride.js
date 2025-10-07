@@ -221,9 +221,6 @@ export const findPendingRides = async (
     },
   };
 
-  console.log('Query');
-  console.log(query);
-
   if (excludeIds.length) {
     query._id = { $nin: excludeIds };
   }
@@ -242,9 +239,6 @@ export const findPendingRides = async (
       { path: 'chatRoomId' }, // simple top-level ref
     ])
     .sort({ requestedAt: 1 });
-
-  console.log('DB Return');
-  console.log(q);
 
   return q;
 };
@@ -636,7 +630,6 @@ export const removeDriverFromQueue = async (driverId, session = null) => {
     );
 
     if (!session) await useSession.commitTransaction();
-    console.log('Driver removed from queues:', result.modifiedCount);
     return result;
   } catch (err) {
     if (!session) await useSession.abortTransaction();
@@ -721,8 +714,6 @@ async function rotateQueue(parkingLotId, driverId) {
   if (!driverId || !parkingLotId) return;
 
   const driver = await DriverModel.findById(driverId);
-  console.log('driver');
-  console.log(driver);
 
   await ParkingQueue.findOneAndUpdate(
     { parkingLotId },

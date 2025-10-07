@@ -84,7 +84,7 @@ export const createComplainTicket = async (
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while creating complaint ticket';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -103,7 +103,7 @@ export const getAllComplainTickets = async (user, { page, limit }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while finding complain tickets';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -122,7 +122,7 @@ export const getComplainTicketById = async (user, { id }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'something went wrong while finding complain ticket';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };

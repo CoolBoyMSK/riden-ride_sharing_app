@@ -135,10 +135,10 @@ export const getAllPromoCodes = async (
 
     resp.meta = { data: totalItems };
     return resp;
-  } catch (err) {
-    console.error(err);
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while fetching promo codes';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -153,13 +153,11 @@ export const getSearchPromoCode = async ({ search, page, limit }, resp) => {
     }
 
     resp.data = promos;
-    
-    console.log(resp.data);
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = ' Something went wrong while searching promocodes';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -178,7 +176,7 @@ export const getPromoCodesById = async (id, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while fetching promocode by id';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };

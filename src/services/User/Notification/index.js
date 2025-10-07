@@ -17,16 +17,12 @@ export const getNotificationSettings = async (user, resp) => {
       return resp;
     }
 
-    console.log(isUser);
-
     const settings = await findNotificationSettings(isUser.userId._id);
     if (!settings) {
       resp.error = true;
       resp.error_message = 'Failed to fetch settings';
       return resp;
     }
-
-    console.log(settings);
 
     resp.data = settings;
     return resp;

@@ -113,7 +113,6 @@ export const findAndAssignDriver = async (rideId, pickupLocation, carType, maxRa
                 ...rideAcceptedData,
                 message: 'A driver has been assigned to your ride!'
               });
-              console.log(`🚗 Notified passenger ${passengerUserId} about driver assignment`);
             }
             
             // Notify driver
@@ -126,7 +125,6 @@ export const findAndAssignDriver = async (rideId, pickupLocation, carType, maxRa
                 },
                 message: 'You have been assigned a new ride!'
               });
-              console.log(`🚗 Notified driver ${driverUserId} about ride assignment`);
             }
           }
         }

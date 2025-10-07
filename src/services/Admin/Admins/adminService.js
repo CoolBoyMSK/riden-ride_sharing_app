@@ -60,12 +60,11 @@ export const getSearchAdmins = async ({ search, page, limit }, resp) => {
       return resp;
     }
     resp.data = admins;
-    console.log(resp.data);
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while searching admin';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -176,7 +175,7 @@ export const deleteAdminById = async ({ id }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while deleting admin';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };

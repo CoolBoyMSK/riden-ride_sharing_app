@@ -34,7 +34,7 @@ export const findAllComplainTickets = async (
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while fetching complain tickets';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -53,7 +53,7 @@ export const getComplainById = async (user, { id }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while fetching complain ticket';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -72,7 +72,7 @@ export const updateComplainStatus = async (user, { id, status }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while updating complain status';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -114,7 +114,7 @@ export const replyToComplain = async (user, { id }, { text }, files, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while updating complain status';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -144,7 +144,7 @@ export const findAllReports = async (
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while fetching reports';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -163,7 +163,7 @@ export const getReportById = async (user, { id }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while fetching report';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -182,7 +182,7 @@ export const updateReportStatus = async (user, { id, status }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while updating report status';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };

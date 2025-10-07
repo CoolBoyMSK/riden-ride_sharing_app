@@ -40,7 +40,7 @@ export const getAllPassengers = async (
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while searching passenger';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -71,7 +71,7 @@ export const getPassengerById = async ({ passengerId }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while fetching passenger';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -99,7 +99,7 @@ export const deletePassengerById = async ({ passengerId }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while deleting passenger';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -157,7 +157,7 @@ export const getAllUpdateRequests = async (
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while Fetching update requests';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -186,8 +186,7 @@ export const toggleUpdateRequest = async ({ status, id }, resp) => {
 
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message =
-      'Something went wrong while toggling the update request';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };

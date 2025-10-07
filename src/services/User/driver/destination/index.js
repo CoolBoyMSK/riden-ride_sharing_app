@@ -54,7 +54,7 @@ export const addDestination = async (
 
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while adding destination';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -75,14 +75,12 @@ export const fetchDestinations = async (user, resp) => {
       return resp;
     }
 
-    console.log(destinations);
-
     resp.data = destinations;
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while fetching destinations';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -108,7 +106,7 @@ export const fetchDestinationById = async (user, { id }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while fetching destination';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -161,7 +159,7 @@ export const editDestination = async (
 
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while editing destination';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -203,7 +201,7 @@ export const deleteDestination = async (user, { id }, resp) => {
 
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while deleting destination';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -237,7 +235,7 @@ export const toggleDestination = async (user, resp) => {
 
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while toggling destination';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };

@@ -17,10 +17,10 @@ export const getAgoraToken = (user, { channelName, uid }, resp) => {
 
     resp.data = token;
     return resp;
-  } catch (err) {
-    console.error(`API ERROR: ${err}`);
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while generating agora token';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };

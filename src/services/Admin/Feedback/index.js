@@ -29,7 +29,7 @@ export const getDriverFeedbacks = async (
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while fetching driver feedbacks';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -48,7 +48,7 @@ export const deleteFeedback = async (user, { id }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while deleting feedback';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
@@ -67,7 +67,7 @@ export const feedbackStats = async (user, { type }, resp) => {
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while fetching stats';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };

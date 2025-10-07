@@ -31,8 +31,6 @@ export const updateDriverByUserId = async (id, update, options = {}) => {
       { new: true, session: options.session },
     );
 
-    console.log('🧾 Updated Driver:', updatedDriver);
-
     return updatedDriver;
   } catch (error) {
     console.error('❌ Error in updateDriverByUserId:', error);
