@@ -19,14 +19,27 @@ export const createDriverProfile = (userId, uniqueId) =>
     vehicle: { make: '', model: '', plateNumber: '', color: '' },
   }).save();
 
-export const updateDriverByUserId = (id, update, options = {}) => {
-  let query = DriverModel.findOneAndUpdate({ userId: id }, update, {
-    new: true,
-    ...options,
-  });
-  if (options.session) query = query.session(options.session);
-  return query.lean();
+export const updateDriverByUserId = async (id, update, options = {}) => {
+  try {
+    const objectId = mongoose.Types.ObjectId.isValid(id)
+      ? new mongoose.Types.ObjectId(id)
+      : id;
+
+    const updatedDriver = await DriverModel.findOneAndUpdate(
+      { userId: objectId },
+      update,
+      { new: true, session: options.session }
+    );
+
+    console.log('🧾 Updated Driver:', updatedDriver);
+
+    return updatedDriver;
+  } catch (error) {
+    console.error('❌ Error in updateDriverByUserId:', error);
+    throw error;
+  }
 };
+
 
 export const countDrivers = () => DriverModel.countDocuments();
 

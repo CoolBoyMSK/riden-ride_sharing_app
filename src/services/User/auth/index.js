@@ -264,13 +264,14 @@ export const loginUser = async (
       if (phoneNumber) {
         let user = await findUserByPhone(phoneNumber);
         if (user && user.isPhoneVerified) {
+          console.log(user);
           const payload = { id: user._id, roles: user.roles };
           const success = await updateDriverByUserId(user._id, {
             isActive: true,
           });
           if (!success) {
             resp.error = true;
-            resp.error_message = 'Failed to activate passenger';
+            resp.error_message = 'Failed to activate driver';
             return resp;
           }
 
@@ -334,9 +335,6 @@ export const loginUser = async (
             const driver = await createDriverProfile(user._id, uniqueId);
             if (!driver) throw new Error('Failed to create driver profile');
 
-            const payout = await createPayout(driver._id);
-            if (!payout) throw new Error('Failed to create driver payout');
-
             // For Testing
             const payload = { id: user._id, roles: user.roles };
             resp.data = {
@@ -386,7 +384,7 @@ export const loginUser = async (
           });
           if (!success) {
             resp.error = true;
-            resp.error_message = 'Failed to activate passenger';
+            resp.error_message = 'Failed to activate driver';
             return resp;
           }
 
@@ -460,9 +458,9 @@ export const loginUser = async (
     resp.error_message = 'Invalid role specified';
     return resp;
   } catch (err) {
-    console.error('Login Error:', err);
+    console.error(`API ERROR: ${err}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong during login';
+    resp.error_message = err.message || 'Something went wrong';
     return resp;
   }
 };
@@ -565,9 +563,9 @@ export const otpVerification = async (
     resp.error_message = 'Invalid role or type specified';
     return resp;
   } catch (err) {
-    console.error('OTP Verification Error:', err);
+    console.error(`API ERROR: ${err}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong during OTP verification';
+    resp.error_message = err.message || 'Something went wrong';
     return resp;
   }
 };
@@ -605,9 +603,9 @@ export const forgotPassword = async ({ phoneNumber }, resp) => {
     resp.data = { otpSent: true };
     return resp;
   } catch (err) {
-    console.error('Forgot Password Error:', err);
+    console.error(`API ERROR: ${err}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while requesting password reset';
+    resp.error_message = err.message || 'Something went wrong';
     return resp;
   }
 };
@@ -643,9 +641,9 @@ export const resetUserPassword = async ({ newPassword, phoneNumber }, resp) => {
     resp.data = { passwordReset: true };
     return resp;
   } catch (err) {
-    console.error('Reset Password Error:', err);
+    console.error(`API ERROR: ${err}`);
     resp.error = true;
-    resp.error_message = 'Something went wrong while resetting password';
+    resp.error_message = err.message || 'Something went wrong';
     return resp;
   }
 };
@@ -682,10 +680,9 @@ export const passKeyLogInAuthOptions = async ({ type, provider }, resp) => {
     resp.data = success;
     return resp;
   } catch (error) {
-    console.error(`API ERROR: ${error}`);
+    console.error(`API ERROR: ${err}`);
     resp.error = true;
-    resp.error_message =
-      'Something went wrong while deleting recovery phone number';
+    resp.error_message = err.message || 'Something went wrong';
     return resp;
   }
 };
@@ -708,10 +705,9 @@ export const verifyPasskeyLoginAuth = async (
     resp.data = { ...success, flow: 'passkey-login' };
     return resp;
   } catch (error) {
-    console.error(`API ERROR: ${error}`);
+    console.error(`API ERROR: ${err}`);
     resp.error = true;
-    resp.error_message =
-      'Something went wrong while deleting recovery phone number';
+    resp.error_message = err.message || 'Something went wrong';
     return resp;
   }
 };

@@ -13,12 +13,12 @@ import {
   verifyRegistrationResponse,
 } from '@simplewebauthn/server';
 
-export const findUserByEmail = (email) => UserModel.findOne({ email }).lean();
+export const findUserByEmail = async (email) => UserModel.findOne({ email }).lean();
 
-export const findUserByPhone = (phoneNumber) =>
+export const findUserByPhone = async (phoneNumber) =>
   UserModel.findOne({ phoneNumber }).lean();
 
-export const createUser = (payload) => new UserModel(payload).save();
+export const createUser = async (payload) => new UserModel(payload).save();
 
 export const updateUserById = (filter, update) =>
   UserModel.findByIdAndUpdate(filter, update, { new: true });

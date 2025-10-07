@@ -70,7 +70,6 @@ const passengerSchema = new mongoose.Schema(
     addresses: [addressSchema],
     stripeCustomerId: {
       type: String,
-      unique: true,
     },
     defaultCardId: {
       type: String,

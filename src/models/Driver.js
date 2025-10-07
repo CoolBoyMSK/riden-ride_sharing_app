@@ -118,7 +118,7 @@ const driverSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: DRIVER_STATUS,
-      default: 'offline',
+      default: 'online',
       index: true,
     },
     vehicle: {
@@ -149,16 +149,6 @@ const driverSchema = new mongoose.Schema(
       enum: ['pending', 'approved', 'rejected'],
       default: 'approved',
     },
-    payoutDetails: {
-      bankAccount: {
-        type: String,
-        trim: true,
-      },
-      ifscCode: {
-        type: String,
-        trim: true,
-      },
-    },
     isBlocked: {
       type: Boolean,
       default: false,
@@ -172,6 +162,10 @@ const driverSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
       index: true,
+    },
+    isActive: {
+      type: Boolean,
+      default: true,
     },
     isSuspended: {
       type: Boolean,
@@ -244,7 +238,6 @@ const driverSchema = new mongoose.Schema(
       {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Ride',
-        unique: true,
       },
     ],
     payoutMethodIds: [
@@ -255,7 +248,6 @@ const driverSchema = new mongoose.Schema(
     ],
     stripeAccountId: {
       type: String,
-      unique: true,
       index: true,
     },
     defaultAccountId: {

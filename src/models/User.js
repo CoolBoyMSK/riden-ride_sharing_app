@@ -120,6 +120,9 @@ const userSchema = new mongoose.Schema(
       trim: true,
       default: 'ios',
     },
+    userSocialToken: {
+      type: String,
+    },
   },
   {
     timestamps: true,
