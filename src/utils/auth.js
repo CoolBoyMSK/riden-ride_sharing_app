@@ -147,8 +147,8 @@ const verifyPasskeyLogin = async (emailOrPhone, response) => {
   const verification = await verifyAuthenticationResponse({
     response,
     expectedChallenge: user.passkeyChallenge,
-    expectedOrigin: 'https://example.com', // your frontend origin
-    expectedRPID: 'example.com', // your RP ID (usually your domain)
+    expectedOrigin: 'https://api.riden.online', // your frontend origin
+    expectedRPID: 'https://api.riden.online', // your RP ID (usually your domain)
     authenticator: {
       credentialID:
         authenticator.credentialID instanceof Buffer
