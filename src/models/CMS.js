@@ -33,6 +33,9 @@ const cmsSchema = new mongoose.Schema(
         type: String,
       },
     ],
+    icon: {
+      type: String,
+    },
   },
   { timestamps: true },
 );

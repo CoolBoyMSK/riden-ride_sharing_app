@@ -23,7 +23,13 @@ export const addCMSPageController = (req, res) =>
     {
       handler: addCMSPage,
       validationFn: null,
-      handlerParams: [req.user, req.query, req.body, req.files],
+      handlerParams: [
+        req.user,
+        req.query,
+        req.body,
+        req.files?.gallery || [],
+        req.files?.icon ? req.files.icon[0] : null,
+      ],
       successMessage: 'CMS page added successfully',
     },
     req,
@@ -47,7 +53,14 @@ export const editCMSPageController = (req, res) =>
     {
       handler: editCMSPage,
       validationFn: null,
-      handlerParams: [req.user, req.params, req.query, req.body, req.files],
+      handlerParams: [
+        req.user,
+        req.params,
+        req.query,
+        req.body,
+        req.files?.gallery || [],
+        req.files?.icon ? req.files.icon[0] : null,
+      ],
       successMessage: 'CMS page updated successfully',
     },
     req,

@@ -83,6 +83,9 @@ const decreaseDriverBalance = async (driverId, amount) =>
 
 const createTransaction = async (payload) => TransactionModel.create(payload);
 
+export const findTransaction = async (payload) =>
+  TransactionModel.findOne(payload).lean();
+
 export const getDefaultCard = async (stripeCustomerId) =>
   PassengerModel.findOne({ stripeCustomerId }).select('defaultCardId').lean();
 
@@ -347,6 +350,7 @@ export const addFundsToWallet = async (
     type: 'CREDIT',
     category,
     amount,
+    for: 'passenger',
     metadata: paymentIntent,
     status: paymentIntent.status,
     referenceId: paymentIntent.id,
@@ -402,6 +406,7 @@ export const payDriverFromWallet = async (
       walletId: wallet._id,
       type: 'DEBIT',
       category,
+      for: 'passenger',
       amount: actualAmount,
       metadata: {},
       status: 'succeeded',
@@ -417,6 +422,7 @@ export const payDriverFromWallet = async (
       type: 'CREDIT',
       category: 'PAYOUT',
       amount,
+      for: 'driver',
       metadata: {},
       status: 'succeeded',
       referenceId: wallet._id,
@@ -501,6 +507,7 @@ export const passengerPaysDriver = async (
       type: 'DEBIT',
       category,
       amount: actualAmount,
+      for: 'passenger',
       metadata: payment,
       status: payment.status || 'failed',
       referenceId: payment.id,
@@ -514,6 +521,7 @@ export const passengerPaysDriver = async (
       type: 'CREDIT',
       category: 'PAYOUT',
       amount,
+      for: 'driver',
       metadata: payment,
       status: payment.status || 'failed',
       referenceId: payment.id,
@@ -887,6 +895,7 @@ export const instantPayoutDriver = async (driver, requestId) => {
       type: 'DEBIT',
       category: 'INSTANT-PAYOUT',
       amount: balance,
+      for: 'admin',
       metadata: { transfer, payout },
       status: 'succeeded',
       referenceId: payout.id,
@@ -897,6 +906,7 @@ export const instantPayoutDriver = async (driver, requestId) => {
       type: 'CREDIT',
       category: 'INSTANT-PAYOUT',
       amount: balance,
+      for: 'driver',
       metadata: { transfer, payout },
       status: 'succeeded',
       referenceId: payout.id,
@@ -924,14 +934,15 @@ export const createPayoutRequest = async (driverId) => {
   return payoutRequest;
 };
 
-export const refundPayment = async ({
+// Admin Flow
+export const refundCardPayment = async (
   paymentIntentId,
   amount,
   passenger,
   driver,
   ride,
   reason = 'requested_by_customer',
-}) => {
+) => {
   if (!paymentIntentId) throw new Error('Payment Intent ID is required');
   if (!passenger || !driver || !ride) throw new Error('Missing refund context');
 
@@ -942,13 +953,29 @@ export const refundPayment = async ({
     reason,
   });
 
-  const transaction = await createTransaction({
+  await createTransaction({
+    passengerId: passenger._id,
+    rideId: ride._id,
+    type: 'CREDIT',
+    category: 'REFUND',
+    amount: amount || refund.amount / 100,
+    reason,
+    for: 'passenger',
+    metadata: refund,
+    status: refund.status || 'failed',
+    referenceId: refund.id,
+    receiptUrl: refund.receipt_url || null,
+  });
+
+  await createTransaction({
     passengerId: passenger._id,
     driverId: driver._id,
     rideId: ride._id,
-    type: 'REFUND',
+    type: 'DEBIT',
     category: 'REFUND',
     amount: amount || refund.amount / 100,
+    reason,
+    for: 'admin',
     metadata: refund,
     status: refund.status || 'failed',
     referenceId: refund.id,
@@ -957,8 +984,52 @@ export const refundPayment = async ({
 
   return {
     success: true,
-    message: 'Refund processed successfully',
     refund,
-    transaction,
+  };
+};
+
+export const refundWalletPayment = async () => {
+  if (!paymentIntentId) throw new Error('Payment Intent ID is required');
+  if (!passenger || !driver || !ride) throw new Error('Missing refund context');
+
+  // 💰 Perform refund (partial if `amount` is passed)
+  const refund = await stripe.refunds.create({
+    payment_intent: paymentIntentId,
+    ...(amount && { amount: Math.round(amount * 100) }), // convert to cents if provided
+    reason,
+  });
+
+  await createTransaction({
+    passengerId: passenger._id,
+    rideId: ride._id,
+    type: 'CREDIT',
+    category: 'REFUND',
+    amount: amount || refund.amount / 100,
+    reason,
+    for: 'passenger',
+    metadata: refund,
+    status: refund.status || 'failed',
+    referenceId: refund.id,
+    receiptUrl: refund.receipt_url || null,
+  });
+
+  await createTransaction({
+    passengerId: passenger._id,
+    driverId: driver._id,
+    rideId: ride._id,
+    type: 'DEBIT',
+    category: 'REFUND',
+    amount: amount || refund.amount / 100,
+    reason,
+    for: 'admin',
+    metadata: refund,
+    status: refund.status || 'failed',
+    referenceId: refund.id,
+    receiptUrl: refund.receipt_url || null,
+  });
+
+  return {
+    success: true,
+    refund,
   };
 };

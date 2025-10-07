@@ -5,7 +5,12 @@ import {
   updateInstatnPayoutRequest,
   countTotalPendingRequests,
 } from '../../../dal/payout.js';
-import { instantPayoutDriver } from '../../../dal/stripe.js';
+import {
+  instantPayoutDriver,
+  refundCardPayment,
+  findTransaction,
+} from '../../../dal/stripe.js';
+import { findCompletedRide } from '../../../dal/driver.js';
 
 export const getUpcomingPayouts = async (
   user,
@@ -145,6 +150,60 @@ export const getInstantPayoutRequestsCount = async (user, resp) => {
 
     resp.data = success;
     return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
+    return resp;
+  }
+};
+
+export const refundPassenger = async (user, { rideId }, resp) => {
+  try {
+    const ride = await findCompletedRide(rideId);
+    if (!ride) {
+      resp.error = true;
+      resp.error_message = 'Failed to find completed ride';
+      return resp;
+    }
+
+    const transaction = await findTransaction({ rideId, type: 'CREDIT' });
+
+    if (transaction.paymentMethodId) {
+      const success = await refundCardPayment(
+        transaction.referenceId,
+        transaction.amount,
+        ride.driverId,
+        ride.passengerId,
+        ride,
+      );
+      if (!success) {
+        resp.error = true;
+        resp.error_message = 'Failed to refund passenger';
+        return resp;
+      }
+
+      resp.data = success;
+      return resp;
+    }
+
+    if (transaction.walletId) {
+      const success = await refundCardPayment(
+        transaction.referenceId,
+        transaction.amount,
+        ride.driverId,
+        ride.passengerId,
+        ride,
+      );
+      if (!success) {
+        resp.error = true;
+        resp.error_message = 'Failed to refund passenger';
+        return resp;
+      }
+
+      resp.data = success;
+      return resp;
+    }
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;

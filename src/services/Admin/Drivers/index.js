@@ -338,7 +338,6 @@ export const uploadWayBillDocument = async (
     }
 
     const imageUrl = await uploadDriverDocumentToS3(id, docType, file);
-    console.log(imageUrl);
 
     let updated = await updateWayBillDocuments(id, docType, imageUrl);
     if (!updated) {

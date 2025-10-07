@@ -1,6 +1,6 @@
 import express from 'express';
 import { registerRoute } from '../../../utils/registerRoute.js';
-import { uploadMany } from '../../../middlewares/upload.js';
+import { uploadMany, uploadCMSFiles } from '../../../middlewares/upload.js';
 import {
   getCMSPagesController,
   addCMSPageController,
@@ -23,7 +23,7 @@ registerRoute({
   route: '/add',
   admin_auth_enable: true,
   post_permission: 'cms_management',
-  post_middlewares: [uploadMany],
+  post_middlewares: [uploadCMSFiles],
   post_method: addCMSPageController,
 });
 
@@ -40,7 +40,7 @@ registerRoute({
   route: '/edit/:id',
   admin_auth_enable: true,
   put_permission: 'cms_management',
-  put_middlewares: [uploadMany],
+  put_middlewares: [uploadCMSFiles],
   put_method: editCMSPageController,
 });
 

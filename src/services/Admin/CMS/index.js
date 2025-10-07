@@ -5,6 +5,7 @@ import {
   findCMSPageByIdAndUpdate,
   prepareBlocks,
 } from '../../../dal/admin/index.js';
+import { uploadAdminImage } from '../../../utils/s3Uploader.js';
 
 // --- Get all pages ---
 export const getCMSPages = async (user, resp) => {
@@ -21,10 +22,18 @@ export const getCMSPages = async (user, resp) => {
 };
 
 // --- Add CMS page ---
-export const addCMSPage = async (user, { type }, req, files, resp) => {
+export const addCMSPage = async (user, { type }, req, files, file, resp) => {
   try {
     let cmsData = {};
-    console.log(req);
+
+    if (!file) {
+      resp.error = true;
+      resp.error_message = 'No file provided';
+      return resp;
+    }
+
+    const iconUrl = await uploadAdminImage(user._id, file);
+    cmsData.icon = iconUrl;
 
     if (type === 'faqs') {
       let faqs = req.faqs || [];
@@ -98,9 +107,26 @@ export const getCMSPageById = async (user, { id }, resp) => {
   }
 };
 
-export const editCMSPage = async (user, { id }, { type }, req, files, resp) => {
+export const editCMSPage = async (
+  user,
+  { id },
+  { type },
+  req,
+  files,
+  file,
+  resp,
+) => {
   try {
     let cmsData = {};
+
+    if (!file) {
+      resp.error = true;
+      resp.error_message = 'No file provided';
+      return resp;
+    }
+
+    const iconUrl = await uploadAdminImage(user._id, file);
+    cmsData.icon = iconUrl;
 
     if (type === 'faqs') {
       let faqs = req.faqs || [];

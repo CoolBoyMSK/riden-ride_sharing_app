@@ -21,6 +21,7 @@ const transactionSchema = new mongoose.Schema(
     rideId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Ride',
+      index: true,
     },
     type: {
       type: String,
@@ -29,8 +30,27 @@ const transactionSchema = new mongoose.Schema(
     },
     category: {
       type: String,
-      enum: ['TIP', 'PAYOUT', 'TOP-UP', 'RIDE', 'INSTANT-PAYOUT', 'TRANSFER'],
+      enum: [
+        'TIP',
+        'PAYOUT',
+        'TOP-UP',
+        'RIDE',
+        'INSTANT-PAYOUT',
+        'TRANSFER',
+        'REFUND',
+      ],
       required: true,
+      index: true,
+    },
+    reason: {
+      type: String,
+      trim: true,
+    },
+    for: {
+      type: String,
+      enum: ["admin", "driver", "passenger"],
+      required: true,
+      index: true
     },
     amount: {
       type: Number,
@@ -47,6 +67,7 @@ const transactionSchema = new mongoose.Schema(
     },
     status: {
       type: String,
+      index: true,
     },
     referenceId: {
       type: String,
