@@ -161,7 +161,6 @@ export const initSocket = (server) => {
     socket.on('ride:find', async () => {
       const objectType = 'find-ride';
       try {
-
         const driver = await findDriverByUserId(userId);
         if (
           !driver ||
@@ -230,7 +229,6 @@ export const initSocket = (server) => {
           message: `${filteredRides.length} available rides found`,
         });
       } catch (error) {
-
         console.error(`SOCKET ERROR: ${error}`);
         return socket.emit('error', {
           success: false,
@@ -283,67 +281,66 @@ export const initSocket = (server) => {
     socket.on('ride:decline_ride', async ({ rideId }) => {
       const objectType = 'decline-ride';
       try {
-          const driver = await findDriverByUserId(userId);
-          if (
-            !driver ||
-            driver.isRestricted ||
-            driver.isBlocked ||
-            driver.isSuspended ||
-            driver.backgroundCheckStatus !== 'approved' ||
-            driver.status !== 'online'
-          ) {
-            return socket.emit('ride:decline_ride', {
-              success: false,
-              objectType,
-              code: 'FORBIDDEN',
-              message: 'Forbidden: Driver not eligible',
-            });
-          }
-
-          const driverLocation = await findDriverLocation(driver._id);
-          if (!driverLocation || !driverLocation.isAvailable) {
-            return socket.emit('ride:decline_ride', {
-              success: false,
-              objectType,
-              code: 'LOCATION_UNAVAILABLE',
-              message: 'Driver location unavailable or not marked as available',
-            });
-          }
-
-          const ride = await findRideById(rideId);
-          if (!ride) {
-            return socket.emit('ride:decline_ride', {
-              success: false,
-              objectType,
-              code: 'NOT_FOUND',
-              message: 'Ride not found',
-            });
-          }
-
-          if (ride.driverId?.toString() === driver._id.toString()) {
-            return socket.emit('ride:decline_ride', {
-              success: false,
-              objectType,
-              code: 'ALREADY_ASSIGNED',
-              message: 'Cannot decline a ride already assigned to you',
-            });
-          }
-
-          // Fetch replacement rides
-          const replacementRides = await findPendingRides(
-            driver.vehicle.type,
-            driverLocation.location.coordinates,
-            10000,
-            { excludeIds: [rideId], limit: 10 },
-          );
-
-          socket.emit('ride:decline_ride', {
-            success: true,
+        const driver = await findDriverByUserId(userId);
+        if (
+          !driver ||
+          driver.isRestricted ||
+          driver.isBlocked ||
+          driver.isSuspended ||
+          driver.backgroundCheckStatus !== 'approved' ||
+          driver.status !== 'online'
+        ) {
+          return socket.emit('ride:decline_ride', {
+            success: false,
             objectType,
-            data: replacementRides,
-            message: 'Ride declined successfully',
+            code: 'FORBIDDEN',
+            message: 'Forbidden: Driver not eligible',
           });
-        
+        }
+
+        const driverLocation = await findDriverLocation(driver._id);
+        if (!driverLocation || !driverLocation.isAvailable) {
+          return socket.emit('ride:decline_ride', {
+            success: false,
+            objectType,
+            code: 'LOCATION_UNAVAILABLE',
+            message: 'Driver location unavailable or not marked as available',
+          });
+        }
+
+        const ride = await findRideById(rideId);
+        if (!ride) {
+          return socket.emit('ride:decline_ride', {
+            success: false,
+            objectType,
+            code: 'NOT_FOUND',
+            message: 'Ride not found',
+          });
+        }
+
+        if (ride.driverId?.toString() === driver._id.toString()) {
+          return socket.emit('ride:decline_ride', {
+            success: false,
+            objectType,
+            code: 'ALREADY_ASSIGNED',
+            message: 'Cannot decline a ride already assigned to you',
+          });
+        }
+
+        // Fetch replacement rides
+        const replacementRides = await findPendingRides(
+          driver.vehicle.type,
+          driverLocation.location.coordinates,
+          10000,
+          { excludeIds: [rideId], limit: 10 },
+        );
+
+        socket.emit('ride:decline_ride', {
+          success: true,
+          objectType,
+          data: replacementRides,
+          message: 'Ride declined successfully',
+        });
       } catch (error) {
         console.error(`SOCKET ERROR: ${error}`);
         socket.emit('error', {
@@ -2722,8 +2719,8 @@ export const initSocket = (server) => {
           }
 
           if (
-            String(ride.passengerId) !== String(caller._id) &&
-            String(ride.driverId) !== String(caller._id)
+            String(ride.passengerId?._id) !== String(caller._id) &&
+            String(ride.driverId?._id) !== String(caller._id)
           ) {
             return socket.emit('error', {
               success: false,
