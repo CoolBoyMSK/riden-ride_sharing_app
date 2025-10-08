@@ -5,13 +5,22 @@ import routes from './routes/index.js';
 import env from './config/envConfig.js';
 import { requestLogger } from './middlewares/requestLogger.js';
 import cors from './config/cors.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 const app = express();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 app.use(cors);
 app.use(helmet());
 app.use(globalRateLimiter);
 app.use(express.json());
 app.use(requestLogger);
+app.use(
+  '/.well-known',
+  express.static(path.join(__dirname, 'public/.well-known')),
+);
 
 app.use('/api', routes);
 

@@ -5,6 +5,7 @@ import UserModel from '../../models/User.js';
 import DriverModel from '../../models/Driver.js';
 import PassengerModel from '../../models/Passenger.js';
 import UpdateRequest from '../../models/updateRequest.js';
+import env from '../../config/envConfig.js';
 import CMS from '../../models/CMS.js';
 import { sendEmailUpdateVerificationOtp } from '../../templates/emails/user/index.js';
 import mongoose from 'mongoose';
@@ -190,29 +191,30 @@ export const updateRecoveryPhoneNumber = async (
   return updatedUser;
 };
 
-// === REGISTER PASSKEY (one-time setup after normal login) ===
+// === REGISTER PASSKEY START (one-time setup after normal login) ===
+
+// --- Registration Step 1 ---
 export const getPasskeyRegisterOptions = async (userId) => {
   const user = await UserModel.findById(userId);
   if (!user) throw new Error('User not found');
 
-  // ✅ Convert Mongo ObjectId string to a Uint8Array
-  const encoder = new TextEncoder();
-  const userIDBuffer = encoder.encode(user._id.toString());
+  const userIDBuffer = Buffer.from(user._id.toString(), 'utf8');
 
   const options = generateRegistrationOptions({
-    rpName: 'riden', // Your app name
-    userID: userIDBuffer, // <-- must be a BufferSource now
+    rpName: env.RP_NAME,
+    rpID: env.RP_ID,
+    userID: userIDBuffer,
     userName: user.email || user.phoneNumber || `user-${user._id}`,
     attestationType: 'none',
   });
 
-  // Save the challenge for later verification
   user.passkeyChallenge = options.challenge;
   await user.save();
 
   return options;
 };
 
+// --- Registration Step 2 ---
 export const verifyPasskeyRegistration = async (userId, credential) => {
   const user = await UserModel.findById(userId);
   if (!user || !user.passkeyChallenge) throw new Error('Challenge missing');
@@ -220,23 +222,20 @@ export const verifyPasskeyRegistration = async (userId, credential) => {
   const verification = await verifyRegistrationResponse({
     response: credential,
     expectedChallenge: user.passkeyChallenge,
-    expectedOrigin: 'https://api.riden.online',
-    expectedRPID: 'https://api.riden.online',
+    expectedOrigin: env.ORIGIN,
+    expectedRPID: env.RP_ID,
   });
 
-  if (!verification.verified) {
-    throw new Error('Passkey registration failed');
-  }
+  if (!verification.verified) throw new Error('Passkey registration failed');
 
-  // Save the credential info for later login
-  const { credentialPublicKey, credentialID, counter } =
+  const { credentialPublicKey, credentialID, counter, transports } =
     verification.registrationInfo;
 
-  user.passkeys = user.passkeys || [];
   user.passkeys.push({
-    credentialID: Buffer.from(credentialID).toString('base64'),
-    publicKey: Buffer.from(credentialPublicKey).toString('base64'),
+    credentialID: Buffer.from(credentialID).toString('base64url'),
+    publicKey: Buffer.from(credentialPublicKey).toString('base64url'),
     counter,
+    transports,
   });
 
   user.passkeyChallenge = undefined;
@@ -244,6 +243,8 @@ export const verifyPasskeyRegistration = async (userId, credential) => {
 
   return { verified: true };
 };
+
+// === REGISTER PASSKEY END (one-time setup after normal login) ===
 
 export const update2FAStatus = async (userId) => {
   const user = await UserModel.findById(userId);

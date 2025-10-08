@@ -90,6 +90,9 @@ const userSchema = new mongoose.Schema(
       required: false,
     },
     passkeys: [passkeySchema],
+    passkeyChallenge: {
+      type: String,
+    },
     isEmailVerified: {
       type: Boolean,
       default: false,

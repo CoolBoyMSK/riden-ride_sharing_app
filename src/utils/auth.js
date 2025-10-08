@@ -4,6 +4,11 @@ import env from '../config/envConfig.js';
 import crypto from 'crypto';
 import mongoose from 'mongoose';
 import User from '../models/User.js';
+import base64url from 'base64url';
+import {
+  generateAuthenticationOptions,
+  verifyAuthenticationResponse,
+} from '@simplewebauthn/server';
 
 const SALT_ROUNDS = env.SALT_ROUNDS;
 const JWT_ACCESS_SECRET = env.JWT_ACCESS_SECRET;
@@ -88,32 +93,25 @@ const generateUniqueId = (role, userObjectId) => {
   return prefix + last6;
 };
 
+// --- Login Step 1 ---
 const getPasskeyLoginOptions = async (emailOrPhone) => {
   const user = await User.findOne({
     $or: [{ email: emailOrPhone }, { phoneNumber: emailOrPhone }],
   });
 
-  if (!user || !user.passkeys || !user.passkeys.length) {
+  if (!user || !user.passkeys?.length) {
     throw new Error('No passkeys registered');
   }
 
-  // Convert stored credentialID (base64url or Buffer) to a BufferSource
-  const allowCredentials = user.passkeys.map((pk) => {
-    // If you stored credentialID as base64url, decode it:
-    const credentialIDBuffer =
-      typeof pk.credentialID === 'string'
-        ? Buffer.from(pk.credentialID, 'base64url')
-        : pk.credentialID;
-
-    return {
-      id: credentialIDBuffer,
-      type: 'public-key',
-    };
-  });
+  const allowCredentials = user.passkeys.map((pk) => ({
+    id: Buffer.from(pk.credentialID, 'base64url'),
+    type: 'public-key',
+  }));
 
   const options = generateAuthenticationOptions({
+    rpID: env.RP_ID,
     allowCredentials,
-    userVerification: 'preferred', // optional: 'preferred' | 'required' | 'discouraged'
+    userVerification: 'preferred',
   });
 
   user.passkeyChallenge = options.challenge;
@@ -122,51 +120,40 @@ const getPasskeyLoginOptions = async (emailOrPhone) => {
   return options;
 };
 
+// --- Login Step 2 ---
 const verifyPasskeyLogin = async (emailOrPhone, response) => {
   const user = await User.findOne({
     $or: [{ email: emailOrPhone }, { phoneNumber: emailOrPhone }],
   });
   if (!user || !user.passkeys) throw new Error('User or passkeys not found');
 
-  // Decode credential ID from response
   const credentialIDBuffer = Buffer.from(response.id, 'base64url');
 
-  // Find the stored authenticator that matches the credential
-  const authenticator = user.passkeys.find((pk) => {
-    const storedID =
-      typeof pk.credentialID === 'string'
-        ? Buffer.from(pk.credentialID, 'base64url')
-        : Buffer.from(pk.credentialID);
-    return storedID.equals(credentialIDBuffer);
-  });
+  const authenticator = user.passkeys.find((pk) =>
+    Buffer.from(pk.credentialID, 'base64url').equals(credentialIDBuffer),
+  );
 
   if (!authenticator)
     throw new Error('Authenticator not found for this credential');
 
-  // Verify the authentication response
   const verification = await verifyAuthenticationResponse({
     response,
     expectedChallenge: user.passkeyChallenge,
-    expectedOrigin: 'https://api.riden.online', // your frontend origin
-    expectedRPID: 'https://api.riden.online', // your RP ID (usually your domain)
+    expectedOrigin: env.ORIGIN,
+    expectedRPID: env.RP_ID,
     authenticator: {
-      credentialID:
-        authenticator.credentialID instanceof Buffer
-          ? authenticator.credentialID
-          : Buffer.from(authenticator.credentialID, 'base64url'),
-      credentialPublicKey: Buffer.from(authenticator.credentialPublicKey), // stored during registration
+      credentialID: Buffer.from(authenticator.credentialID, 'base64url'),
+      credentialPublicKey: Buffer.from(authenticator.publicKey, 'base64url'),
       counter: authenticator.counter,
-      transports: authenticator.transports, // optional
+      transports: authenticator.transports,
     },
   });
 
   if (!verification.verified) throw new Error('Invalid passkey login');
 
-  // ✅ Update signature counter
   authenticator.counter = verification.authenticationInfo.newCounter;
   await user.save();
 
-  // Generate tokens
   const payload = { id: user._id, roles: user.roles };
   return {
     user,
