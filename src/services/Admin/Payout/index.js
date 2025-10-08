@@ -7,8 +7,8 @@ import {
 } from '../../../dal/payout.js';
 import {
   instantPayoutDriver,
-  refundCardPayment,
-  findTransaction,
+  refundCardPaymentToPassenger,
+  refundWalletPaymentToPassenger,
 } from '../../../dal/stripe.js';
 import { findCompletedRide } from '../../../dal/driver.js';
 
@@ -158,25 +158,19 @@ export const getInstantPayoutRequestsCount = async (user, resp) => {
   }
 };
 
-export const refundPassenger = async (user, { rideId }, resp) => {
+export const refundPassenger = async ({ id, reason }, resp) => {
   try {
-    const ride = await findCompletedRide(rideId);
+    const ride = await findCompletedRide(id);
+    console.log(ride);
+
     if (!ride) {
       resp.error = true;
       resp.error_message = 'Failed to find completed ride';
       return resp;
     }
 
-    const transaction = await findTransaction({ rideId, type: 'CREDIT' });
-
-    if (transaction.paymentMethodId) {
-      const success = await refundCardPayment(
-        transaction.referenceId,
-        transaction.amount,
-        ride.driverId,
-        ride.passengerId,
-        ride,
-      );
+    if (ride.paymentMethod === 'CARD') {
+      const success = await refundCardPaymentToPassenger(ride._id, reason);
       if (!success) {
         resp.error = true;
         resp.error_message = 'Failed to refund passenger';
@@ -187,14 +181,8 @@ export const refundPassenger = async (user, { rideId }, resp) => {
       return resp;
     }
 
-    if (transaction.walletId) {
-      const success = await refundCardPayment(
-        transaction.referenceId,
-        transaction.amount,
-        ride.driverId,
-        ride.passengerId,
-        ride,
-      );
+    if (ride.paymentMethod === 'WALLET') {
+      const success = await refundWalletPaymentToPassenger(ride._id, reason);
       if (!success) {
         resp.error = true;
         resp.error_message = 'Failed to refund passenger';

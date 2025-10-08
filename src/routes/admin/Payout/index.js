@@ -6,6 +6,7 @@ import {
   getInstantPayoutRequestsController,
   editInstantPayoutRequestController,
   getInstantPayoutRequestsCountController,
+  refundPassengerController,
 } from '../../../controllers/Admin/Payout/index.js';
 
 const router = express.Router();
@@ -43,6 +44,13 @@ registerRoute({
   route: '/count',
   admin_auth_enable: true,
   get_method: getInstantPayoutRequestsCountController,
+});
+
+registerRoute({
+  router,
+  route: '/refund',
+  admin_auth_enable: true,
+  put_method: refundPassengerController,
 });
 
 export default router;

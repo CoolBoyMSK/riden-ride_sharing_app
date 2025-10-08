@@ -934,101 +934,227 @@ export const createPayoutRequest = async (driverId) => {
 };
 
 // Admin Flow
-export const refundCardPayment = async (
-  paymentIntentId,
-  amount,
-  passenger,
-  driver,
-  ride,
-  reason = 'requested_by_customer',
+export const refundCardPaymentToPassenger = async (
+  rideId,
+  reason = 'Ride cancelled',
 ) => {
-  if (!paymentIntentId) throw new Error('Payment Intent ID is required');
-  if (!passenger || !driver || !ride) throw new Error('Missing refund context');
+  try {
+    // 1️⃣ Find the original successful transaction
+    const originalTx = await TransactionModel.findOne({
+      rideId,
+      type: 'DEBIT',
+      for: 'passenger',
+      status: 'succeeded',
+    });
 
-  // 💰 Perform refund (partial if `amount` is passed)
-  const refund = await stripe.refunds.create({
-    payment_intent: paymentIntentId,
-    ...(amount && { amount: Math.round(amount * 100) }), // convert to cents if provided
-    reason,
-  });
+    if (!originalTx) throw new Error('Original payment not found for refund');
 
-  await createTransaction({
-    passengerId: passenger._id,
-    rideId: ride._id,
-    type: 'CREDIT',
-    category: 'REFUND',
-    amount: amount || refund.amount / 100,
-    reason,
-    for: 'passenger',
-    metadata: refund,
-    status: refund.status || 'failed',
-    referenceId: refund.id,
-    receiptUrl: refund.receipt_url || null,
-  });
+    const { passengerId, driverId, amount, referenceId } = originalTx;
 
-  await createTransaction({
-    passengerId: passenger._id,
-    driverId: driver._id,
-    rideId: ride._id,
-    type: 'DEBIT',
-    category: 'REFUND',
-    amount: amount || refund.amount / 100,
-    reason,
-    for: 'admin',
-    metadata: refund,
-    status: refund.status || 'failed',
-    referenceId: refund.id,
-    receiptUrl: refund.receipt_url || null,
-  });
+    // 2️⃣ Fetch related entities
+    const passenger = await getUserById(passengerId);
+    const driver = await getDriverById(driverId);
 
-  return {
-    success: true,
-    refund,
-  };
+    if (!passenger || !driver) throw new Error('Passenger or Driver not found');
+
+    // 3️⃣ Process refund through Stripe
+    const refund = await stripe.refunds.create({
+      payment_intent: referenceId, // Stripe payment intent ID
+      amount: amount * 100, // refund same amount, in cents
+      reason: 'requested_by_customer',
+    });
+
+    if (!refund || refund.status !== 'succeeded')
+      throw new Error('Stripe refund failed');
+
+    // 4️⃣ Adjust balances
+    await decreaseDriverBalance(driver._id, amount);
+
+    // 5️⃣ Log refund transactions
+    await createTransaction({
+      passengerId,
+      driverId,
+      rideId,
+      type: 'CREDIT',
+      category: 'REFUND',
+      amount,
+      for: 'passenger',
+      metadata: refund,
+      status: refund.status,
+      referenceId: refund.id,
+      receiptUrl: refund.receipt_url || refund.id,
+    });
+
+    await createTransaction({
+      passengerId,
+      driverId,
+      rideId,
+      type: 'DEBIT',
+      category: 'REFUND',
+      amount,
+      for: 'driver',
+      metadata: refund,
+      status: refund.status,
+      referenceId: refund.id,
+      receiptUrl: refund.receipt_url || refund.id,
+    });
+
+    // 6️⃣ Notify both users
+    await notifyUser({
+      userId: passenger.userId,
+      title: '💸 Refund Issued',
+      message: `A refund of $${amount} has been processed for your ride.`,
+      module: 'refund',
+      metadata: { rideId, refundId: refund.id, reason },
+      type: 'ALERT',
+      actionLink: `${env.FRONTEND_URL}/ride?rideId=${rideId}`,
+    });
+
+    await notifyUser({
+      userId: driver.userId,
+      title: '⚠️ Refund Deducted',
+      message: `A refund of $${amount} has been deducted for ride ${rideId}. Reason: ${reason}.`,
+      module: 'refund',
+      metadata: { rideId, refundId: refund.id, reason },
+      type: 'ALERT',
+      actionLink: `${env.FRONTEND_URL}/ride?rideId=${rideId}`,
+    });
+
+    return {
+      success: true,
+      message: 'Refund processed successfully',
+      refund,
+    };
+  } catch (error) {
+    console.error(`Refund failed: ${error.message}`);
+
+    try {
+      await notifyUser({
+        userId: passenger?.userId,
+        title: '❌ Refund Failed',
+        message: `We couldn’t process your refund. ${error.message}`,
+        module: 'refund',
+        metadata: { rideId, error: error.message },
+        type: 'ALERT',
+        actionLink: `${env.FRONTEND_URL}/support`,
+      });
+    } catch (notifyErr) {
+      console.error(
+        '❌ Failed to send refund failure notification:',
+        notifyErr,
+      );
+    }
+
+    return { success: false, error: error.message };
+  }
 };
 
-export const refundWalletPayment = async () => {
-  if (!paymentIntentId) throw new Error('Payment Intent ID is required');
-  if (!passenger || !driver || !ride) throw new Error('Missing refund context');
-
-  // 💰 Perform refund (partial if `amount` is passed)
-  const refund = await stripe.refunds.create({
-    payment_intent: paymentIntentId,
-    ...(amount && { amount: Math.round(amount * 100) }), // convert to cents if provided
-    reason,
-  });
-
-  await createTransaction({
-    passengerId: passenger._id,
-    rideId: ride._id,
-    type: 'CREDIT',
-    category: 'REFUND',
-    amount: amount || refund.amount / 100,
-    reason,
-    for: 'passenger',
-    metadata: refund,
-    status: refund.status || 'failed',
-    referenceId: refund.id,
-    receiptUrl: refund.receipt_url || null,
-  });
-
-  await createTransaction({
-    passengerId: passenger._id,
-    driverId: driver._id,
-    rideId: ride._id,
+export const refundWalletPaymentToPassenger = async (
+  rideId,
+  reason = 'Ride cancelled',
+) => {
+  // 1. Find original successful transaction
+  const originalTx = await TransactionModel.findOne({
+    rideId,
     type: 'DEBIT',
-    category: 'REFUND',
-    amount: amount || refund.amount / 100,
-    reason,
-    for: 'admin',
-    metadata: refund,
-    status: refund.status || 'failed',
-    referenceId: refund.id,
-    receiptUrl: refund.receipt_url || null,
+    status: 'succeeded',
+    for: 'passenger',
   });
 
-  return {
-    success: true,
-    refund,
-  };
+  if (!originalTx) throw new Error('Original payment not found');
+
+  const { passengerId, driverId, amount, walletId } = originalTx;
+
+  // 2. Get entities
+  const passenger = await PassengerModel.findById(passengerId);
+  const driver = await DriverModel.findById(driverId);
+  const wallet = await getWallet(passengerId);
+  if (!wallet) throw new Error('Passenger wallet not found');
+
+  // 3. Ensure driver has enough balance for refund
+  if (driver.balance < amount) {
+    throw new Error('Driver has insufficient balance for refund');
+  }
+
+  try {
+    // 4. Reverse balances
+    await decreaseDriverBalance(driverId, amount);
+    await increaseWalletBalance(passengerId, amount);
+
+    // 5. Log refund transactions
+    await createTransaction({
+      passengerId,
+      driverId,
+      rideId,
+      walletId,
+      type: 'CREDIT', // money goes back to passenger
+      category: 'REFUND',
+      amount,
+      for: 'passenger',
+      metadata: { reason },
+      status: 'succeeded',
+      referenceId: rideId,
+      receiptUrl: walletId,
+    });
+
+    await createTransaction({
+      passengerId,
+      driverId,
+      rideId,
+      walletId,
+      type: 'DEBIT', // money taken from driver
+      category: 'REFUND',
+      amount,
+      for: 'driver',
+      metadata: { reason },
+      status: 'succeeded',
+      referenceId: rideId,
+      receiptUrl: walletId,
+    });
+
+    // 6. Notify both users
+    await notifyUser({
+      userId: passenger.userId,
+      title: '💸 Refund Processed',
+      message: `Your refund of PKR ${amount} for ride ${rideId} has been processed successfully.`,
+      module: 'refund',
+      metadata: { rideId, reason },
+      type: 'ALERT',
+      actionLink: `${env.FRONTEND_URL}/wallet`,
+    });
+
+    await notifyUser({
+      userId: driver.userId,
+      title: '⚠️ Refund Deducted',
+      message: `A refund of PKR ${amount} has been deducted for ride ${rideId}. Reason: ${reason}.`,
+      module: 'refund',
+      metadata: { rideId, reason },
+      type: 'ALERT',
+      actionLink: `${env.FRONTEND_URL}/rides/${rideId}`,
+    });
+
+    return { success: true, message: 'Refund completed successfully' };
+  } catch (error) {
+    console.error(`Refund Failed: ${error.message}`);
+
+    // Notify passenger about failure
+    try {
+      await notifyUser({
+        userId: passenger?.userId,
+        title: '❌ Refund Failed',
+        message: `We couldn’t process your refund. ${error.message}`,
+        module: 'refund',
+        metadata: { rideId, error: error.message },
+        type: 'ALERT',
+        actionLink: `${env.FRONTEND_URL}/support`,
+      });
+    } catch (notifyErr) {
+      console.error(
+        '❌ Failed to send refund failure notification:',
+        notifyErr,
+      );
+    }
+
+    return { error: error.message };
+  }
 };

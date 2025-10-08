@@ -754,16 +754,14 @@ export const findDriverWayBill = async (driverId) => {
 export const findCompletedRide = async (rideId) => {
   try {
     const ride = await RideModel.findOne({
-      _id: rideId,
+      // _id: rideId,
       status: 'RIDE_COMPLETED',
       paymentStatus: 'COMPLETED',
-      driverPaidAt: { $exists: true, $ne: null },
-      actualFare: { $exists: true, $ne: null },
     })
       .populate('passengerId driverId')
       .lean();
 
-    return ride || false;
+    return ride;
   } catch (error) {
     console.error(`ERROR in findCompletedRide: ${error.message}`);
     return false;

@@ -5,6 +5,7 @@ import {
   getInstantPayoutRequests,
   editInstantPayoutRequest,
   getInstantPayoutRequestsCount,
+  refundPassenger,
 } from '../../../services/Admin/Payout/index.js';
 
 export const getUpcomingPayoutsController = (req, res) =>
@@ -63,6 +64,18 @@ export const getInstantPayoutRequestsCountController = (req, res) =>
       handlerParams: [req.user],
       successMessage:
         'Number of total pennding payout requests fetched successfully',
+    },
+    req,
+    res,
+  );
+
+export const refundPassengerController = (req, res) =>
+  handleResponse(
+    {
+      handler: refundPassenger,
+      validationFn: null,
+      handlerParams: [req.user, req.query],
+      successMessage: 'Passenger refunded successfully',
     },
     req,
     res,
