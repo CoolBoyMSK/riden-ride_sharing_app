@@ -168,6 +168,11 @@ export const bookRide = async (userId, rideData) => {
           success: false,
           message: 'Card(s) not available. Please add a card.',
         };
+      } else if (!passenger.defaultCardId) {
+        return {
+          success: false,
+          message: 'Please add a default payment method',
+        };
       }
     } else if (paymentMethod === 'WALLET') {
       wallet = await getWallet(passenger._id);
@@ -203,33 +208,6 @@ export const bookRide = async (userId, rideData) => {
     };
 
     const newRide = await createRide(ridePayload);
-
-    // Try to find and assign a driver
-    // const driverAssignment = await findAndAssignDriver(
-    //   newRide._id,
-    //   pickupLocation,
-    //   carType,
-    // );
-
-    // if (driverAssignment.success) {
-    //   return {
-    //     success: true,
-    //     message: 'Ride booked successfully! Driver found.',
-    //     ride: {
-    //       rideId: newRide.rideId,
-    //       _id: newRide._id,
-    //       status: 'DRIVER_ASSIGNED',
-    //       estimatedFare: fareResult.estimatedFare,
-    //       fareBreakdown: fareResult.fareBreakdown,
-    //       promoDetails: promoDetails,
-    //       driver: driverAssignment.assignedDriver,
-    //       pickupLocation,
-    //       dropoffLocation,
-    //       scheduledTime: newRide.scheduledTime,
-    //     },
-    //   };
-    // } else {
-    // No driver available immediately, but ride is created
     return {
       success: true,
       message: 'Ride requested successfully',
@@ -244,12 +222,7 @@ export const bookRide = async (userId, rideData) => {
         dropoffLocation,
         scheduledTime: newRide.scheduledTime,
       },
-      // driverSearchInfo: {
-      //   availableDriversCount: driverAssignment.availableDriversCount || 0,
-      //   message: driverAssignment.message,
-      // },
     };
-    // }
   } catch (error) {
     console.error('Ride booking error:', error);
     return {
