@@ -15,6 +15,7 @@ registerRoute({
   router,
   route: '/upcoming',
   admin_auth_enable: true,
+  get_permission: 'payment_management',
   get_method: getUpcomingPayoutsController,
 });
 
@@ -22,6 +23,7 @@ registerRoute({
   router,
   route: '/previous',
   admin_auth_enable: true,
+  get_permission: 'payment_management',
   get_method: getPreviousPayoutsController,
 });
 
@@ -29,6 +31,7 @@ registerRoute({
   router,
   route: '/requests',
   admin_auth_enable: true,
+  get_permission: 'payment_management',
   get_method: getInstantPayoutRequestsController,
 });
 
@@ -36,6 +39,7 @@ registerRoute({
   router,
   route: '/edit',
   admin_auth_enable: true,
+  put_permission: 'payment_management',
   put_method: editInstantPayoutRequestController,
 });
 
@@ -43,6 +47,7 @@ registerRoute({
   router,
   route: '/count',
   admin_auth_enable: true,
+  get_permission: 'payment_management',
   get_method: getInstantPayoutRequestsCountController,
 });
 
@@ -50,6 +55,7 @@ registerRoute({
   router,
   route: '/refund',
   admin_auth_enable: true,
+  put_permission: 'payment_management',
   put_method: refundPassengerController,
 });
 
