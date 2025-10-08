@@ -2722,14 +2722,14 @@ export const initSocket = (server) => {
           }
 
           if (
-            String(ride.passengerId) !== String(caller.userId) &&
-            String(ride.driverId) !== String(caller.userId)
+            String(ride.passengerId) !== String(caller._id) &&
+            String(ride.driverId) !== String(caller._id)
           ) {
             return socket.emit('error', {
               success: false,
               objectType,
               code: `INVALID_USER`,
-              message: `You are not allowed to receive the call`,
+              message: `You are not allowed to start the call`,
             });
           }
 
