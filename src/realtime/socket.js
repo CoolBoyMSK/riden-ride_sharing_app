@@ -54,7 +54,6 @@ import { createCallLog, findCallById, updateCallLogById } from '../dal/call.js';
 import { findDashboardData } from '../dal/admin/index.js';
 import { notifyUser } from '../dal/notification.js';
 import { generateAgoraToken } from '../utils/agoraTokenGenerator.js';
-import mongoose from 'mongoose';
 
 let ioInstance = null;
 
@@ -2803,7 +2802,6 @@ export const initSocket = (server) => {
               metadata: callLog,
               actionLink: '',
             });
-
             if (!notify) {
               socket.emit('error', {
                 success: false,

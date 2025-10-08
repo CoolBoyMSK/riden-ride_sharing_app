@@ -11,6 +11,7 @@ import mongoose from 'mongoose';
 import Feedback from '../models/Feedback.js';
 import Commission from '../models/Commission.js';
 import AdminCommission from '../models/AdminCommission.js';
+import { notifyUser } from '../dal/notification.js';
 
 // Ride Operations
 export const createRide = async (rideData) => {
