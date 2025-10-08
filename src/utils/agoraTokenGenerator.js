@@ -3,12 +3,12 @@ import env from '../config/envConfig.js';
 
 const { RtcTokenBuilder, RtcRole } = pkg;
 
-export const generateAgoraToken = (
+export const generateAgoraToken = ({
   channelName,
   uid = 0,
   role = 'publisher',
   expireSeconds = 60 * 60,
-) => {
+}) => {
   const appID = env.AGORA_APP_ID;
   const appCertificate = env.AGORA_APP_CERTIFICATE;
   const roleConst =

@@ -1,4 +1,12 @@
 import { Server } from 'socket.io';
+import Redis from 'ioredis';
+import { createAdapter } from '@socket.io/redis-adapter';
+import {
+  addSocket,
+  removeSocket,
+  getSocketIds,
+  isOnline,
+} from '../utils/onlineUsers.js';
 import env from '../config/envConfig.js';
 import { verifyAccessToken } from '../utils/auth.js';
 import {
@@ -62,6 +70,12 @@ export const initSocket = (server) => {
     },
   });
 
+  if (env.REDIS_URL) {
+    const pubClient = new Redis(env.REDIS_URL);
+    const subClient = pubClient.duplicate();
+    io.adapter(createAdapter(pubClient, subClient));
+  }
+
   // JWT Authentication middleware for socket connections
   io.use((socket, next) => {
     const authHeader =
@@ -82,6 +96,9 @@ export const initSocket = (server) => {
   io.on('connection', (socket) => {
     const userId = socket.user.id;
     console.log(`🔌 User ${userId} connected to socket`);
+
+    // add to online registry
+    addSocket(userId, socket.id).catch(console.error);
 
     // Join user's personal room for direct notifications
     socket.join(`user:${userId}`);
@@ -362,7 +379,6 @@ export const initSocket = (server) => {
     socket.on('ride:accept_ride', async ({ rideId }) => {
       const objectType = 'accept-ride';
       const session = await mongoose.startSession();
-
       try {
         await session.withTransaction(async () => {
           const driver = await findDriverByUserId(userId, { session });
@@ -2995,6 +3011,18 @@ export const initSocket = (server) => {
             });
           }
 
+          if (
+            String(ride.passengerId) !== String(caller.userId) &&
+            String(ride.driverId) !== String(caller.userId)
+          ) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: `INVALID_USER`,
+              message: `You are not allowed to receive the call`,
+            });
+          }
+
           const receiverId =
             role === 'driver'
               ? ride.passengerId?.userId
@@ -3840,7 +3868,8 @@ export const initSocket = (server) => {
       }
     });
 
-    socket.on('disconnect', (reason) => {
+    socket.on('disconnect', async (reason) => {
+      await removeSocket(userId, socket.id).catch(console.error);
       console.log(`🔌 User ${userId} disconnected: ${reason}`);
     });
 
