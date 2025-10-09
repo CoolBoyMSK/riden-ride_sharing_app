@@ -40,6 +40,8 @@ import {
   createFeedback,
   deductRidenCommission,
   updateDriverRideHistory,
+  createRideTransaction,
+  getPayoutWeek,
 } from '../dal/ride.js';
 import {
   findDriverByUserId,
@@ -2091,18 +2093,43 @@ export const initSocket = (server) => {
               code: 'PAYMENT_FAILED',
               message: fare.error,
             });
-          }
+          } else if (fare.success) {
+            await createRideTransaction({
+              rideId: ride._id,
+              driverId: ride.driverId,
+              passengerId: ride.passengerId,
+              amount: ride.actualFare,
+              commission: adminCommission,
+              discount: ride.fareBreakdown?.promoDiscount || 0,
+              tip: ride.tipBreakdown?.amount || 0,
+              driverEarning: ride.actualFare - adminCommission,
+              paymentMethod: ride.paymentMethod,
+              status: 'COMPLETED',
+              payoutWeek: getPayoutWeek(new Date()),
+            });
 
-          await updateRideById(ride._id, { paymentStatus: 'COMPLETED' });
-          io.to(`ride:${ride._id}`).emit('ride:pay_driver', {
-            success: true,
-            objectType,
-            data: {
-              ride,
-              transaction: fare.transaction,
-            },
-            message: 'Fare successfully paid to driver',
-          });
+            await updateRideById(ride._id, {
+              paymentStatus: 'COMPLETED',
+              driverPaidAt: new Date(),
+            });
+
+            io.to(`ride:${ride._id}`).emit('ride:pay_driver', {
+              success: true,
+              objectType,
+              data: {
+                ride,
+                transaction: fare.transaction,
+              },
+              message: 'Fare successfully paid to driver',
+            });
+          } else {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'PAYMENT_ERROR',
+              message: fare.error || 'something went wrong',
+            });
+          }
         }
 
         if (ride.paymentMethod === 'CARD') {
@@ -2122,29 +2149,50 @@ export const initSocket = (server) => {
             passenger.defaultCardId,
             'RIDE',
           );
-          if (!fare.payment || !fare.transaction) {
+          if (!fare.success) {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'PAYMENT_FAILED',
-              message: `Failed to pay ride fare`,
+              message: fare.error,
+            });
+          } else if (fare.success) {
+            await createRideTransaction({
+              rideId: ride._id,
+              driverId: ride.driverId,
+              passengerId: ride.passengerId,
+              amount: ride.actualFare,
+              commission: adminCommission,
+              discount: ride.fareBreakdown?.promoDiscount || 0,
+              tip: ride.tipBreakdown?.amount || 0,
+              driverEarning: ride.actualFare - adminCommission,
+              paymentMethod: ride.paymentMethod,
+              status: 'COMPLETED',
+              payoutWeek: getPayoutWeek(new Date()),
+            });
+
+            await updateRideById(ride._id, {
+              paymentStatus: 'COMPLETED',
+              driverPaidAt: new Date(),
+            });
+            io.to(`ride:${ride._id}`).emit('ride:pay_driver', {
+              success: true,
+              objectType,
+              data: {
+                ride,
+                payment: fare.payment,
+                transaction: fare.transaction,
+              },
+              message: 'Driver Paid Successfully',
+            });
+          } else {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'PAYMENT_ERROR',
+              message: fare.error || 'something went wrong',
             });
           }
-
-          await updateRideById(ride._id, {
-            paymentStatus: 'COMPLETED',
-            driverPaidAt: new Date(),
-          });
-          io.to(`ride:${ride._id}`).emit('ride:pay_driver', {
-            success: true,
-            objectType,
-            data: {
-              ride,
-              payment: fare.payment,
-              transaction: fare.transaction,
-            },
-            message: 'Driver Paid Successfully',
-          });
         }
       } catch (error) {
         console.error(`SOCKET ERROR: ${error}`);
@@ -2735,10 +2783,7 @@ export const initSocket = (server) => {
               ? ride.passengerId?.userId
               : ride.driverId?.userId;
 
-          const channelName =
-            role === 'driver'
-              ? `call_${caller.userId}_${receiverId}_${rideId}_${Date.now()}`
-              : `call_${caller.userId}_${receiverId}_${rideId}_${Date.now()}`;
+          const channelName = `call_${rideId}`;
 
           // generate agora token (short lived)
           const { token: rtcToken, expiresAt } = generateAgoraToken({

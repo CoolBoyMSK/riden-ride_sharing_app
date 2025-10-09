@@ -11,7 +11,9 @@ import mongoose from 'mongoose';
 import Feedback from '../models/Feedback.js';
 import Commission from '../models/Commission.js';
 import AdminCommission from '../models/AdminCommission.js';
+import RideTransaction from '../models/RideTransaction.js';
 import { notifyUser } from '../dal/notification.js';
+import moment from 'moment';
 
 // Ride Operations
 export const createRide = async (rideData) => {
@@ -885,3 +887,10 @@ export const updateDriverRideHistory = async (driverId, rideId) =>
     { $push: { rideIds: rideId } },
     { new: true },
   );
+export const createRideTransaction = async (payload) =>
+  RideTransaction.create(payload);
+
+export const getPayoutWeek = (date = new Date()) => {
+  const weekStart = moment(date).startOf('isoWeek');
+  return weekStart.format('DD-MM-YYYY');
+};
