@@ -5,6 +5,7 @@ import UserModel from '../../models/User.js';
 import DriverModel from '../../models/Driver.js';
 import PassengerModel from '../../models/Passenger.js';
 import UpdateRequest from '../../models/updateRequest.js';
+import UserDevice from '../../models/UserDevice.js';
 import env from '../../config/envConfig.js';
 import CMS from '../../models/CMS.js';
 import { sendEmailUpdateVerificationOtp } from '../../templates/emails/user/index.js';
@@ -259,3 +260,15 @@ export const update2FAStatus = async (userId) => {
 export const findCMSPages = async () => CMS.find().select('page').lean();
 
 export const findCMSPageById = async (id) => CMS.findById(id).lean();
+
+export const createDeviceInfo = async (payload) => UserDevice.create(payload);
+
+export const findDeviceInfo = async (userId) => {
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+  return UserDevice.find({
+    userId,
+    lastLoginAt: { $gte: thirtyDaysAgo }, // only last 30 days
+  }).sort({ lastLoginAt: -1 }); // latest first
+};

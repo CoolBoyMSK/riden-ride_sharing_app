@@ -7,6 +7,7 @@ import {
   fetchPasskeyRegisterOptions,
   verifyAndSavePasskeyInDb,
   toggle2FAStatus,
+  getUserDevices,
 } from '../../../services/User/Security/index.js';
 import { validatePhoneNumber } from '../../../validations/driver.js';
 
@@ -89,6 +90,18 @@ export const toggle2FAStatusController = (req, res) =>
       validationFn: null,
       handlerParams: [req.user],
       successMessage: '2FA status toggled successfully',
+    },
+    req,
+    res,
+  );
+
+export const getUserDevicesController = (req, res) =>
+  handleResponse(
+    {
+      handler: getUserDevices,
+      validationFn: null,
+      handlerParams: [req.user],
+      successMessage: 'Devices info fetched successfully',
     },
     req,
     res,

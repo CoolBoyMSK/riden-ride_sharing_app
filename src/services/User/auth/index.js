@@ -30,13 +30,16 @@ import {
   createPayout,
 } from '../../../dal/stripe.js';
 import { createAdminNotification } from '../../../dal/notification.js';
+import { createDeviceInfo } from '../../../dal/user/index.js';
 // import { otpQueue } from '../../../queues/otpQueue.js';
 import { verifyOtp, sendOtp } from '../../../utils/otpUtils.js';
 import {
   getPasskeyLoginOptions,
   verifyPasskeyLogin,
 } from '../../../utils/auth.js';
+import { extractDeviceInfo } from '../../../utils/deviceInfo.js';
 import env from '../../../config/envConfig.js';
+import { v4 as uuidv4 } from 'uuid';
 
 export const signupUser = async (
   users,
@@ -184,6 +187,7 @@ export const signupUser = async (
 
 export const loginUser = async (
   { email, phoneNumber, password, role },
+  headers,
   resp,
 ) => {
   try {
@@ -200,6 +204,7 @@ export const loginUser = async (
         }
       } else if (phoneNumber) {
         user = await findUserByPhone(phoneNumber);
+
         if (user && !user.isPhoneVerified) {
           const sent = await sendOtp(phoneNumber);
           if (!sent.success) {
@@ -305,11 +310,23 @@ export const loginUser = async (
             return resp;
           }
 
+          const deviceInfo = extractDeviceInfo(headers);
+          const device = {
+            userId: user._id,
+            deviceId: uuidv4(),
+            loginMethod: 'phone',
+            ...deviceInfo,
+            lastLoginAt: new Date(),
+          };
+
+          await createDeviceInfo(device);
+
           // For Testing
           resp.data = {
             user: user,
             accessToken: generateAccessToken(payload),
             refreshToken: generateRefreshToken(payload),
+            deviceId: device.deviceId,
             flow: 'Driver Phone Number login',
           };
           // For Testing
@@ -335,6 +352,17 @@ export const loginUser = async (
             const driver = await createDriverProfile(user._id, uniqueId);
             if (!driver) throw new Error('Failed to create driver profile');
 
+            const deviceInfo = extractDeviceInfo(headers);
+            const device = {
+              userId: user._id,
+              deviceId: uuidv4(),
+              loginMethod: 'phone',
+              ...deviceInfo,
+              lastLoginAt: new Date(),
+            };
+
+            await createDeviceInfo(device);
+
             // For Testing
             const payload = { id: user._id, roles: user.roles };
             resp.data = {
@@ -356,6 +384,17 @@ export const loginUser = async (
           // }
           // resp.data = { otpSent: true, flow: 'register' };
           // For Production
+
+          const deviceInfo = extractDeviceInfo(headers);
+          const device = {
+            userId: user._id,
+            deviceId: uuidv4(),
+            loginMethod: 'phone',
+            ...deviceInfo,
+            lastLoginAt: new Date(),
+          };
+
+          await createDeviceInfo(device);
 
           // For Testing
           const payload = { id: user._id, roles: user.roles };
@@ -388,12 +427,24 @@ export const loginUser = async (
             return resp;
           }
 
+          const deviceInfo = extractDeviceInfo(headers);
+          const device = {
+            userId: user._id,
+            deviceId: uuidv4(),
+            loginMethod: 'email',
+            ...deviceInfo,
+            lastLoginAt: new Date(),
+          };
+
+          await createDeviceInfo(device);
+
           // For Testing
           const payload = { id: user._id, roles: user.roles };
           resp.data = {
             user: user,
             accessToken: generateAccessToken(payload),
             refreshToken: generateRefreshToken(payload),
+            deviceId: device.deviceId,
             flow: 'login',
           };
           // For Testing
@@ -423,6 +474,7 @@ export const loginUser = async (
               user: user,
               accessToken: generateAccessToken(payload),
               refreshToken: generateRefreshToken(payload),
+              deviceId: device.deviceId,
               flow: 'driver email login',
             };
             return resp;
@@ -439,12 +491,24 @@ export const loginUser = async (
           // resp.data = { otpSent: true, flow: 'register' };
           // For Production
 
+          const deviceInfo = extractDeviceInfo(headers);
+          const device = {
+            userId: user._id,
+            deviceId: uuidv4(),
+            loginMethod: 'email',
+            ...deviceInfo,
+            lastLoginAt: new Date(),
+          };
+
+          await createDeviceInfo(device);
+
           // For Testing
           const payload = { id: user._id, roles: user.roles };
           resp.data = {
             user: user,
             accessToken: generateAccessToken(payload),
             refreshToken: generateRefreshToken(payload),
+            deviceId: device.deviceId,
             flow: 'login',
           };
           // For Testing

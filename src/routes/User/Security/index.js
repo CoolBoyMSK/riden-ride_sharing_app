@@ -8,6 +8,7 @@ import {
   fetchPasskeyRegisterOptionsController,
   verifyAndSavePasskeyInDbController,
   toggle2FAStatusController,
+  getUserDevicesController,
 } from '../../../controllers/User/Security/index.js';
 
 const router = express.Router();
@@ -59,6 +60,13 @@ registerRoute({
   route: '/toggle',
   driver_auth_enable: true,
   post_method: toggle2FAStatusController,
+});
+
+registerRoute({
+  router,
+  route: '/device',
+  driver_auth_enable: true,
+  get_method: getUserDevicesController,
 });
 
 export default router;

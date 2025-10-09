@@ -7,6 +7,7 @@ import {
   getPasskeyRegisterOptions,
   verifyPasskeyRegistration,
   update2FAStatus,
+  findDeviceInfo,
 } from '../../../dal/user/index.js';
 
 export const createRecoveryNumber = async (user, { phoneNumber }, resp) => {
@@ -189,6 +190,25 @@ export const toggle2FAStatus = async (user, resp) => {
     if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to save passkeys';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'something went wrong';
+    return resp;
+  }
+};
+
+export const getUserDevices = async (user, resp) => {
+  try {
+    const success = await findDeviceInfo(user._id);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch Device info';
       return resp;
     }
 

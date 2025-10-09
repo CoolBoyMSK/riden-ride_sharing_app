@@ -32,7 +32,7 @@ export const loginController = (req, res) =>
     {
       handler: loginUser,
       validationFn: validateLogin,
-      handlerParams: [req.body],
+      handlerParams: [req.body, req],
       successMessage: 'User logged in successfully',
     },
     req,
