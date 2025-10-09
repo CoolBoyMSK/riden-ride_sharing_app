@@ -2874,7 +2874,7 @@ export const initSocket = (server) => {
           });
         }
 
-        if (String(call.receiverId) !== String(receiver.userId)) {
+        if (call.receiverId.toString() !== receiver.userId.toString()) {
           return socket.emit('error', {
             success: false,
             objectType,
@@ -2992,7 +2992,7 @@ export const initSocket = (server) => {
           });
         }
 
-        if (String(call.receiverId) !== String(receiver.userId)) {
+        if (call.receiverId.toString() !== receiver.userId.toString()) {
           return socket.emit('error', {
             success: false,
             objectType,
@@ -3126,7 +3126,7 @@ export const initSocket = (server) => {
           });
         }
 
-        if (String(call.callerId) !== String(caller.userId)) {
+        if (call.callerId.toString() !== caller.userId.toString()) {
           return socket.emit('error', {
             success: false,
             objectType,
@@ -3261,8 +3261,8 @@ export const initSocket = (server) => {
         }
 
         if (
-          String(call.callerId) !== String(member.userId) &&
-          String(call.receiverId) !== String(member.userId)
+          call.callerId.toString() !== member.userId.toString() &&
+          call.receiverId.toString() !== member.userId.toString()
         ) {
           return socket.emit('error', {
             success: false,
@@ -3416,8 +3416,8 @@ export const initSocket = (server) => {
         }
 
         if (
-          String(ride.driverId) !== String(member._id) &&
-          String(call.passengerId) !== String(member._id)
+          ride.driverId.toString() !== member._id &&
+          call.passengerId.toString() !== member._id.toString()
         ) {
           return socket.emit('error', {
             success: false,
@@ -3514,8 +3514,8 @@ export const initSocket = (server) => {
         }
 
         if (
-          String(ride.driverId) !== String(member._id) &&
-          String(call.passengerId) !== String(member._id)
+          ride.driverId.toString() !== member._id.toString() &&
+          call.passengerId.toString() !== member._id.toString()
         ) {
           return socket.emit('error', {
             success: false,

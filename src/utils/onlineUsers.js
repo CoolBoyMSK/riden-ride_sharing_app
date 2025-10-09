@@ -1,6 +1,6 @@
 import Redis from 'ioredis';
 import env from '../config/envConfig.js';
-const redisUrl = env.REDISrs_URL || null;
+const redisUrl = env.REDIS_URL || null;
 
 let redis = null;
 if (redisUrl) redis = new Redis(redisUrl);
