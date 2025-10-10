@@ -7,12 +7,14 @@ import {
   forgotPassword,
   passKeyLogInAuthOptions,
   verifyPasskeyLoginAuth,
+  updateFCMToken,
 } from '../../services/User/auth/index.js';
 import { handleResponse } from '../../utils/handleRespone.js';
 import {
   validateLogin,
   validateResetPassword,
   validateSignup,
+  validateFCMToken,
 } from '../../validations/user/authValidations.js';
 
 export const signupController = (req, res) =>
@@ -106,6 +108,18 @@ export const verifyPasskeyLoginAuthController = (req, res) =>
       validationFn: null,
       handlerParams: [req.body],
       successMessage: 'Passkey login successfully',
+    },
+    req,
+    res,
+  );
+
+export const updateFCMTokenController = (req, res) =>
+  handleResponse(
+    {
+      handler: updateFCMToken,
+      validationFn: validateFCMToken,
+      handlerParams: [req.user, req.body],
+      successMessage: 'FCM token update successfully',
     },
     req,
     res,

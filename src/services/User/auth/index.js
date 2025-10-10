@@ -26,7 +26,7 @@ import {
 import {
   createPassengerStripeCustomer,
   createDriverStripeAccount,
-  createWallet,
+  createPassengerWallet,
   createPayout,
 } from '../../../dal/stripe.js';
 import { createAdminNotification } from '../../../dal/notification.js';
@@ -39,7 +39,6 @@ import {
 } from '../../../utils/auth.js';
 import { extractDeviceInfo } from '../../../utils/deviceInfo.js';
 import env from '../../../config/envConfig.js';
-import { v4 as uuidv4 } from 'uuid';
 
 export const signupUser = async (
   users,
@@ -153,7 +152,7 @@ export const signupUser = async (
       return resp;
     }
 
-    const wallet = await createWallet(passengerProfile._id);
+    const wallet = await createPassengerWallet(passengerProfile._id);
     if (!wallet) {
       resp.error = true;
       resp.error_message = 'Failed to create In-App wallet';
@@ -186,7 +185,17 @@ export const signupUser = async (
 };
 
 export const loginUser = async (
-  { email, phoneNumber, password, role },
+  {
+    email,
+    phoneNumber,
+    password,
+    role,
+    userDeviceType,
+    deviceId,
+    deviceModel,
+    deviceVendor,
+    os,
+  },
   headers,
   resp,
 ) => {
@@ -246,6 +255,16 @@ export const loginUser = async (
         return resp;
       }
 
+      user = await updateUserById(user._id, {
+        userDeviceToken,
+        userDeviceType,
+      });
+      if (!user) {
+        resp.error = true;
+        resp.error_message = 'Failed to update Device Token and Type';
+        return resp;
+      }
+
       // ✅ If phone already verified → issue tokens
       const payload = { id: userId, roles: user.roles };
       resp.data = {
@@ -269,7 +288,6 @@ export const loginUser = async (
       if (phoneNumber) {
         let user = await findUserByPhone(phoneNumber);
         if (user && user.isPhoneVerified) {
-          console.log(user);
           const payload = { id: user._id, roles: user.roles };
           const success = await updateDriverByUserId(user._id, {
             isActive: true,
@@ -277,6 +295,15 @@ export const loginUser = async (
           if (!success) {
             resp.error = true;
             resp.error_message = 'Failed to activate driver';
+            return resp;
+          }
+
+          user = await updateUserById(user._id, {
+            userDeviceType,
+          });
+          if (!user) {
+            resp.error = true;
+            resp.error_message = 'Failed to update Device Type';
             return resp;
           }
 
@@ -296,29 +323,18 @@ export const loginUser = async (
           //   return resp;
           // }
 
-          if (user.is2FAEnabled) {
-            // For Production
-            // const sent = await sendOtp(phoneNumber);
-            // resp.data = { otpSent: true, flow: 'login' };
-            // For Production
-            resp.data = {
-              user: user,
-              accessToken: generateAccessToken(payload),
-              refreshToken: generateRefreshToken(payload),
-              flow: 'Driver 2FA with Phone Number Login',
-            };
-            return resp;
-          }
-
-          const deviceInfo = extractDeviceInfo(headers);
+          const deviceInfo = await extractDeviceInfo(headers);
           const device = {
             userId: user._id,
-            deviceId: uuidv4(),
-            loginMethod: 'phone',
+            deviceId,
+            deviceType: userDeviceType,
+            deviceModel,
+            deviceVendor,
+            os,
             ...deviceInfo,
+            loginMethod: 'phone',
             lastLoginAt: new Date(),
           };
-
           await createDeviceInfo(device);
 
           // For Testing
@@ -338,6 +354,8 @@ export const loginUser = async (
               phoneNumber,
               roles: ['driver'],
               status: 'pending',
+              userDeviceToken,
+              userDeviceType,
               // For Production
               // isPhoneVerified: false,
               // For Production
@@ -352,15 +370,18 @@ export const loginUser = async (
             const driver = await createDriverProfile(user._id, uniqueId);
             if (!driver) throw new Error('Failed to create driver profile');
 
-            const deviceInfo = extractDeviceInfo(headers);
+            const deviceInfo = await extractDeviceInfo(headers);
             const device = {
               userId: user._id,
-              deviceId: uuidv4(),
-              loginMethod: 'phone',
+              deviceId,
+              deviceType: userDeviceType,
+              deviceModel,
+              deviceVendor,
+              os,
               ...deviceInfo,
+              loginMethod: 'phone',
               lastLoginAt: new Date(),
             };
-
             await createDeviceInfo(device);
 
             // For Testing
@@ -385,15 +406,27 @@ export const loginUser = async (
           // resp.data = { otpSent: true, flow: 'register' };
           // For Production
 
-          const deviceInfo = extractDeviceInfo(headers);
+          user = await updateUserById(user._id, {
+            userDeviceType,
+          });
+          if (!user) {
+            resp.error = true;
+            resp.error_message = 'Failed to update Device Type';
+            return resp;
+          }
+
+          const deviceInfo = await extractDeviceInfo(headers);
           const device = {
             userId: user._id,
-            deviceId: uuidv4(),
-            loginMethod: 'phone',
+            deviceId,
+            deviceType: userDeviceType,
+            deviceModel,
+            deviceVendor,
+            os,
             ...deviceInfo,
+            loginMethod: 'phone',
             lastLoginAt: new Date(),
           };
-
           await createDeviceInfo(device);
 
           // For Testing
@@ -427,15 +460,27 @@ export const loginUser = async (
             return resp;
           }
 
-          const deviceInfo = extractDeviceInfo(headers);
+          user = await updateUserById(user._id, {
+            userDeviceType,
+          });
+          if (!user) {
+            resp.error = true;
+            resp.error_message = 'Failed to update Device Type';
+            return resp;
+          }
+
+          const deviceInfo = await extractDeviceInfo(headers);
           const device = {
             userId: user._id,
-            deviceId: uuidv4(),
-            loginMethod: 'email',
+            deviceId,
+            deviceType: userDeviceType,
+            deviceModel,
+            deviceVendor,
+            os,
             ...deviceInfo,
+            loginMethod: 'email',
             lastLoginAt: new Date(),
           };
-
           await createDeviceInfo(device);
 
           // For Testing
@@ -456,6 +501,8 @@ export const loginUser = async (
               email,
               roles: ['driver'],
               status: 'pending',
+              userDeviceToken,
+              userDeviceType,
               // For Production
               // isPhoneVerified: false,
               // For Production
@@ -491,15 +538,27 @@ export const loginUser = async (
           // resp.data = { otpSent: true, flow: 'register' };
           // For Production
 
-          const deviceInfo = extractDeviceInfo(headers);
+          user = await updateUserById(user._id, {
+            userDeviceType,
+          });
+          if (!user) {
+            resp.error = true;
+            resp.error_message = 'Failed to update Device Type';
+            return resp;
+          }
+
+          const deviceInfo = await extractDeviceInfo(headers);
           const device = {
             userId: user._id,
-            deviceId: uuidv4(),
-            loginMethod: 'email',
+            deviceId,
+            deviceType: userDeviceType,
+            deviceModel,
+            deviceVendor,
+            os,
             ...deviceInfo,
+            loginMethod: 'email',
             lastLoginAt: new Date(),
           };
-
           await createDeviceInfo(device);
 
           // For Testing
@@ -772,6 +831,28 @@ export const verifyPasskeyLoginAuth = async (
     console.error(`API ERROR: ${err}`);
     resp.error = true;
     resp.error_message = err.message || 'Something went wrong';
+    return resp;
+  }
+};
+
+export const updateFCMToken = async (user, { userDeviceToken }, resp) => {
+  try {
+    console.log(userDeviceToken);
+    const success = await updateUserById(user.id, {
+      userDeviceToken,
+    });
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to update Device Token';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };

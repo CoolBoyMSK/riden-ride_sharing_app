@@ -8,7 +8,16 @@ const walletSchema = new mongoose.Schema(
       required: true,
       unique: true,
     },
-    balance: {
+    availableBalance: {
+      type: Number,
+      default: 0,
+      min: [0, 'Balance cannot be negative'],
+      validate: {
+        validator: (value) => value >= 0,
+        message: 'Balance cannot be less than zero',
+      },
+    },
+    negativeBalance: {
       type: Number,
       default: 0,
       min: [0, 'Balance cannot be negative'],

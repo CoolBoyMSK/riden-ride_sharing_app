@@ -1983,35 +1983,35 @@ export const initSocket = (server) => {
           });
         }
 
-        // if (ride.paymentMethod === 'CARD') {
-        //   const tip = await passengerPaysDriver(
-        //     passenger,
-        //     driver,
-        //     ride,
-        //     amount,
-        //     passenger.defaultCardId,
-        //     'TIP',
-        //   );
-        //   if (!tip.payment || !tip.transaction) {
-        //     return socket.emit('ride:tip_driver', {
-        //       success: false,
-        //       objectType,
-        //       code: 'PAYMENT_FAILED',
-        //       message: `Failed to send tip t driver's account`,
-        //     });
-        //   }
+        if (ride.paymentMethod === 'CARD') {
+          const tip = await passengerPaysDriver(
+            passenger,
+            driver,
+            ride,
+            amount,
+            passenger.defaultCardId,
+            'TIP',
+          );
+          if (!tip.payment || !tip.transaction) {
+            return socket.emit('ride:tip_driver', {
+              success: false,
+              objectType,
+              code: 'PAYMENT_FAILED',
+              message: `Failed to send tip t driver's account`,
+            });
+          }
 
-        //   io.to(`ride:${ride._id}`).emit('ride:tip_driver', {
-        //     success: true,
-        //     objectType,
-        //     data: {
-        //       ride,
-        //       payment: tip.payment,
-        //       transaction: tip.transaction,
-        //     },
-        //     message: 'Tip successfully send to driver',
-        //   });
-        // }
+          io.to(`ride:${ride._id}`).emit('ride:tip_driver', {
+            success: true,
+            objectType,
+            data: {
+              ride,
+              payment: tip.payment,
+              transaction: tip.transaction,
+            },
+            message: 'Tip successfully send to driver',
+          });
+        }
       } catch (error) {
         console.error(`SOCKET ERROR: ${error}`);
         return socket.emit('error', {

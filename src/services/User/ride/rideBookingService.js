@@ -5,7 +5,7 @@ import {
   findRideByRideId,
 } from '../../../dal/ride.js';
 import { findPassengerByUserId } from '../../../dal/passenger.js';
-import { getWallet } from '../../../dal/stripe.js';
+import { getPassengerWallet } from '../../../dal/stripe.js';
 import { validatePromoCode } from '../../../dal/promo_code.js';
 import { calculateEstimatedFare } from './fareCalculationService.js';
 import {
@@ -175,7 +175,7 @@ export const bookRide = async (userId, rideData) => {
         };
       }
     } else if (paymentMethod === 'WALLET') {
-      wallet = await getWallet(passenger._id);
+      wallet = await getPassengerWallet(passenger._id);
       if (!wallet) {
         return {
           success: false,

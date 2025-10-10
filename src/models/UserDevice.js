@@ -13,6 +13,8 @@ const userDeviceSchema = new mongoose.Schema(
     },
     deviceType: {
       type: String,
+      enum: ['android', 'ios'],
+      required: true,
     },
     deviceModel: {
       type: String,
@@ -21,12 +23,6 @@ const userDeviceSchema = new mongoose.Schema(
       type: String,
     },
     os: {
-      type: String,
-    },
-    browser: {
-      type: String,
-    },
-    browserVersion: {
       type: String,
     },
     ipAddress: {
@@ -48,9 +44,6 @@ const userDeviceSchema = new mongoose.Schema(
     lastLoginAt: {
       type: Date,
       default: Date.now,
-    },
-    userAgent: {
-      type: String,
     },
   },
   { timestamps: true },

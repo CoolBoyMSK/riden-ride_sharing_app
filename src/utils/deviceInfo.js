@@ -1,58 +1,52 @@
-import * as UAParser from 'ua-parser-js';
-import geoip from 'geoip-lite';
+import axios from 'axios';
 
-/**
- * Extract device, browser, OS, IP, and geolocation info from request headers.
- * Works in production (behind proxy) and local environments.
- *
- * @param {object} req - Express request object
- * @returns {object} device info object
- */
-export const extractDeviceInfo = (req) => {
+export const getClientIp = (req) => {
+  let ip =
+    req.headers['x-forwarded-for']?.split(',')[0] ||
+    req.connection?.remoteAddress ||
+    req.socket?.remoteAddress ||
+    req.ip ||
+    '';
+
+  // Normalize IPv6 localhost (::1) and IPv4 localhost (127.0.0.1)
+  if (ip.includes('::1') || ip.includes('127.0.0.1')) {
+    ip = '8.8.8.8'; // fallback to public IP for testing
+  }
+
+  // Remove IPv6 prefix if exists (e.g., "::ffff:192.168.0.1")
+  if (ip.startsWith('::ffff:')) {
+    ip = ip.replace('::ffff:', '');
+  }
+
+  return ip;
+};
+
+export const getGeoLocation = async (ip) => {
   try {
-    const userAgent = req.headers['user-agent'] || 'unknown';
-    const parser = new UAParser.UAParser();
-    const result = parser.setUA(userAgent).getResult();
-
-    // Get the real IP address even if behind reverse proxy (NGINX, etc.)
-    const ip =
-      req.headers['x-forwarded-for']?.split(',').shift()?.trim() ||
-      req.connection?.remoteAddress ||
-      req.socket?.remoteAddress ||
-      req.ip ||
-      '0.0.0.0';
-
-    // Use geoip to get approximate location
-    const geo = geoip.lookup(ip);
-
+    const { data } = await axios.get(`https://ipapi.co/${ip}/json/`);
     return {
-      os: result.os?.name || 'unknown',
-      browser: result.browser?.name || 'unknown',
-      browserVersion: result.browser?.version || 'unknown',
-      deviceType: result.device?.type || 'desktop',
-      deviceModel: result.device?.model || 'unknown',
-      deviceVendor: result.device?.vendor || 'unknown',
-      ipAddress: ip,
-      userAgent,
-      location: {
-        country: geo?.country || 'unknown',
-        city: geo?.city || 'unknown',
-        region: geo?.region || 'unknown',
-        timezone: geo?.timezone || 'unknown',
-      },
+      country: data.country_name || 'Unknown',
+      city: data.city || 'Unknown',
+      region: data.region || 'Unknown',
+      timezone: data.timezone || 'Unknown',
     };
-  } catch (error) {
-    console.error('Error parsing device info:', error);
+  } catch (err) {
+    console.error('Geo lookup failed:', err.message);
     return {
-      os: 'unknown',
-      browser: 'unknown',
-      deviceType: 'unknown',
-      ipAddress: '0.0.0.0',
-      userAgent: req.headers['user-agent'] || 'unknown',
-      location: {
-        country: 'unknown',
-        city: 'unknown',
-      },
+      country: 'Unknown',
+      city: 'Unknown',
+      region: 'Unknown',
+      timezone: 'Unknown',
     };
   }
+};
+
+export const extractDeviceInfo = async (req) => {
+  const ipAddress = getClientIp(req);
+  const location = await getGeoLocation(ipAddress);
+
+  return {
+    ipAddress,
+    location,
+  };
 };

@@ -7,7 +7,7 @@ import {
   updatePassengerCard,
   getCardDetails,
   addFundsToWallet,
-  getWallet,
+  getPassengerWallet,
 } from '../../../dal/stripe.js';
 import mongoose from 'mongoose';
 
@@ -264,7 +264,7 @@ export const getInAppWallet = async (user, resp) => {
       return resp;
     }
 
-    const success = await getWallet(passenger._id);
+    const success = await getPassengerWallet(passenger._id);
     if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to fetch wallet';

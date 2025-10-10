@@ -34,15 +34,31 @@ export const validateSignup = (body) => {
 };
 
 // --- Login ---
-const loginSchema = Joi.object({
+export const loginSchema = Joi.object({
+  // 🧩 Login credentials
   email: Joi.string().email().optional(),
   phoneNumber: Joi.string()
     .pattern(/^[0-9+\- ]{7,20}$/)
     .optional(),
   password: Joi.string().min(8).max(128).optional(),
   role: Joi.string().valid('passenger', 'driver').required(),
+
+  // 🔔 Notification fields (mandatory for React Native apps)
+  userDeviceType: Joi.string().valid('android', 'ios').required().messages({
+    'any.only': 'Device type must be one of android or ios',
+    'any.required': 'Device type is required for login',
+  }),
+
+  // 📱 Device info (optional but recommended for analytics and security)
+  deviceId: Joi.string().trim().min(5).max(200).required().messages({
+    'any.required': 'Device ID is required',
+    'string.empty': 'Device ID cannot be empty',
+  }),
+  deviceModel: Joi.string().trim().max(200).optional(),
+  deviceVendor: Joi.string().trim().max(100).optional(),
+  os: Joi.string().trim().max(100).optional(),
 }).custom((value, helpers) => {
-  // Passenger flow: needs email/phone + password
+  // 🧠 Passenger flow: requires email/phone + password
   if (value.role === 'passenger') {
     if ((!value.email && !value.phoneNumber) || !value.password) {
       return helpers.error('any.invalid', {
@@ -51,7 +67,7 @@ const loginSchema = Joi.object({
     }
   }
 
-  // Driver flow: needs email or phone (password optional)
+  // 🧠 Driver flow: requires email or phone only (password optional)
   if (value.role === 'driver') {
     if (!value.email && !value.phoneNumber) {
       return helpers.error('any.invalid', {
@@ -65,6 +81,16 @@ const loginSchema = Joi.object({
 
 export const validateLogin = (payload) =>
   loginSchema.validateAsync(payload, { abortEarly: false });
+
+export const fcmTokenSchema = Joi.object({
+  userDeviceToken: Joi.string().trim().min(10).max(500).required().messages({
+    'any.required': 'Device token is required for login',
+    'string.empty': 'Device token cannot be empty',
+  }),
+});
+
+export const validateFCMToken = (payload) =>
+  fcmTokenSchema.validateAsync(payload, { abortEarly: false });
 
 // --- Reset Password ---
 // API expects: phoneNumber + newPassword

@@ -58,6 +58,11 @@ const env = {
   JOB_BACKOFF_MS: required(process.env.JOB_BACKOFF_MS, 'JOB_BACKOFF_MS'),
   DLQ_QUEUE_NAME: required(process.env.DLQ_QUEUE_NAME, 'DLQ_QUEUE_NAME'),
   BATCH_SIZE: required(process.env.BATCH_SIZE, 'BATCH_SIZE'),
+  SCHEDULER_CRON: required(process.env.SCHEDULER_CRON, 'SCHEDULER_CRON'),
+  MIN_TRANSFER_AMOUNT: required(
+    process.env.MIN_TRANSFER_AMOUNT,
+    'MIN_TRANSFER_AMOUNT',
+  ),
   RP_ID: required(process.env.RP_ID, 'RP_ID'),
   RP_NAME: required(process.env.RP_NAME, 'RP_NAME'),
   ORIGIN: required(process.env.ORIGIN, 'ORIGIN'),

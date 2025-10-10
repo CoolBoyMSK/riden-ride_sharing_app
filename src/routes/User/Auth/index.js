@@ -9,9 +9,11 @@ import {
   forgotPasswordController,
   passKeyLogInAuthOptionsController,
   verifyPasskeyLoginAuthController,
+  updateFCMTokenController,
 } from '../../../controllers/User/authIndex.js';
 import { verifyFirebaseToken } from '../../../middlewares/firebaseAuth.js';
 import { driverAuthenticate } from '../../../middlewares/driverAuth.js';
+import { anyUserAuth } from '../../../middlewares/anyUserAuth.js';
 
 const router = express.Router();
 
@@ -63,6 +65,13 @@ registerRoute({
   router,
   route: '/passkey/login',
   post_method: verifyPasskeyLoginAuthController,
+});
+
+registerRoute({
+  router,
+  route: '/fcm',
+  put_middlewares: [anyUserAuth],
+  put_method: updateFCMTokenController,
 });
 
 export default router;

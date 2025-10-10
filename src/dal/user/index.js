@@ -212,6 +212,8 @@ export const getPasskeyRegisterOptions = async (userId) => {
   user.passkeyChallenge = options.challenge;
   await user.save();
 
+  console.log(options)
+
   return options;
 };
 
