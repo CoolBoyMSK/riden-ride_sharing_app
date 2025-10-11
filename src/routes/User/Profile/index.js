@@ -3,24 +3,56 @@ import { uploadSingle } from '../../../middlewares/upload.js';
 import {
   fetchProfile,
   editProfile,
+  sendEmailUpdateOtpController,
+  verifyEmailUpdateController,
+  sendPhoneUpdateOtpController,
+  verifyPhoneUpdateController,
 } from '../../../controllers/User/profile.js';
 import { registerRoute } from '../../../utils/registerRoute.js';
-import { authenticateUser } from '../../../middlewares/genericAuth.js';
+import { anyUserAuth } from '../../../middlewares/anyUserAuth.js';
 
 const router = express.Router();
 
 registerRoute({
   router,
   route: '/me',
-  get_middlewares: [authenticateUser],
+  get_middlewares: [anyUserAuth],
   get_method: fetchProfile,
 });
 
 registerRoute({
   router,
   route: '/update',
-  put_middlewares: [authenticateUser, uploadSingle],
+  put_middlewares: [anyUserAuth, uploadSingle],
   put_method: editProfile,
+});
+
+registerRoute({
+  router,
+  route: '/email',
+  post_middlewares: [anyUserAuth],
+  post_method: sendEmailUpdateOtpController,
+});
+
+registerRoute({
+  router,
+  route: '/verify-email',
+  put_middlewares: [anyUserAuth],
+  put_method: verifyEmailUpdateController,
+});
+
+registerRoute({
+  router,
+  route: '/phone',
+  post_middlewares: [anyUserAuth],
+  post_method: sendPhoneUpdateOtpController,
+});
+
+registerRoute({
+  router,
+  route: '/verify-phone',
+  put_middlewares: [anyUserAuth],
+  put_method: verifyPhoneUpdateController,
 });
 
 export default router;

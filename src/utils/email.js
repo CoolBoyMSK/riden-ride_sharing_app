@@ -11,9 +11,9 @@ const sendEmail = async ({ to, subject, html }) => {
 
   try {
     await emailTransporter.sendMail(mailOptions);
-    console.log(`✅ Email sent to ${to}`);
+    console.log(`Email sent to ${to}`);
   } catch (err) {
-    console.error(`❌ Failed to send email to ${to}:`, err.message);
+    console.error(`Failed to send email to ${to}:`, err.message);
   }
 };
 

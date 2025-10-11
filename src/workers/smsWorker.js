@@ -1,10 +1,10 @@
 import { Worker } from 'bullmq';
+import redisClient from '../config/redisConfig.js';
 import fg from 'fast-glob';
 import { pathToFileURL } from 'url';
-import redisClient from '../config/redisConfig.js';
 
 const connection = redisClient;
-const QUEUE_NAME = 'emails'; // same name as in emailQueue.js
+const QUEUE_NAME = 'sms'; // same name as in emailQueue.js
 
 async function loadJobs() {
   const files = await fg('src/workers/jobs/*.js', {
@@ -36,12 +36,14 @@ async function loadJobs() {
   );
 
   worker.on('ready', () => {
-    console.log(
-      `🔌 Email worker connected; registered jobs: ${Object.keys(jobs).join(', ')}`,
-    );
+    console.log(`📡 SMS Worker connected to queue: ${QUEUE_NAME}`);
+  });
+
+  worker.on('completed', (job) => {
+    console.log(`✅ SMS Job completed: ${job.name} (${job.id})`);
   });
 
   worker.on('failed', (job, err) => {
-    console.error(`❌ Job ${job.id} (${job.name}) failed:`, err);
+    console.error(`❌ SMS Job failed: ${job.name} (${job.id}) —`, err.message);
   });
 })();

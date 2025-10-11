@@ -1,113 +1,231 @@
 import crypto from 'crypto';
 import redisConfig from '../config/redisConfig.js';
+import { emailQueue } from '../queues/emailQueue.js';
+import { smsQueue } from '../queues/smsQueue.js';
 import { otpQueue } from '../queues/otpQueue.js';
 import { getTwilioClient, TWILIO_CONFIG } from '../config/twilioConfig.js';
 import env from '../config/envConfig.js';
-import { sendEmailVerificationOtp } from '../templates/emails/user/index.js';
 
 let client = getTwilioClient();
 
-// const HMAC_KEY = env.OTP_HMAC_KEY;
+const HMAC_KEY = env.OTP_HMAC_KEY;
 
 // // -------- Helpers -------- //
-// const generateOtp = () => Math.floor(10000 + Math.random() * 90000).toString();
+const generateOtp = () => Math.floor(10000 + Math.random() * 90000).toString();
 
-// const hashOtp = (otp) =>
-//   crypto.createHmac('sha256', HMAC_KEY).update(otp).digest('hex');
+const hashOtp = (otp) =>
+  crypto.createHmac('sha256', HMAC_KEY).update(otp).digest('hex');
 
-// const compareHash = (a, b) => {
-//   const A = Buffer.from(a, 'hex');
-//   const B = Buffer.from(b, 'hex');
-//   if (A.length !== B.length) return false;
-//   return crypto.timingSafeEqual(A, B);
-// };
+const compareHash = (a, b) => {
+  const A = Buffer.from(a, 'hex');
+  const B = Buffer.from(b, 'hex');
+  if (A.length !== B.length) return false;
+  return crypto.timingSafeEqual(A, B);
+};
 
-// // Redis keys
-// const otpKey = (email) => `email_otp:${email}`;
-// const cooldownKey = (email) => `email_otp_cd:${email}`;
-// const pendingKey = (email) => `email_otp_pending:${email}`;
+// Redis keys - fixed duplicate declarations
+export const emailOtpKey = (email) => `email_otp:${email}`;
+export const emailCooldownKey = (email) => `email_otp_cd:${email}`;
+export const emailPendingKey = (email) => `email_otp_pending:${email}`;
+export const emailVerifiedKey = (email) => `email_otp_verified:${email}`;
+export const emailAttemptsKey = (email) => `email_otp_attempts:${email}`;
 
-// // Set with TTL
-// const setWithTTL = async (key, ttlSeconds, value) => {
-//   if (typeof redisConfig.setEx === 'function') {
-//     return redisConfig.setEx(key, ttlSeconds, value);
-//   } else {
-//     return redisConfig.set(key, value, 'EX', ttlSeconds);
-//   }
-// };
+export const phoneOtpKey = (phone) => `phone_otp:${phone}`;
+export const phoneCooldownKey = (phone) => `phone_otp_cooldown:${phone}`;
+export const phonePendingKey = (phone) => `phone_pending_update:${phone}`;
+export const phoneVerifiedKey = (phone) => `phone_otp_verified:${phone}`;
+export const phoneAttemptsKey = (phone) => `phone_otp_attempts:${phone}`;
+
+// Set with TTL
+const setWithTTL = async (key, ttlSeconds, value) => {
+  if (typeof redisConfig.setEx === 'function') {
+    return redisConfig.setEx(key, ttlSeconds, value);
+  } else {
+    return redisConfig.set(key, value, 'EX', ttlSeconds);
+  }
+};
 
 // // -------- Services -------- //
 
-// // Request Email OTP
-// export const requestEmailOtp = async (email, username, context = {}) => {
-//   // cooldown check
-//   const cdTtl = await redisConfig.ttl(cooldownKey(email));
-//   if (cdTtl > 0) return { ok: false, waitSeconds: cdTtl };
+// Request Email OTP
+export const requestEmailOtp = async (email, username, context = {}, type) => {
+  try {
+    const cdTtl = await redisConfig.ttl(emailCooldownKey(email));
+    if (cdTtl > 0) return { ok: false, waitSeconds: cdTtl };
 
-//   // generate & hash OTP
-//   const otp = generateOtp();
-//   const hashed = hashOtp(otp);
+    const otp = generateOtp();
+    const hashed = hashOtp(otp);
 
-//   // store hashed otp with TTL
-//   await setWithTTL(otpKey(email), env.OTP_TTL_SECONDS, hashed);
+    await setWithTTL(emailOtpKey(email), env.OTP_TTL_SECONDS, hashed);
+    await setWithTTL(emailCooldownKey(email), env.OTP_COOLDOWN_SECONDS, '1');
 
-//   // set cooldown
-//   await setWithTTL(cooldownKey(email), env.OTP_COOLDOWN_SECONDS, '1');
+    if (Object.keys(context || {}).length > 0) {
+      await setWithTTL(
+        emailPendingKey(email),
+        env.OTP_TTL_SECONDS,
+        JSON.stringify(context),
+      );
+    }
 
-//   // store pending payload if provided
-//   if (Object.keys(context || {}).length > 0) {
-//     await setWithTTL(
-//       pendingKey(email),
-//       env.OTP_TTL_SECONDS,
-//       JSON.stringify(context),
-//     );
-//   }
+    // Instead of direct send, add a job to queue
+    await emailQueue.add('sendEmailOtp', { email, otp, username, type });
 
-//   // send email using your nodemailer template
-//   await sendEmailVerificationOtp(email, otp, username); // pass OTP here
+    return { ok: true };
+  } catch (error) {
+    console.error(`ERROR SENDING OTP to ${email}: ${error.message}`);
+    return { ok: false };
+  }
+};
 
-//   return { ok: true };
-// };
+export const verifyEmailOtp = async (email, otpRaw) => {
+  const verifiedKeyName = emailVerifiedKey(email);
+  const attemptsKeyName = emailAttemptsKey(email);
 
-// // Verify Email OTP
-// export const verifyEmailOtp = async (email, otpRaw) => {
-//   const storedHash = await redisConfig.get(otpKey(email));
-//   if (!storedHash) return { ok: false, reason: 'expired_or_not_requested' };
+  // 1. Check if this email has already been verified
+  const alreadyVerified = await redisConfig.get(verifiedKeyName);
+  if (alreadyVerified) {
+    return { ok: false, reason: 'already_verified' };
+  }
 
-//   const inputHash = hashOtp(otpRaw);
-//   const match = compareHash(storedHash, inputHash);
-//   if (!match) return { ok: false, reason: 'invalid_otp' };
+  // 2. Fetch OTP hash
+  const storedHash = await redisConfig.get(emailOtpKey(email));
+  if (!storedHash) {
+    return { ok: false, reason: 'expired_or_not_requested' };
+  }
 
-//   // read pending payload
-//   const pending = await redisConfig.get(pendingKey(email));
+  // 3. Anti-bruteforce check
+  const attempts = Number(await redisConfig.get(attemptsKeyName)) || 0;
+  if (attempts >= 3) {
+    return { ok: false, reason: 'too_many_attempts' };
+  }
 
-//   // cleanup after success
-//   await redisConfig.del(otpKey(email), cooldownKey(email), pendingKey(email));
+  // 4. Verify hash
+  const inputHash = hashOtp(otpRaw);
+  const match = compareHash(storedHash, inputHash);
 
-//   return { ok: true, pending: pending ? JSON.parse(pending) : null };
-// };
+  if (!match) {
+    // increment failed attempts
+    await redisConfig.incr(attemptsKeyName);
+    await redisConfig.expire(attemptsKeyName, 600); // reset attempts after 10 min
+    return { ok: false, reason: 'invalid_otp' };
+  }
 
-// // Resend OTP
-// export const resendEmailOtp = async (email,username, context = {}) => {
-//   return requestEmailOtp(email, username, context);
-// };
+  // 5. Read pending payload (optional)
+  const pending = await redisConfig.get(emailPendingKey(email));
+
+  // 6. Cleanup OTP & attempts
+  await redisConfig.del(
+    emailOtpKey(email),
+    emailCooldownKey(email),
+    emailPendingKey(email),
+    attemptsKeyName,
+  );
+
+  // 7. Mark verified
+  await redisConfig.setex(verifiedKeyName, env.OTP_TTL_SECONDS, 'true');
+
+  return { ok: true, pending: pending ? JSON.parse(pending) : null };
+};
+
+export const resendEmailOtp = async (email, username, context = {}) => {
+  return requestEmailOtp(email, username, context);
+};
 
 // Phone Number verification Otp Services
+export const requestPhoneOtp = async (
+  currentPhone,
+  username,
+  context,
+  type,
+) => {
+  const cooldownExists = await redisConfig.exists(
+    phoneCooldownKey(currentPhone),
+  );
+  if (cooldownExists) {
+    const ttl = await redisConfig.ttl(phoneCooldownKey(currentPhone));
+    return { ok: false, reason: 'cooldown', waitSeconds: ttl };
+  }
+
+  const otp = String(Math.floor(10000 + Math.random() * 90000));
+  const otpHash = hashOtp(otp);
+
+  // Save OTP and context for verification
+  await redisConfig.setex(phoneOtpKey(currentPhone), 300, otpHash);
+  await redisConfig.setex(
+    phonePendingKey(currentPhone),
+    600,
+    JSON.stringify(context),
+  );
+  await redisConfig.setex(phoneCooldownKey(currentPhone), 60, 'true');
+
+  const job = await smsQueue.add(
+    'sendPhoneOtp',
+    {
+      phoneNumber: currentPhone,
+      otp,
+      username,
+      type,
+    },
+    {
+      attempts: 3,
+      backoff: {
+        type: 'exponential',
+        delay: 1000,
+      },
+    },
+  );
+
+  return { ok: true, message: `OTP sent to ${currentPhone}` };
+};
+
+export const verifyPhoneOtp = async (phoneNumber, otpRaw) => {
+  const verifiedKeyName = phoneVerifiedKey(phoneNumber);
+  const attemptsKeyName = phoneAttemptsKey(phoneNumber);
+
+  const alreadyVerified = await redisConfig.get(verifiedKeyName);
+  if (alreadyVerified) return { ok: false, reason: 'already_verified' };
+
+  const storedHash = await redisConfig.get(phoneOtpKey(phoneNumber));
+  if (!storedHash) return { ok: false, reason: 'expired_or_not_requested' };
+
+  const attempts = Number(await redisConfig.get(attemptsKeyName)) || 0;
+  if (attempts >= 3) return { ok: false, reason: 'too_many_attempts' };
+
+  const inputHash = hashOtp(otpRaw);
+  const match = compareHash(storedHash, inputHash);
+
+  if (!match) {
+    await redisConfig.incr(attemptsKeyName);
+    await redisConfig.expire(attemptsKeyName, 600);
+    return { ok: false, reason: 'invalid_otp' };
+  }
+
+  const pending = await redisConfig.get(phonePendingKey(phoneNumber));
+  await redisConfig.del(
+    phoneOtpKey(phoneNumber),
+    phoneCooldownKey(phoneNumber),
+    phonePendingKey(phoneNumber),
+    attemptsKeyName,
+  );
+
+  await redisConfig.setex(verifiedKeyName, 300, 'true');
+
+  return { ok: true, pending: pending ? JSON.parse(pending) : null };
+};
 
 export const sendOtp = async (phoneNumber) => {
   try {
-    console.log(`🔔 Sending OTP to ${phoneNumber}...`);
-
     const verification = await client.verify.v2
       .services(env.TWILIO_VERIFY_SERVICE_SID)
       .verifications.create({
         to: phoneNumber,
         channel: 'sms',
       });
-    return { success: true };
+
+    return { success: true }; // Fixed: should return success: true when verification is created
   } catch (err) {
     console.error(`ERROR SENDING OTP to ${phoneNumber}: ${err.message}`);
-    throw new Error('Failed to send OTP, please try again later.');
+    return { success: false };
   }
 };
 

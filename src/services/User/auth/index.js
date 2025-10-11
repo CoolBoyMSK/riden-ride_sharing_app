@@ -31,14 +31,25 @@ import {
 } from '../../../dal/stripe.js';
 import { createAdminNotification } from '../../../dal/notification.js';
 import { createDeviceInfo } from '../../../dal/user/index.js';
-// import { otpQueue } from '../../../queues/otpQueue.js';
-import { verifyOtp, sendOtp } from '../../../utils/otpUtils.js';
 import {
   getPasskeyLoginOptions,
   verifyPasskeyLogin,
 } from '../../../utils/auth.js';
 import { extractDeviceInfo } from '../../../utils/deviceInfo.js';
 import env from '../../../config/envConfig.js';
+import {
+  requestEmailOtp,
+  verifyEmailOtp,
+  requestPhoneOtp,
+  verifyPhoneOtp,
+  emailOtpKey,
+  emailCooldownKey,
+  emailPendingKey,
+  phoneOtpKey,
+  phoneCooldownKey,
+  phonePendingKey,
+} from '../../../utils/otpUtils.js';
+import redisConfig from '../../../config/redisConfig.js';
 
 export const signupUser = async (
   users,
@@ -50,31 +61,34 @@ export const signupUser = async (
     user = await findUserById(users.id);
   }
 
-  console.log(user);
   const hashed = await hashPassword(password);
 
   if (users && users.roles.includes('driver')) {
-    let isEmail = await findUserByEmail(email);
-    console.log(isEmail);
-    if (isEmail) {
-      if (isEmail._id.toString() !== user.userId._id.toString()) {
-        resp.error = true;
-        resp.error_message = 'Email already in use';
-        return resp;
-      }
+    if (user.userId.email?.trim()) {
+      user = await updateUserById(
+        { _id: user.userId._id },
+        {
+          name,
+          phoneNumber,
+          password: hashed,
+          isPhoneVerified: true,
+          isEmailVerified: true,
+          isCompleted: true,
+        },
+      );
+    } else if (user.userId.phoneNumber?.trim()) {
+      user = await updateUserById(
+        { _id: user.userId._id },
+        {
+          email,
+          name,
+          password: hashed,
+          isPhoneVerified: true,
+          isEmailVerified: true,
+          isCompleted: true,
+        },
+      );
     }
-
-    user = await updateUserById(
-      { _id: user.userId._id },
-      {
-        email,
-        name,
-        password: hashed,
-        isPhoneVerified: true,
-        isEmailVerified: true,
-        isCompleted: true,
-      },
-    );
 
     let driverProfile = await findDriverByUserId(user._id);
     if (!driverProfile) {
@@ -288,13 +302,15 @@ export const loginUser = async (
       if (phoneNumber) {
         let user = await findUserByPhone(phoneNumber);
         if (user && user.isPhoneVerified) {
-          const payload = { id: user._id, roles: user.roles };
-          const success = await updateDriverByUserId(user._id, {
-            isActive: true,
-          });
-          if (!success) {
+          if (!password) {
             resp.error = true;
-            resp.error_message = 'Failed to activate driver';
+            resp.error_message = 'Password is required';
+            return resp;
+          }
+          const match = await comparePasswords(password, user.password);
+          if (!match) {
+            resp.error = true;
+            resp.error_message = 'Incorrect password';
             return resp;
           }
 
@@ -307,21 +323,17 @@ export const loginUser = async (
             return resp;
           }
 
-          const driverPayload = { status: success.status };
-          if (success.status === 'offline') driverPayload.status = 'online';
-
-          console.log(driverPayload);
+          const driver = await findDriverByUserId(user._id);
+          if (!user) {
+            resp.error = true;
+            resp.error_message = 'Driver Profile not found';
+            return resp;
+          }
 
           await updateDriverByUserId(user._id, {
-            driverPayload,
+            status: driver.status === 'offline' ? 'online' : driver.status,
+            isActive: true,
           });
-
-          // const match = await comparePasswords(password, user.password);
-          // if (!match) {
-          //   resp.error = true;
-          //   resp.error_message = 'Incorrect password';
-          //   return resp;
-          // }
 
           const deviceInfo = await extractDeviceInfo(headers);
           const device = {
@@ -337,81 +349,48 @@ export const loginUser = async (
           };
           await createDeviceInfo(device);
 
-          // For Testing
+          const payload = { id: user._id, roles: user.roles };
           resp.data = {
-            user: user,
+            user,
             accessToken: generateAccessToken(payload),
             refreshToken: generateRefreshToken(payload),
             deviceId: device.deviceId,
-            flow: 'Driver Phone Number login',
           };
-          // For Testing
-
           return resp;
-        } else {
-          if (!user) {
-            user = await createUser({
-              phoneNumber,
-              roles: ['driver'],
-              status: 'pending',
-              userDeviceToken,
-              userDeviceType,
-              // For Production
-              // isPhoneVerified: false,
-              // For Production
-
-              // For Testing
-              isPhoneVerified: true,
-              // For Testing
-            });
-            if (!user) throw new Error('Failed to create user');
-
-            const uniqueId = generateUniqueId(user.roles[0], user._id);
-            const driver = await createDriverProfile(user._id, uniqueId);
-            if (!driver) throw new Error('Failed to create driver profile');
-
-            const deviceInfo = await extractDeviceInfo(headers);
-            const device = {
-              userId: user._id,
-              deviceId,
-              deviceType: userDeviceType,
-              deviceModel,
-              deviceVendor,
-              os,
-              ...deviceInfo,
-              loginMethod: 'phone',
-              lastLoginAt: new Date(),
-            };
-            await createDeviceInfo(device);
-
-            // For Testing
-            const payload = { id: user._id, roles: user.roles };
-            resp.data = {
-              user: user,
-              accessToken: generateAccessToken(payload),
-              refreshToken: generateRefreshToken(payload),
-              flow: 'login',
-            };
+        }
+        if (user && !user.isPhoneVerified) {
+          const result = await requestPhoneOtp(user.phoneNumber, user.name);
+          if (!result.ok) {
+            resp.error = true;
+            resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
             return resp;
-            // For Testing
           }
 
-          // For Production
-          // const sent = await sendOtp(phoneNumber);
-          // if (!sent.success) {
-          //   resp.error = true;
-          //   resp.error_message = 'Failed to send otp';
-          //   return resp;
-          // }
-          // resp.data = { otpSent: true, flow: 'register' };
-          // For Production
-
-          user = await updateUserById(user._id, {
+          resp.data = {
+            phoneOtp: true,
+            message: `OTP has been sent to ${user.phoneNumber}`,
+            phoneNumber: user.phoneNumber,
+          };
+          return resp;
+        }
+        if (!user) {
+          user = await createUser({
+            phoneNumber,
+            roles: ['driver'],
             userDeviceType,
           });
           if (!user) {
             resp.error = true;
-            resp.error_message = 'Failed to update Device Type';
+            resp.error_message = 'Failed to create user';
+            return resp;
+          }
+
+          const uniqueId = generateUniqueId(user.roles[0], user._id);
+
+          const driver = await createDriverProfile(user._id, uniqueId);
+          if (!driver) {
+            resp.error = true;
+            resp.error_message = 'Failed to create driver profile';
             return resp;
           }
 
@@ -429,45 +408,57 @@ export const loginUser = async (
           };
           await createDeviceInfo(device);
 
-          // For Testing
-          const payload = { id: user._id, roles: user.roles };
-          resp.data = {
-            user: user,
-            accessToken: generateAccessToken(payload),
-            refreshToken: generateRefreshToken(payload),
-            flow: 'driver phone login',
-          };
-          // For Testing
+          const result = await requestPhoneOtp(user.phoneNumber, user.name);
+          if (!result.ok) {
+            resp.error = true;
+            resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
+            return resp;
+          }
 
+          resp.data = {
+            phoneOtp: true,
+            message: `OTP has been sent to ${user.phoneNumber}`,
+            phoneNumber: user.phoneNumber,
+          };
           return resp;
         }
       }
 
       if (email) {
         let user = await findUserByEmail(email);
-        if (user && user.isPhoneVerified) {
-          // For Production
-          // const sent = await sendOtp(phoneNumber);
-          // resp.data = { otpSent: true, flow: 'login' };
-          // For Production
-          const success = await updateDriverByUserId(user._id, {
+        if (user && user.isEmailVerified) {
+          if (!password) {
+            resp.error = true;
+            resp.error_message = 'Password is required';
+            return resp;
+          }
+          const match = await comparePasswords(password, user.password);
+          if (!match) {
+            resp.error = true;
+            resp.error_message = 'Incorrect password';
+            return resp;
+          }
+
+          user = await updateUserById(user._id, {
+            userDeviceType,
+          });
+          if (!user) {
+            resp.error = true;
+            resp.error_message = 'Failed to update Device Type';
+            return resp;
+          }
+
+          const driver = await findDriverByUserId(user._id);
+          if (!user) {
+            resp.error = true;
+            resp.error_message = 'Driver Profile not found';
+            return resp;
+          }
+
+          await updateDriverByUserId(user._id, {
+            status: driver.status === 'offline' ? 'online' : driver.status,
             isActive: true,
-            status: 'online',
           });
-          if (!success) {
-            resp.error = true;
-            resp.error_message = 'Failed to activate driver';
-            return resp;
-          }
-
-          user = await updateUserById(user._id, {
-            userDeviceType,
-          });
-          if (!user) {
-            resp.error = true;
-            resp.error_message = 'Failed to update Device Type';
-            return resp;
-          }
 
           const deviceInfo = await extractDeviceInfo(headers);
           const device = {
@@ -478,72 +469,53 @@ export const loginUser = async (
             deviceVendor,
             os,
             ...deviceInfo,
-            loginMethod: 'email',
+            loginMethod: 'phone',
             lastLoginAt: new Date(),
           };
           await createDeviceInfo(device);
 
-          // For Testing
           const payload = { id: user._id, roles: user.roles };
           resp.data = {
-            user: user,
+            user,
             accessToken: generateAccessToken(payload),
             refreshToken: generateRefreshToken(payload),
             deviceId: device.deviceId,
-            flow: 'login',
           };
-          // For Testing
-
           return resp;
-        } else {
-          if (!user) {
-            user = await createUser({
-              email,
-              roles: ['driver'],
-              status: 'pending',
-              userDeviceToken,
-              userDeviceType,
-              // For Production
-              // isPhoneVerified: false,
-              // For Production
-
-              // For Testing
-              isPhoneVerified: true,
-              // For Testing
-            });
-            const uniqueId = generateUniqueId(user.roles[0], user._id);
-
-            await createDriverProfile(user._id, uniqueId);
-
-            // For Testing
-            const payload = { id: user._id, roles: user.roles };
-            resp.data = {
-              user: user,
-              accessToken: generateAccessToken(payload),
-              refreshToken: generateRefreshToken(payload),
-              deviceId: device.deviceId,
-              flow: 'driver email login',
-            };
+        }
+        if (user && !user.isEmailVerified) {
+          const result = await requestEmailOtp(user.email, user.name);
+          if (!result.ok) {
+            resp.error = true;
+            resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
             return resp;
-            // For Testing
           }
 
-          // For Production
-          // const sent = await sendOtp(phoneNumber);
-          // if (!sent.success) {
-          //   resp.error = true;
-          //   resp.error_message = 'Failed to send otp';
-          //   return resp;
-          // }
-          // resp.data = { otpSent: true, flow: 'register' };
-          // For Production
-
-          user = await updateUserById(user._id, {
+          resp.data = {
+            emailOtp: true,
+            message: `OTP has been sent to ${user.email}`,
+            email: user.email,
+          };
+          return resp;
+        }
+        if (!user) {
+          user = await createUser({
+            email,
+            roles: ['driver'],
             userDeviceType,
           });
           if (!user) {
             resp.error = true;
-            resp.error_message = 'Failed to update Device Type';
+            resp.error_message = 'Failed to create user';
+            return resp;
+          }
+
+          const uniqueId = generateUniqueId(user.roles[0], user._id);
+
+          const driver = await createDriverProfile(user._id, uniqueId);
+          if (!driver) {
+            resp.error = true;
+            resp.error_message = 'Failed to create driver profile';
             return resp;
           }
 
@@ -556,22 +528,23 @@ export const loginUser = async (
             deviceVendor,
             os,
             ...deviceInfo,
-            loginMethod: 'email',
+            loginMethod: 'phone',
             lastLoginAt: new Date(),
           };
           await createDeviceInfo(device);
 
-          // For Testing
-          const payload = { id: user._id, roles: user.roles };
-          resp.data = {
-            user: user,
-            accessToken: generateAccessToken(payload),
-            refreshToken: generateRefreshToken(payload),
-            deviceId: device.deviceId,
-            flow: 'login',
-          };
-          // For Testing
+          const result = await requestEmailOtp(user.email, user.name);
+          if (!result.ok) {
+            resp.error = true;
+            resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
+            return resp;
+          }
 
+          resp.data = {
+            emailOtp: true,
+            message: `OTP has been sent to ${user.email}`,
+            email: user.email,
+          };
           return resp;
         }
       }
@@ -580,45 +553,115 @@ export const loginUser = async (
     resp.error = true;
     resp.error_message = 'Invalid role specified';
     return resp;
-  } catch (err) {
-    console.error(`API ERROR: ${err}`);
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = err.message || 'Something went wrong';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
 };
 
 export const otpVerification = async (
-  { role, email, phoneNumber, otp, type },
+  { phoneOtp, phoneNumber, emailOtp, email, otp, type },
   resp,
 ) => {
   try {
     let user;
 
-    // --- Identify user ---
-    if (phoneNumber) {
+    if (phoneOtp) {
+      if (!phoneNumber || !otp) {
+        resp.error = true;
+        resp.error_message = 'Phone number and OTP are required';
+        return resp;
+      }
+
+      const result = await verifyPhoneOtp(phoneNumber, otp);
+      if (!result.ok) {
+        resp.error = true;
+        switch (result.reason) {
+          case 'expired_or_not_requested':
+            resp.error_message = 'OTP expired or not requested';
+            break;
+          case 'invalid_otp':
+            resp.error_message = 'Invalid OTP';
+            break;
+          case 'too_many_attempts':
+            resp.error_message = 'Too many failed attempts, try later';
+            break;
+          default:
+            resp.error_message = 'Verification failed';
+        }
+        return resp;
+      }
+
       user = await findUserByPhone(phoneNumber);
-    } else if (email) {
+      user = await updateUserById(user._id, {
+        isPhoneVerified: true,
+      });
+      if (!user) {
+        resp.error = true;
+        resp.error_message = 'User not found';
+        return resp;
+      }
+
+      await redisConfig.del(
+        phoneOtpKey(phoneNumber),
+        phoneCooldownKey(phoneNumber),
+        phonePendingKey(phoneNumber),
+      );
+
+      const payload = { id: user._id, roles: user.roles };
+      resp.data = {
+        user: user,
+        accessToken: generateAccessToken(payload),
+        refreshToken: generateRefreshToken(payload),
+      };
+      return resp;
+    }
+
+    if (emailOtp) {
+      if (!email || !otp) {
+        resp.error = true;
+        resp.error_message = 'Email and OTP are required';
+        return resp;
+      }
+
+      const result = await verifyEmailOtp(email, otp);
+      if (!result.ok) {
+        resp.error = true;
+        resp.error_message =
+          result.reason === 'expired_or_not_requested'
+            ? 'OTP expired or not requested'
+            : 'Invalid OTP';
+        return resp;
+      }
+
       user = await findUserByEmail(email);
-    }
+      user = await updateUserById(user._id, {
+        isEmailVerified: true,
+      });
+      if (!user) {
+        resp.error = true;
+        resp.error_message = 'User not found';
+        return resp;
+      }
 
-    if (!user) {
-      resp.error = true;
-      resp.error_message = 'User not found';
+      // Final cleanup
+      await redisConfig.del(
+        emailOtpKey(email),
+        emailCooldownKey(email),
+        emailPendingKey(email),
+      );
+
+      const payload = { id: user._id, roles: user.roles };
+      resp.data = {
+        user: user,
+        accessToken: generateAccessToken(payload),
+        refreshToken: generateRefreshToken(payload),
+      };
       return resp;
     }
 
-    // --- Verify OTP ---
-    const isValid = await verifyOtp(user.phoneNumber, otp);
-    if (!isValid) {
-      resp.error = true;
-      resp.error_message = 'Invalid or expired OTP';
-      return resp;
-    }
-
-    const userId = user._id.toString();
-
-    // --- Handle OTP by type ---
     if (type === 'password-reset') {
       if (!user.roles.includes('passenger')) {
         resp.error = true;
@@ -633,62 +676,13 @@ export const otpVerification = async (
       return resp;
     }
 
-    if (role === 'driver') {
-      if (!user.isPhoneVerified) {
-        user = await updateUserById(userId, {
-          isPhoneVerified: true,
-          // status: 'active',
-        });
-
-        let driverProfile = await findDriverByUserId(userId);
-        if (!driverProfile) {
-          driverProfile = await createPassengerProfile(userId);
-        }
-
-        const payload = { id: userId, roles: user.roles };
-        resp.data = {
-          user: user,
-          accessToken: generateAccessToken(payload),
-          refreshToken: generateRefreshToken(payload),
-          flow: 'register',
-        };
-        return resp;
-      }
-
-      // already verified → login flow
-      const payload = { id: userId, roles: user.roles };
-      resp.data = {
-        user: user,
-        accessToken: generateAccessToken(payload),
-        refreshToken: generateRefreshToken(payload),
-        flow: 'login',
-      };
-      return resp;
-    }
-
-    if (role === 'passenger') {
-      // verify phone if not already verified
-      if (!user.isPhoneVerified) {
-        await updateUserById({ _id: userId }, { isPhoneVerified: true });
-      }
-
-      const payload = { id: userId, roles: user.roles };
-      resp.data = {
-        user: user,
-        accessToken: generateAccessToken(payload),
-        refreshToken: generateRefreshToken(payload),
-        flow: 'login',
-      };
-      return resp;
-    }
-
     resp.error = true;
     resp.error_message = 'Invalid role or type specified';
     return resp;
-  } catch (err) {
-    console.error(`API ERROR: ${err}`);
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = err.message || 'Something went wrong';
+    resp.error_message = error.message || 'Something went wrong';
     return resp;
   }
 };

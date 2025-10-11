@@ -82,7 +82,6 @@ const userSchema = new mongoose.Schema(
     roles: {
       type: [String],
       enum: USER_TYPES,
-      default: ['passenger'],
     },
     gender: {
       type: String,
