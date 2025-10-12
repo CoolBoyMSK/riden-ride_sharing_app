@@ -46,7 +46,7 @@ export const otpVerificationController = (req, res) =>
     {
       handler: otpVerification,
       validationFn: null, // you may add validateOtp if you create one
-      handlerParams: [req.body],
+      handlerParams: [req.body, req],
       successMessage: 'OTP verified successfully',
     },
     req,
@@ -69,7 +69,7 @@ export const resetPasswordController = (req, res) =>
   handleResponse(
     {
       handler: resetUserPassword,
-      validationFn: validateResetPassword,
+      // validationFn: validateResetPassword,
       handlerParams: [req.body],
       successMessage: 'Password has been reset',
     },

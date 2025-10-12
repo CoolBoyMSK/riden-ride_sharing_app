@@ -77,7 +77,7 @@ export const requestEmailOtp = async (email, username, context = {}, type) => {
   }
 };
 
-export const verifyEmailOtp = async (email, otpRaw) => {
+export const verifyEmailOtp = async (email, otpRaw, expectedPurpose = null) => {
   const verifiedKeyName = emailVerifiedKey(email);
   const attemptsKeyName = emailAttemptsKey(email);
 
@@ -104,16 +104,31 @@ export const verifyEmailOtp = async (email, otpRaw) => {
   const match = compareHash(storedHash, inputHash);
 
   if (!match) {
-    // increment failed attempts
     await redisConfig.incr(attemptsKeyName);
-    await redisConfig.expire(attemptsKeyName, 600); // reset attempts after 10 min
+    await redisConfig.expire(attemptsKeyName, 600);
     return { ok: false, reason: 'invalid_otp' };
   }
 
-  // 5. Read pending payload (optional)
+  // 5. Read pending payload
   const pending = await redisConfig.get(emailPendingKey(email));
+  let pendingData = pending ? JSON.parse(pending) : null;
 
-  // 6. Cleanup OTP & attempts
+  // 6. Purpose validation — only when needed
+  if (expectedPurpose) {
+    const storedPurpose = pendingData?.purpose || null;
+
+    if (!storedPurpose) {
+      // Optional: log missing purpose for debugging
+      console.warn(`⚠️ OTP verified for ${email}, but stored purpose missing.`);
+      return { ok: false, reason: 'purpose_missing' };
+    }
+
+    if (storedPurpose !== expectedPurpose) {
+      return { ok: false, reason: 'purpose_mismatch' };
+    }
+  }
+
+  // 7. Cleanup OTP & attempts
   await redisConfig.del(
     emailOtpKey(email),
     emailCooldownKey(email),
@@ -121,10 +136,10 @@ export const verifyEmailOtp = async (email, otpRaw) => {
     attemptsKeyName,
   );
 
-  // 7. Mark verified
+  // 8. Mark verified
   await redisConfig.setex(verifiedKeyName, env.OTP_TTL_SECONDS, 'true');
 
-  return { ok: true, pending: pending ? JSON.parse(pending) : null };
+  return { ok: true, pending: pendingData };
 };
 
 export const resendEmailOtp = async (email, username, context = {}) => {
@@ -158,7 +173,7 @@ export const requestPhoneOtp = async (
   );
   await redisConfig.setex(phoneCooldownKey(currentPhone), 60, 'true');
 
-  const job = await smsQueue.add(
+  await smsQueue.add(
     'sendPhoneOtp',
     {
       phoneNumber: currentPhone,

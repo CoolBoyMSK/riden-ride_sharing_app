@@ -50,6 +50,7 @@ import {
   phonePendingKey,
 } from '../../../utils/otpUtils.js';
 import redisConfig from '../../../config/redisConfig.js';
+import crypto from 'crypto';
 
 export const signupUser = async (
   users,
@@ -144,9 +145,8 @@ export const signupUser = async (
       email,
       phoneNumber,
       gender,
+      roles: ['passenger'],
       password: hashed,
-      isPhoneVerified: true,
-      isEmailVerified: true,
       isCompleted: true,
     });
 
@@ -220,35 +220,49 @@ export const loginUser = async (
 
       if (email) {
         user = await findUserByEmail(email);
+        const match = await comparePasswords(password, user.password);
+        if (!match) {
+          resp.error = true;
+          resp.error_message = 'Invalid password';
+          return resp;
+        }
 
         if (user && !user.isEmailVerified) {
-          // const code = 12345;
-          // await sendEmailVerificationOtp(email, code, user.name);
-        }
-      } else if (phoneNumber) {
-        user = await findUserByPhone(phoneNumber);
-
-        if (user && !user.isPhoneVerified) {
-          const sent = await sendOtp(phoneNumber);
-          if (!sent.success) {
+          const result = await requestEmailOtp(user.email, user.name);
+          if (!result.ok) {
             resp.error = true;
-            resp.error_message = 'Failed to send otp';
+            resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
             return resp;
           }
-          resp.data = { otpSent: true, flow: 'verify-phone' };
-          return resp;
         }
       }
 
-      if (!user) {
+      if (phoneNumber) {
+        user = await findUserByPhone(phoneNumber);
+        const match = await comparePasswords(password, user.password);
+        if (!match) {
+          resp.error = true;
+          resp.error_message = 'Invalid password';
+          return resp;
+        }
+
+        if (user && !user.isPhoneVerified) {
+          const result = await requestPhoneOtp(user.phoneNumber, user.name);
+          if (!result.ok) {
+            resp.error = true;
+            resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
+            return resp;
+          }
+        }
+      }
+
+      if (!password) {
         resp.error = true;
-        resp.error_message = 'Invalid credentials';
+        resp.error_message = 'Password is required';
         return resp;
       }
 
-      // Check password
-      const match = await comparePasswords(password, user.password);
-      if (!match) {
+      if (!user) {
         resp.error = true;
         resp.error_message = 'Invalid credentials';
         return resp;
@@ -262,31 +276,44 @@ export const loginUser = async (
         passenger = await createPassengerProfile(userId);
       }
 
-      const success = await updatePassenger({ userId }, { isActive: true });
-      if (!success) {
-        resp.error = true;
-        resp.error_message = 'Failed to activate passenger';
-        return resp;
-      }
-
-      user = await updateUserById(user._id, {
-        userDeviceToken,
-        userDeviceType,
-      });
-      if (!user) {
-        resp.error = true;
-        resp.error_message = 'Failed to update Device Token and Type';
-        return resp;
-      }
-
       // ✅ If phone already verified → issue tokens
-      const payload = { id: userId, roles: user.roles };
-      resp.data = {
-        user: user,
-        accessToken: generateAccessToken(payload),
-        refreshToken: generateRefreshToken(payload),
-        flow: 'login',
-      };
+      if (email && !user.isEmailVerified) {
+        resp.data = {
+          emailOtp: true,
+          message: `OTP has been sent to ${user.email}`,
+          email: user.email,
+        };
+      } else if (phoneNumber && !user.isPhoneVerified) {
+        resp.data = {
+          phoneOtp: true,
+          message: `OTP has been sent to ${user.phoneNumber}`,
+          phoneNumber: user.phoneNumber,
+        };
+      } else {
+        const passenger = await updatePassenger({ userId }, { isActive: true });
+        if (!passenger) {
+          resp.error = true;
+          resp.error_message = 'Failed to activate passenger';
+          return resp;
+        }
+
+        user = await updateUserById(user._id, {
+          userDeviceType,
+        });
+        if (!user) {
+          resp.error = true;
+          resp.error_message = 'Failed to update Device Type';
+          return resp;
+        }
+
+        const payload = { id: userId, roles: user.roles };
+        resp.data = {
+          user: user,
+          accessToken: generateAccessToken(payload),
+          refreshToken: generateRefreshToken(payload),
+          flow: 'login',
+        };
+      }
       return resp;
     }
 
@@ -301,64 +328,7 @@ export const loginUser = async (
 
       if (phoneNumber) {
         let user = await findUserByPhone(phoneNumber);
-        if (user && user.isPhoneVerified) {
-          if (!password) {
-            resp.error = true;
-            resp.error_message = 'Password is required';
-            return resp;
-          }
-          const match = await comparePasswords(password, user.password);
-          if (!match) {
-            resp.error = true;
-            resp.error_message = 'Incorrect password';
-            return resp;
-          }
-
-          user = await updateUserById(user._id, {
-            userDeviceType,
-          });
-          if (!user) {
-            resp.error = true;
-            resp.error_message = 'Failed to update Device Type';
-            return resp;
-          }
-
-          const driver = await findDriverByUserId(user._id);
-          if (!user) {
-            resp.error = true;
-            resp.error_message = 'Driver Profile not found';
-            return resp;
-          }
-
-          await updateDriverByUserId(user._id, {
-            status: driver.status === 'offline' ? 'online' : driver.status,
-            isActive: true,
-          });
-
-          const deviceInfo = await extractDeviceInfo(headers);
-          const device = {
-            userId: user._id,
-            deviceId,
-            deviceType: userDeviceType,
-            deviceModel,
-            deviceVendor,
-            os,
-            ...deviceInfo,
-            loginMethod: 'phone',
-            lastLoginAt: new Date(),
-          };
-          await createDeviceInfo(device);
-
-          const payload = { id: user._id, roles: user.roles };
-          resp.data = {
-            user,
-            accessToken: generateAccessToken(payload),
-            refreshToken: generateRefreshToken(payload),
-            deviceId: device.deviceId,
-          };
-          return resp;
-        }
-        if (user && !user.isPhoneVerified) {
+        if (user) {
           const result = await requestPhoneOtp(user.phoneNumber, user.name);
           if (!result.ok) {
             resp.error = true;
@@ -426,64 +396,7 @@ export const loginUser = async (
 
       if (email) {
         let user = await findUserByEmail(email);
-        if (user && user.isEmailVerified) {
-          if (!password) {
-            resp.error = true;
-            resp.error_message = 'Password is required';
-            return resp;
-          }
-          const match = await comparePasswords(password, user.password);
-          if (!match) {
-            resp.error = true;
-            resp.error_message = 'Incorrect password';
-            return resp;
-          }
-
-          user = await updateUserById(user._id, {
-            userDeviceType,
-          });
-          if (!user) {
-            resp.error = true;
-            resp.error_message = 'Failed to update Device Type';
-            return resp;
-          }
-
-          const driver = await findDriverByUserId(user._id);
-          if (!user) {
-            resp.error = true;
-            resp.error_message = 'Driver Profile not found';
-            return resp;
-          }
-
-          await updateDriverByUserId(user._id, {
-            status: driver.status === 'offline' ? 'online' : driver.status,
-            isActive: true,
-          });
-
-          const deviceInfo = await extractDeviceInfo(headers);
-          const device = {
-            userId: user._id,
-            deviceId,
-            deviceType: userDeviceType,
-            deviceModel,
-            deviceVendor,
-            os,
-            ...deviceInfo,
-            loginMethod: 'phone',
-            lastLoginAt: new Date(),
-          };
-          await createDeviceInfo(device);
-
-          const payload = { id: user._id, roles: user.roles };
-          resp.data = {
-            user,
-            accessToken: generateAccessToken(payload),
-            refreshToken: generateRefreshToken(payload),
-            deviceId: device.deviceId,
-          };
-          return resp;
-        }
-        if (user && !user.isEmailVerified) {
+        if (user) {
           const result = await requestEmailOtp(user.email, user.name);
           if (!result.ok) {
             resp.error = true;
@@ -562,12 +475,25 @@ export const loginUser = async (
 };
 
 export const otpVerification = async (
-  { phoneOtp, phoneNumber, emailOtp, email, otp, type },
+  {
+    phoneOtp,
+    emailOtp,
+    forgotPasswordPhoneOtp,
+    forgotPasswordEmailOtp,
+    phoneNumber,
+    email,
+    otp,
+    userDeviceType,
+    deviceId,
+    deviceModel,
+    deviceVendor,
+    os,
+  },
+  headers,
   resp,
 ) => {
   try {
     let user;
-
     if (phoneOtp) {
       if (!phoneNumber || !otp) {
         resp.error = true;
@@ -595,12 +521,22 @@ export const otpVerification = async (
       }
 
       user = await findUserByPhone(phoneNumber);
-      user = await updateUserById(user._id, {
-        isPhoneVerified: true,
-      });
       if (!user) {
         resp.error = true;
         resp.error_message = 'User not found';
+        return resp;
+      } else if (!user.isPhoneVerified) {
+        user = await updateUserById(user._id, {
+          isPhoneVerified: true,
+        });
+      }
+
+      user = await updateUserById(user._id, {
+        userDeviceType,
+      });
+      if (!user) {
+        resp.error = true;
+        resp.error_message = 'Failed to update Device Type';
         return resp;
       }
 
@@ -610,6 +546,46 @@ export const otpVerification = async (
         phonePendingKey(phoneNumber),
       );
 
+      if (user.roles.includes('driver')) {
+        const driver = await updateDriverByUserId(user._id, {
+          status: driver.status === 'offline' ? 'online' : driver.status,
+          isActive: true,
+        });
+        if (!driver) {
+          resp.error = true;
+          resp.error_message = 'Failed to activate driver';
+          return resp;
+        }
+      } else if (user.roles.includes('passenger')) {
+        const passenger = await updatePassenger(
+          { userId: user._id },
+          { isActive: true },
+        );
+        if (!passenger) {
+          resp.error = true;
+          resp.error_message = 'Failed to activate passenger';
+          return resp;
+        }
+      } else {
+        resp.error = true;
+        resp.error_message = 'Invalid user role';
+        return resp;
+      }
+
+      const deviceInfo = await extractDeviceInfo(headers);
+      const device = {
+        userId: user._id,
+        deviceId,
+        deviceType: userDeviceType,
+        deviceModel,
+        deviceVendor,
+        os,
+        ...deviceInfo,
+        loginMethod: 'phone',
+        lastLoginAt: new Date(),
+      };
+      await createDeviceInfo(device);
+
       const payload = { id: user._id, roles: user.roles };
       resp.data = {
         user: user,
@@ -617,9 +593,7 @@ export const otpVerification = async (
         refreshToken: generateRefreshToken(payload),
       };
       return resp;
-    }
-
-    if (emailOtp) {
+    } else if (emailOtp) {
       if (!email || !otp) {
         resp.error = true;
         resp.error_message = 'Email and OTP are required';
@@ -637,12 +611,22 @@ export const otpVerification = async (
       }
 
       user = await findUserByEmail(email);
-      user = await updateUserById(user._id, {
-        isEmailVerified: true,
-      });
       if (!user) {
         resp.error = true;
         resp.error_message = 'User not found';
+        return resp;
+      } else if (!user.isPhoneVerified) {
+        user = await updateUserById(user._id, {
+          isEmailVerified: true,
+        });
+      }
+
+      user = await updateUserById(user._id, {
+        userDeviceType,
+      });
+      if (!user) {
+        resp.error = true;
+        resp.error_message = 'Failed to update Device Type';
         return resp;
       }
 
@@ -653,6 +637,46 @@ export const otpVerification = async (
         emailPendingKey(email),
       );
 
+      if (user.roles.includes('driver')) {
+        const driver = await updateDriverByUserId(user._id, {
+          status: driver.status === 'offline' ? 'online' : driver.status,
+          isActive: true,
+        });
+        if (!driver) {
+          resp.error = true;
+          resp.error_message = 'Failed to activate driver';
+          return resp;
+        }
+      } else if (user.roles.includes('passenger')) {
+        const passenger = await updatePassenger(
+          { userId: user._id },
+          { isActive: true },
+        );
+        if (!passenger) {
+          resp.error = true;
+          resp.error_message = 'Failed to activate passenger';
+          return resp;
+        }
+      } else {
+        resp.error = true;
+        resp.error_message = 'Invalid user role';
+        return resp;
+      }
+
+      const deviceInfo = await extractDeviceInfo(headers);
+      const device = {
+        userId: user._id,
+        deviceId,
+        deviceType: userDeviceType,
+        deviceModel,
+        deviceVendor,
+        os,
+        ...deviceInfo,
+        loginMethod: 'email',
+        lastLoginAt: new Date(),
+      };
+      await createDeviceInfo(device);
+
       const payload = { id: user._id, roles: user.roles };
       resp.data = {
         user: user,
@@ -660,25 +684,192 @@ export const otpVerification = async (
         refreshToken: generateRefreshToken(payload),
       };
       return resp;
-    }
-
-    if (type === 'password-reset') {
-      if (!user.roles.includes('passenger')) {
+    } else if (forgotPasswordPhoneOtp) {
+      if (!phoneNumber || !otp) {
         resp.error = true;
-        resp.error_message = 'Only passengers can reset password';
+        resp.error_message = 'Phone number and OTP are required';
         return resp;
       }
 
-      // mark flag for reset flow
-      await updateUserById(userId, { canResetPassword: true });
+      const result = await verifyPhoneOtp(phoneNumber, otp);
+      if (!result.ok) {
+        resp.error = true;
+        switch (result.reason) {
+          case 'expired_or_not_requested':
+            resp.error_message = 'OTP expired or not requested';
+            break;
+          case 'invalid_otp':
+            resp.error_message = 'Invalid OTP';
+            break;
+          case 'too_many_attempts':
+            resp.error_message = 'Too many failed attempts, try later';
+            break;
+          default:
+            resp.error_message = 'Verification failed';
+        }
+        return resp;
+      }
 
-      resp.data = { otpVerified: true, flow: 'password-reset' };
+      user = await findUserByPhone(phoneNumber);
+      if (!user) {
+        resp.error = true;
+        resp.error_message = 'User not found';
+        return resp;
+      }
+
+      await redisConfig.del(
+        phoneOtpKey(phoneNumber),
+        phoneCooldownKey(phoneNumber),
+        phonePendingKey(phoneNumber),
+      );
+
+      try {
+        const resetSessionKey = `password_reset_session:${user._id}`;
+
+        const existingSession = await redisConfig.get(resetSessionKey);
+        if (existingSession) {
+          const parsed = JSON.parse(existingSession);
+          const expired =
+            !parsed.createdAt || Date.now() - parsed.createdAt > 10 * 60 * 1000;
+
+          if (!expired) {
+            // ⏱ Get remaining expiry time (in seconds)
+            const ttlSeconds = await redisConfig.ttl(resetSessionKey);
+
+            let remainingMsg = '';
+            if (ttlSeconds > 0) {
+              const minutes = Math.floor(ttlSeconds / 60);
+              const seconds = ttlSeconds % 60;
+              remainingMsg = `Please wait ${minutes} minute${minutes !== 1 ? 's' : ''} and ${seconds} second${seconds !== 1 ? 's' : ''} before trying again.`;
+            }
+
+            resp.error = true;
+            resp.error_message = `A password reset session already exists. ${remainingMsg || 'Please wait until it expires or use the existing one.'}`;
+            return resp;
+          } else {
+            await redisConfig.del(resetSessionKey);
+          }
+        }
+
+        const resetSessionToken = crypto.randomBytes(32).toString('hex');
+
+        await redisConfig.set(
+          resetSessionKey,
+          JSON.stringify({
+            token: resetSessionToken,
+            purpose: 'password_reset',
+            createdAt: Date.now(),
+            ip: headers?.ip || null, // optional: attach req.ip for trace
+          }),
+          'EX',
+          10 * 60,
+        );
+
+        resp.data = {
+          success: true,
+          message:
+            'OTP verified. You can now reset your password. The session will expire in 10 minutes',
+          resetSessionToken,
+        };
+      } catch (error) {
+        console.error(`REDIS ERROR: ${error}`);
+        resp.error = true;
+        resp.error_message = error.message || 'Something went wrong';
+        return resp;
+      }
+
+      return resp;
+    } else if (forgotPasswordEmailOtp) {
+      if (!email || !otp) {
+        resp.error = true;
+        resp.error_message = 'Email and OTP are required';
+        return resp;
+      }
+
+      const result = await verifyEmailOtp(email, otp, 'password_reset');
+      if (!result.ok) {
+        resp.error = true;
+        resp.error_message =
+          result.reason === 'expired_or_not_requested'
+            ? 'OTP expired or not requested'
+            : 'Invalid OTP';
+        return resp;
+      }
+
+      user = await findUserByEmail(email);
+      if (!user) {
+        resp.error = true;
+        resp.error_message = 'User not found';
+        return resp;
+      }
+
+      await redisConfig.del(
+        emailOtpKey(email),
+        emailCooldownKey(email),
+        emailPendingKey(email),
+      );
+
+      try {
+        const resetSessionKey = `password_reset_session:${user._id}`;
+
+        const existingSession = await redisConfig.get(resetSessionKey);
+        if (existingSession) {
+          const parsed = JSON.parse(existingSession);
+          const expired =
+            !parsed.createdAt || Date.now() - parsed.createdAt > 10 * 60 * 1000;
+
+          if (!expired) {
+            // ⏱ Get remaining expiry time (in seconds)
+            const ttlSeconds = await redisConfig.ttl(resetSessionKey);
+
+            let remainingMsg = '';
+            if (ttlSeconds > 0) {
+              const minutes = Math.floor(ttlSeconds / 60);
+              const seconds = ttlSeconds % 60;
+              remainingMsg = `Please wait ${minutes} minute${minutes !== 1 ? 's' : ''} and ${seconds} second${seconds !== 1 ? 's' : ''} before trying again.`;
+            }
+
+            resp.error = true;
+            resp.error_message = `A password reset session already exists. ${remainingMsg || 'Please wait until it expires or use the existing one.'}`;
+            return resp;
+          } else {
+            await redisConfig.del(resetSessionKey);
+          }
+        }
+
+        const resetSessionToken = crypto.randomBytes(32).toString('hex');
+
+        await redisConfig.set(
+          resetSessionKey,
+          JSON.stringify({
+            token: resetSessionToken,
+            purpose: 'password_reset',
+            createdAt: Date.now(),
+            ip: headers?.ip || null, // optional: attach req.ip for trace
+          }),
+          'EX',
+          10 * 60,
+        );
+
+        resp.data = {
+          success: true,
+          message:
+            'OTP verified. You can now reset your password. The session will expire in 10 minutes',
+          resetSessionToken,
+        };
+      } catch (error) {
+        console.error(`REDIS ERROR: ${error}`);
+        resp.error = true;
+        resp.error_message = error.message || 'Something went wrong';
+        return resp;
+      }
+
+      return resp;
+    } else {
+      resp.error = true;
+      resp.error_message = 'Invalid OTP Type';
       return resp;
     }
-
-    resp.error = true;
-    resp.error_message = 'Invalid role or type specified';
-    return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
@@ -687,38 +878,69 @@ export const otpVerification = async (
   }
 };
 
-export const forgotPassword = async ({ phoneNumber }, resp) => {
+export const forgotPassword = async ({ phoneNumber, email }, resp) => {
   try {
-    const user = await findUserByPhone(phoneNumber);
+    if (email) {
+      const user = await findUserByEmail(email);
+      if (!user) {
+        resp.error = true;
+        resp.error_message = 'No user found with that phone number';
+        return resp;
+      }
 
-    if (!user) {
+      if (!user.isEmailVerified) {
+        resp.error = true;
+        resp.error_message = 'Email is not verified';
+        return resp;
+      }
+
+      const result = await requestEmailOtp(user.email, user.name, {
+        purpose: 'password_reset',
+      });
+      if (!result.ok) {
+        resp.error = true;
+        resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
+        return resp;
+      }
+
+      resp.data = {
+        forgotPasswordEmailOtp: true,
+        message: `OTP has been sent to ${user.email}`,
+        email: user.email,
+      };
+      return resp;
+    } else if (phoneNumber) {
+      const user = await findUserByPhone(phoneNumber);
+      if (!user) {
+        resp.error = true;
+        resp.error_message = 'No user found with that phone number';
+        return resp;
+      }
+
+      if (!user.isPhoneVerified) {
+        resp.error = true;
+        resp.error_message = 'Phone number is not verified';
+        return resp;
+      }
+
+      const result = await requestPhoneOtp(user.phoneNumber, user.name);
+      if (!result.ok) {
+        resp.error = true;
+        resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
+        return resp;
+      }
+
+      resp.data = {
+        forgotPasswordPhoneOtp: true,
+        message: `OTP has been sent to ${user.phoneNumber}`,
+        phoneNumber: user.phoneNumber,
+      };
+      return resp;
+    } else {
       resp.error = true;
-      resp.error_message = 'No user found with that phone number';
+      resp.error_message = 'Invalid method';
       return resp;
     }
-
-    if (!user.roles.includes('passenger')) {
-      resp.error = true;
-      resp.error_message = 'Only passengers can reset password';
-      return resp;
-    }
-
-    if (!user.isPhoneVerified) {
-      resp.error = true;
-      resp.error_message = 'Phone number is not verified';
-      return resp;
-    }
-
-    // Send OTP for password rese
-    const sent = await sendOtp(phoneNumber);
-    if (!sent.success) {
-      resp.error = true;
-      resp.error_message = 'Failed to send otp';
-      return resp;
-    }
-
-    resp.data = { otpSent: true };
-    return resp;
   } catch (err) {
     console.error(`API ERROR: ${err}`);
     resp.error = true;
@@ -727,35 +949,98 @@ export const forgotPassword = async ({ phoneNumber }, resp) => {
   }
 };
 
-export const resetUserPassword = async ({ newPassword, phoneNumber }, resp) => {
+export const resetUserPassword = async (
+  { newPassword, email, phoneNumber, resetSessionToken },
+  resp,
+) => {
   try {
-    const user = await findUserByPhone(phoneNumber);
-    if (!user) {
+    let user;
+    if (email) {
+      if (!resetSessionToken || !newPassword) {
+        resp.error = true;
+        resp.error_message = 'session token, and new password are required';
+        return resp;
+      }
+
+      user = await findUserByEmail(email);
+      if (!user) {
+        resp.error = true;
+        resp.error_message = 'No user found for that email';
+        return resp;
+      }
+    } else if (phoneNumber) {
+      if (!resetSessionToken || !newPassword) {
+        resp.error = true;
+        resp.error_message = 'session token, and new password are required';
+        return resp;
+      }
+
+      user = await findUserByPhone(phoneNumber);
+      if (!user) {
+        resp.error = true;
+        resp.error_message = 'No user found for that phone number';
+        return resp;
+      }
+    } else {
       resp.error = true;
-      resp.error_message = 'No user found for that phone number';
+      resp.error_message = 'No user found';
       return resp;
     }
 
-    if (!user.roles.includes('passenger')) {
+    const resetSessionKey = `password_reset_session:${user._id}`;
+
+    // 🧠 Fetch session data from Redis
+    const sessionData = await redisConfig.get(resetSessionKey);
+    if (!sessionData) {
       resp.error = true;
-      resp.error_message = 'Only passengers can reset password';
+      resp.error_message = 'Password reset session expired or not found';
       return resp;
     }
 
-    if (!user.canResetPassword) {
+    let parsedSession;
+    try {
+      parsedSession = JSON.parse(sessionData);
+    } catch (error) {
+      console.error(`REDIS ERROR: ${error}`);
+      await redisConfig.del(resetSessionKey);
       resp.error = true;
-      resp.error_message =
-        'OTP verification required before resetting password';
+      resp.error_message = error.message || 'Something went wrong';
       return resp;
     }
 
-    const hashed = await hashPassword(newPassword);
-    await updateUserById(user._id, {
-      password: hashed,
-      canResetPassword: false,
-    });
+    // 🔐 Validate token & purpose
+    if (parsedSession.token !== resetSessionToken) {
+      resp.error = true;
+      resp.error_message = 'Invalid or mismatched reset session token';
+      return resp;
+    }
 
-    resp.data = { passwordReset: true };
+    if (parsedSession.purpose !== 'password_reset') {
+      resp.error = true;
+      resp.error_message = 'Invalid session purpose';
+      return resp;
+    }
+
+    // 🕐 Check expiry manually (defensive, Redis already auto-expires)
+    const maxAgeMs = 10 * 60 * 1000; // 10 minutes
+    if (Date.now() - parsedSession.createdAt > maxAgeMs) {
+      await redisConfig.del(resetSessionKey);
+      resp.error = true;
+      resp.error_message = 'Password reset session has expired';
+      return resp;
+    }
+
+    // ✅ Hash and update password
+    const hashedPassword = await hashPassword(newPassword);
+    await updateUserById(user._id, { password: hashedPassword });
+
+    // 🧹 Cleanup session
+    await redisConfig.del(resetSessionKey);
+
+    resp.data = {
+      success: true,
+      message: 'Password reset successful',
+    };
     return resp;
   } catch (err) {
     console.error(`API ERROR: ${err}`);
