@@ -12,6 +12,11 @@ const rideReceiptSchema = new mongoose.Schema({
     ref: 'Driver',
     required: true,
   },
+  passengerId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Passenger',
+    required: true,
+  },
   pdfData: {
     type: Buffer,
     required: true,

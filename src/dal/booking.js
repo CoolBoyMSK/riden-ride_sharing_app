@@ -2,6 +2,7 @@ import bookingModel from '../models/Ride.js';
 import Report from '../models/Report.js';
 import Driver from '../models/Driver.js';
 import Passenger from '../models/Passenger.js';
+import RideReceipt from '../models/RideReceipt.js';
 import { generateUniqueId } from '../utils/auth.js';
 import { notifyUser } from '../dal/notification.js';
 import env from '../config/envConfig.js';
@@ -246,3 +247,5 @@ export const createBookingReportByPassengerId = async (
 
   return report;
 };
+
+export const findReceipt = async (receiptId) => RideReceipt.findById(receiptId);

@@ -273,6 +273,9 @@ const rideSchema = new mongoose.Schema(
       ref: 'ChatRoom',
       unique: true,
     },
+    receipt: {
+      type: Object,
+    },
 
     isReported: {
       type: Boolean,

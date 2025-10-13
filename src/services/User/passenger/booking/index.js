@@ -2,8 +2,10 @@ import {
   findAllBookingsByPassengerId,
   findPassengerBookingById,
   createBookingReportByPassengerId,
+  findReceipt,
 } from '../../../../dal/booking.js';
 import { findPassengerByUserId } from '../../../../dal/passenger.js';
+import { generateRideReceipt } from '../../../../utils/receiptGenerator.js';
 
 export const getAllBookings = async (user, { page, limit }, resp) => {
   try {
@@ -82,6 +84,50 @@ export const addBookingReport = async (user, { id }, { reason }, resp) => {
     }
 
     resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'something went wrong';
+    return resp;
+  }
+};
+
+export const generateReceipt = async ({ id }, resp) => {
+  try {
+    const success = await generateRideReceipt(id);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to generate receipt';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'something went wrong';
+    return resp;
+  }
+};
+
+export const downloadReceipt = async ({ id }, res, resp) => {
+  try {
+    const success = await findReceipt(id);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to find receipt';
+      return resp;
+    }
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${success.fileName}"`,
+    );
+
+    resp.data = success.pdfData;
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);

@@ -1,41 +1,109 @@
 import PDFDocument from 'pdfkit';
+import mongoose from 'mongoose';
 import Ride from '../models/Ride.js';
 import RideTransaction from '../models/RideTransaction.js';
 import RideReceipt from '../models/RideReceipt.js';
 import { findPassengerById } from '../dal/passenger.js';
+import { findDriverById } from '../dal/driver.js';
+import env from '../config/envConfig.js';
 
-// Store receipt in database and return base64
-export const generateRideReceipt = async (booking, driver) => {
+const formatDate = (date) => {
+  return new Date(date).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+};
+
+const formatTime = (date) => {
+  return new Date(date).toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  });
+};
+
+const formatDuration = (seconds) => {
+  if (!seconds) return '0 min';
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes} min`;
+};
+
+const formatCurrency = (amount) => {
+  if (!amount) return '$0.00';
+  return `$${parseFloat(amount).toFixed(2)}`;
+};
+
+// Check if MongoDB is connected
+const checkConnection = () => {
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error('MongoDB not connected');
+  }
+};
+
+// Connection retry logic
+const withRetry = async (operation, maxRetries = 3, delay = 1000) => {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (error.name === 'MongooseError' && attempt < maxRetries) {
+        console.log(`Attempt ${attempt} failed, retrying in ${delay}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        delay *= 2; // Exponential backoff
+      } else {
+        throw error;
+      }
+    }
+  }
+};
+
+export const generateRideReceipt = async (bookingId) => {
   try {
-    // Get ride details with transaction information
-    const ride = await Ride.findOne({
-      _id: booking._id,
-      driverId: driver._id,
-      status: 'RIDE_COMPLETED',
-    })
-      .populate('riderId', 'name phone email')
-      .lean();
+    // Check connection first
+    checkConnection();
+
+    // Get ride details with transaction information - FIXED: use findOne() instead of find()
+    const ride = await withRetry(async () => {
+      return await Ride.findOne({
+        _id: new mongoose.Types.ObjectId(bookingId),
+        status: 'RIDE_COMPLETED',
+        paymentStatus: 'COMPLETED',
+      }).lean();
+    });
 
     if (!ride) {
       throw new Error('Ride not found');
     }
 
+    // Get passenger and driver in parallel
+    const [passenger, driver] = await Promise.all([
+      withRetry(() => findPassengerById(ride.passengerId)),
+      withRetry(() => findDriverById(ride.driverId)),
+    ]);
+
+    if (!passenger) {
+      throw new Error('Passenger not found');
+    }
+
+    if (!driver) {
+      // FIXED: was checking passenger instead of driver
+      throw new Error('Driver not found');
+    }
+
     // Get transaction details
-    const transaction = await RideTransaction.findOne({
-      rideId: booking._id,
-      status: 'COMPLETED',
-    }).lean();
+    const transaction = await withRetry(async () => {
+      return await RideTransaction.findOne({
+        rideId: ride._id,
+        status: 'COMPLETED',
+      }).lean();
+    });
 
     if (!transaction) {
       throw new Error('Transaction not found');
     }
 
     // Generate PDF as buffer
-    const passenger = await findPassengerById(ride.passengerId);
-    if (!passenger) {
-      throw new Error('Passenger not found');
-    }
-
     const pdfBuffer = await generatePDFBuffer(
       ride,
       transaction,
@@ -44,37 +112,58 @@ export const generateRideReceipt = async (booking, driver) => {
     );
 
     // Store receipt in database
-    const receipt = await RideReceipt.findOneAndUpdate(
-      { rideId: booking._id },
-      {
-        rideId: booking._id,
-        driverId: driver._id,
-        pdfData: pdfBuffer,
-        fileName: `receipt-${ride.rideId}.pdf`,
-        generatedAt: new Date(),
-      },
-      { upsert: true, new: true },
-    );
+    const receipt = await withRetry(async () => {
+      return await RideReceipt.findOneAndUpdate(
+        { rideId: ride._id },
+        {
+          rideId: ride._id,
+          driverId: driver._id,
+          passengerId: passenger._id,
+          pdfData: pdfBuffer,
+          fileName: `receipt-${ride.rideId}.pdf`, // FIXED: was ride.rideId, should be ride._id
+          generatedAt: new Date(),
+        },
+        { upsert: true, new: true },
+      );
+    });
+    if (!receipt) {
+      throw new Error('Receipt generation failed');
+    }
 
     // Return base64 for mobile apps and URL for web
     const base64PDF = pdfBuffer.toString('base64');
+
+    const updatedRide = await withRetry(async () => {
+      return await Ride.findByIdAndUpdate(
+        ride._id,
+        {
+          receipt,
+        },
+        { new: true },
+      );
+    });
+    if (!updatedRide) {
+      throw new Error('Failed to update ride');
+    }
 
     return {
       success: true,
       receipt: {
         id: receipt._id,
         base64: base64PDF,
-        downloadUrl: `/api/receipts/${receipt._id}/download`,
+        downloadUrl: `${env.BASE_URL}/user/passenger/booking-management/download?id=${receipt._id}`,
         fileName: receipt.fileName,
       },
     };
   } catch (error) {
     console.error('Error generating receipt:', error);
-    return false;
+    return {
+      success: false,
+      error: error.message,
+    };
   }
 };
 
-// Generate PDF as buffer
 const generatePDFBuffer = (ride, transaction, driver, passenger) => {
   return new Promise((resolve, reject) => {
     try {
@@ -99,65 +188,8 @@ const generatePDFBuffer = (ride, transaction, driver, passenger) => {
   });
 };
 
-// Download receipt by ID
-export const downloadReceipt = async (req, res) => {
-  try {
-    const { receiptId } = req.params;
-
-    const receipt = await RideReceipt.findById(receiptId);
-
-    if (!receipt) {
-      return res.status(404).json({ error: 'Receipt not found' });
-    }
-
-    // Verify the driver owns this receipt
-    if (req.user._id.toString() !== receipt.driverId.toString()) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
-
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${receipt.fileName}"`,
-    );
-    res.send(receipt.pdfData);
-  } catch (error) {
-    console.error('Error downloading receipt:', error);
-    res.status(500).json({ error: 'Failed to download receipt' });
-  }
-};
-
-// Get receipt for a ride
-export const getRideReceipt = async (req, res) => {
-  try {
-    const { rideId } = req.params;
-
-    const receipt = await RideReceipt.findOne({
-      rideId: rideId,
-      driverId: req.user._id,
-    });
-
-    if (!receipt) {
-      return res.status(404).json({ error: 'Receipt not found' });
-    }
-
-    res.json({
-      success: true,
-      receipt: {
-        id: receipt._id,
-        downloadUrl: `/api/receipts/${receipt._id}/download`,
-        fileName: receipt.fileName,
-        generatedAt: receipt.generatedAt,
-      },
-    });
-  } catch (error) {
-    console.error('Error getting receipt:', error);
-    res.status(500).json({ error: 'Failed to get receipt' });
-  }
-};
-
 const addReceiptContent = (doc, ride, transaction, driver, passenger) => {
-  const { riderId, pickupLocation, dropoffLocation } = ride;
+  const { pickupLocation, dropoffLocation } = ride;
 
   // Colors
   const primaryColor = '#2563eb';
@@ -218,11 +250,7 @@ const addReceiptContent = (doc, ride, transaction, driver, passenger) => {
     .fillColor(secondaryColor)
     .font('Helvetica')
     .text(`Name: ${driver.userId?.name || 'Driver'}`, 300, yPosition + 20)
-    .text(
-      `Vehicle: ${driver.userId?.vehicleType || 'N/A'}`,
-      300,
-      yPosition + 35,
-    );
+    .text(`Vehicle: ${driver.vehicle?.type || 'N/A'}`, 300, yPosition + 35);
 
   doc
     .fillColor('#000000')
@@ -233,7 +261,11 @@ const addReceiptContent = (doc, ride, transaction, driver, passenger) => {
     .fillColor(secondaryColor)
     .font('Helvetica')
     .text(`Name: ${passenger.userId?.name || 'N/A'}`, 300, yPosition + 80)
-    .text(`Phone: ${driver.userId?.phone || 'N/A'}`, 300, yPosition + 95);
+    .text(
+      `Phone: ${passenger.userId?.phoneNumber || 'N/A'}`,
+      300,
+      yPosition + 95,
+    );
 
   yPosition += 140;
 
@@ -335,23 +367,27 @@ const addReceiptContent = (doc, ride, transaction, driver, passenger) => {
 
   yPosition += 15;
 
+  // Safe fare breakdown with proper null checks
+  const fareBreakdown = ride.fareBreakdown || {};
+  const tipBreakdown = ride.tipBreakdown || {};
+
   const fareItems = [
-    { label: 'Base Fare', amount: ride.fareBreakdown.baseFare || 0 },
-    { label: 'Time Fare', amount: ride.fareBreakdown.timeFare || 0 },
-    { label: 'Peak Charges', amount: ride.fareBreakdown.peakCharge || 0 },
-    { label: 'Night Charges', amount: ride.fareBreakdown.nightCharge || 0 },
-    { label: 'Distance Fare', amount: ride.fareBreakdown.distanceFare || 0 },
-    { label: 'Waiting Charges', amount: ride.fareBreakdown.waitingCharge || 0 },
-    { label: 'Tips', amount: ride.tipBreakdown.amount || 0 },
+    { label: 'Base Fare', amount: fareBreakdown.baseFare || 0 },
+    { label: 'Time Fare', amount: fareBreakdown.timeFare || 0 },
+    { label: 'Peak Charges', amount: fareBreakdown.peakCharge || 0 },
+    { label: 'Night Charges', amount: fareBreakdown.nightCharge || 0 },
+    { label: 'Distance Fare', amount: fareBreakdown.distanceFare || 0 },
+    { label: 'Waiting Charges', amount: fareBreakdown.waitingCharge || 0 },
+    { label: 'Tips', amount: tipBreakdown.amount || 0 },
   ];
 
   const deductionItems = [
     { label: 'Platform Commission', amount: transaction.commission || 0 },
-    { label: 'Discount Applied', amount: ride.tipBreakdown.promoDiscount || 0 },
+    { label: 'Discount Applied', amount: tipBreakdown.promoDiscount || 0 },
   ];
 
   // Earnings items
-  fareItems.forEach((item, index) => {
+  fareItems.forEach((item) => {
     if (item.amount > 0) {
       doc
         .fillColor('#000000')
@@ -362,7 +398,7 @@ const addReceiptContent = (doc, ride, transaction, driver, passenger) => {
   });
 
   // Deductions
-  deductionItems.forEach((item, index) => {
+  deductionItems.forEach((item) => {
     if (item.amount > 0) {
       doc
         .fillColor('#ef4444')

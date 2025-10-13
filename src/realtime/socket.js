@@ -56,6 +56,7 @@ import { createCallLog, findCallById, updateCallLogById } from '../dal/call.js';
 import { findDashboardData } from '../dal/admin/index.js';
 import { notifyUser } from '../dal/notification.js';
 import { generateAgoraToken } from '../utils/agoraTokenGenerator.js';
+import { generateRideReceipt } from '../utils/receiptGenerator.js';
 
 let ioInstance = null;
 
@@ -2112,6 +2113,16 @@ export const initSocket = (server) => {
               paymentStatus: 'COMPLETED',
               driverPaidAt: new Date(),
             });
+
+            const receipt = await generateRideReceipt(ride._id);
+            if (!receipt) {
+              return socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'RECEIPT_FAILED',
+                message: 'Failed to generate the receipt',
+              });
+            }
 
             io.to(`ride:${ride._id}`).emit('ride:pay_driver', {
               success: true,
