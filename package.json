@@ -80,6 +80,7 @@
     "node-fetch": "^3.3.2",
     "nodemailer": "^7.0.3",
     "p-limit": "^7.1.1",
+    "pdfkit": "^0.17.2",
     "promise-retry": "^2.0.1",
     "redlock": "^5.0.0-beta.2",
     "socket.io": "^4.8.1",

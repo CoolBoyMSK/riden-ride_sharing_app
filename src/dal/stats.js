@@ -1,7 +1,95 @@
 import Ride from '../models/Ride.js';
 import Driver from '../models/Driver.js';
+import RideModel from '../models/Ride.js';
+import DriverPayout from '../models/DriverPayout.js';
 import mongoose from 'mongoose';
-import { startOfISOWeek, endOfISOWeek, addWeeks, startOfYear } from 'date-fns';
+
+const formatDate = (date) => {
+  return date.toISOString().split('T')[0]; // YYYY-MM-DD
+};
+
+const getDateFromWeek = (year, week) => {
+  const date = new Date(year, 0, 1 + (week - 1) * 7);
+  const day = date.getDay();
+  const diff = date.getDate() - day + (day === 0 ? -6 : 1);
+  date.setDate(diff);
+  date.setHours(0, 0, 0, 0);
+  return date;
+};
+
+const getAllWeeksSinceDate = (startDate, endDate) => {
+  const weeks = [];
+  const current = new Date(startDate);
+  const end = new Date(endDate);
+
+  // Set to the start of the week (Monday)
+  current.setDate(current.getDate() - current.getDay() + 1);
+
+  while (current <= end) {
+    const weekStart = new Date(current);
+    const weekEnd = new Date(current);
+    weekEnd.setDate(weekStart.getDate() + 6);
+    weekEnd.setHours(23, 59, 59, 999);
+
+    const weekNumber = getISOWeek(weekStart);
+    const year = weekStart.getFullYear();
+
+    weeks.push({
+      weekNumber,
+      year,
+      weekId: `${year}-${weekNumber}`,
+      weekStart: new Date(weekStart),
+      weekEnd: new Date(weekEnd),
+      display: `${formatDate(weekStart)} to ${formatDate(weekEnd)}`,
+    });
+
+    current.setDate(current.getDate() + 7);
+  }
+
+  return weeks;
+};
+
+const getISOWeek = (date) => {
+  const target = new Date(date.valueOf());
+  const dayNr = (date.getDay() + 6) % 7;
+  target.setDate(target.getDate() - dayNr + 3);
+  const firstThursday = target.valueOf();
+  target.setMonth(0, 1);
+  if (target.getDay() !== 4) {
+    target.setMonth(0, 1 + ((4 - target.getDay() + 7) % 7));
+  }
+  return 1 + Math.ceil((firstThursday - target) / 604800000);
+};
+
+const getWeekRange = (date = new Date()) => {
+  const startOfWeek = new Date(date);
+  const day = startOfWeek.getDay();
+  const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1); // Monday as start
+  startOfWeek.setDate(diff);
+  startOfWeek.setHours(0, 0, 0, 0);
+
+  const endOfWeek = new Date(startOfWeek);
+  endOfWeek.setDate(startOfWeek.getDate() + 6);
+  endOfWeek.setHours(23, 59, 59, 999);
+
+  const year = startOfWeek.getFullYear();
+  const weekNumber = getWeekNumber(startOfWeek);
+
+  return {
+    weekStart: startOfWeek,
+    weekEnd: endOfWeek,
+    weekNumber,
+    year,
+    weekId: `week_${year}_${weekNumber.toString().padStart(2, '0')}`,
+    display: `${formatDate(startOfWeek)} to ${formatDate(endOfWeek)}`,
+  };
+};
+
+const getWeekNumber = (date) => {
+  const startOfYear = new Date(date.getFullYear(), 0, 1);
+  const days = Math.floor((date - startOfYear) / (24 * 60 * 60 * 1000));
+  return Math.ceil((days + startOfYear.getDay() + 1) / 7);
+};
 
 export const findStats = async (id, options = {}) => {
   // Safe destructuring
@@ -175,128 +263,300 @@ export const findLifeTimeHighlights = async (driverId) => {
 };
 
 export const findWeeklyStats = async (driverId) => {
-  const matchStage = {
-    driverId: new mongoose.Types.ObjectId(driverId),
-    status: {
-      $in: [
-        'RIDE_COMPLETED',
-        'CANCELLED_BY_PASSENGER',
-        'CANCELLED_BY_DRIVER',
-        'CANCELLED_BY_SYSTEM',
-      ],
-    },
-  };
+  // Get driver creation date to determine historical range
+  const driver = await Driver.findById(driverId).select('createdAt').lean();
+  const driverCreatedAt = driver?.createdAt || new Date();
 
-  const results = await Ride.aggregate([
-    { $match: matchStage },
+  // Get all weeks from driver creation to current week
+  const allWeeks = getAllWeeksSinceDate(driverCreatedAt, new Date());
+
+  // Get weekly stats for all weeks in a single query
+  const weeklyStats = await Ride.aggregate([
+    {
+      $match: {
+        driverId: new mongoose.Types.ObjectId(driverId),
+        status: 'RIDE_COMPLETED',
+        createdAt: { $gte: driverCreatedAt },
+      },
+    },
+    {
+      $lookup: {
+        from: 'ridetransactions',
+        let: { rideId: '$_id' },
+        pipeline: [
+          {
+            $match: {
+              $expr: { $eq: ['$rideId', '$$rideId'] },
+              status: { $in: ['COMPLETED', 'REFUNDED'] },
+            },
+          },
+        ],
+        as: 'transactions',
+      },
+    },
+    {
+      $unwind: '$transactions',
+    },
+    {
+      $addFields: {
+        weekNumber: { $isoWeek: '$createdAt' },
+        year: { $isoWeekYear: '$createdAt' },
+      },
+    },
     {
       $group: {
         _id: {
-          year: { $isoWeekYear: '$requestedAt' },
-          week: { $isoWeek: '$requestedAt' },
+          year: '$year',
+          week: '$weekNumber',
         },
-        totalRides: { $sum: 1 },
-        completedRides: {
-          $sum: { $cond: [{ $eq: ['$status', 'RIDE_COMPLETED'] }, 1, 0] },
+        totalRides: {
+          $sum: {
+            $cond: [{ $eq: ['$transactions.status', 'COMPLETED'] }, 1, 0],
+          },
         },
-        cancelledRides: {
+        totalCommission: {
           $sum: {
             $cond: [
-              {
-                $in: [
-                  '$status',
-                  [
-                    'CANCELLED_BY_PASSENGER',
-                    'CANCELLED_BY_DRIVER',
-                    'CANCELLED_BY_SYSTEM',
-                  ],
-                ],
-              },
-              1,
+              { $eq: ['$transactions.status', 'COMPLETED'] },
+              '$transactions.commission',
               0,
             ],
           },
         },
-        totalRevenue: {
+        totalDriverEarnings: {
           $sum: {
-            $add: [
-              { $ifNull: ['$actualFare', 0] },
-              { $ifNull: ['$tipBreakdown.amount', 0] },
+            $cond: [
+              { $eq: ['$transactions.status', 'COMPLETED'] },
+              '$transactions.driverEarning',
+              0,
             ],
           },
         },
-        firstDate: { $min: '$requestedAt' }, // for calculating week start
       },
     },
-    { $sort: { '_id.year': -1, '_id.week': -1 } },
   ]);
 
-  return results.map((r) => {
-    const weekStart = startOfISOWeek(new Date(r.firstDate)); // Monday
-    const weekEnd = endOfISOWeek(new Date(r.firstDate)); // Sunday
+  // Get ALL payouts for the driver (not grouped by week)
+  const allPayouts = await DriverPayout.find({
+    driverId: new mongoose.Types.ObjectId(driverId),
+  })
+    .sort({ payoutDate: -1 })
+    .lean();
+
+  // Create maps for easy lookup
+  const statsMap = new Map();
+  weeklyStats.forEach((stat) => {
+    const key = `${stat._id.year}-${stat._id.week}`;
+    statsMap.set(key, stat);
+  });
+
+  // Create a map to find payout for each week
+  const payoutsMap = new Map();
+  allPayouts.forEach((payout) => {
+    // Convert weekStart string (dd-mm-yyyy) to Date object to get week number
+    const [day, month, year] = payout.weekStart.split('-');
+    const weekStartDate = new Date(`${year}-${month}-${day}`);
+    const weekNumber = getISOWeek(weekStartDate);
+    const payoutYear = weekStartDate.getFullYear();
+
+    const key = `${payoutYear}-${weekNumber}`;
+
+    // Only set if not already set (to get the latest payout for each week)
+    if (!payoutsMap.has(key)) {
+      payoutsMap.set(key, payout);
+    }
+  });
+
+  // Build response array for all weeks
+  const weeklyData = allWeeks.map((week) => {
+    const key = `${week.year}-${week.weekNumber}`;
+    const stats = statsMap.get(key) || {
+      totalRides: 0,
+      totalCommission: 0,
+      totalDriverEarnings: 0,
+    };
+
+    const payout = payoutsMap.get(key);
+
+    // Determine status logic:
+    // 1. If there's a payout with status 'paid', show 'PAID'
+    // 2. If there are earnings but no payout, show 'PENDING'
+    // 3. If no earnings and no payout, show 'NO_EARNINGS'
+    let status = 'NO_EARNINGS';
+    if (payout?.status === 'paid') {
+      status = 'PAID';
+    } else if (stats.totalDriverEarnings > 0) {
+      status = 'PENDING';
+    }
+
     return {
-      year: r._id.year,
-      week: r._id.week,
-      weekStart: weekStart.toISOString().split('T')[0],
-      weekEnd: weekEnd.toISOString().split('T')[0],
-      totalRides: r.totalRides,
-      completedRides: r.completedRides,
-      cancelledRides: r.cancelledRides,
-      totalRevenue: r.totalRevenue,
+      weekInfo: {
+        weekNumber: week.weekNumber,
+        year: week.year,
+        weekId: week.weekId,
+        startDate: week.weekStart,
+        endDate: week.weekEnd,
+        display: week.display,
+        status: status,
+      },
+      earnings: {
+        payoutDate: payout?.payoutDate || null,
+        totalDeductions: stats.totalCommission,
+        totalEarnings: stats.totalDriverEarnings,
+        total: stats.totalRides,
+        // Include payout amount if available
+        payoutAmount: payout?.totalPaid || 0,
+      },
     };
   });
+
+  return weeklyData;
 };
 
 export const findDailyStatsForWeek = async (driverId, year, week) => {
-  // Calculate start of ISO year
-  const yearStart = startOfYear(new Date(year, 0, 1));
+  // Calculate date range for the specified week
+  const weekStart = getDateFromWeek(year, week);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekStart.getDate() + 6);
+  weekEnd.setHours(23, 59, 59, 999);
 
-  // Add weeks to get the Monday of the requested ISO week
-  const weekStart = startOfISOWeek(addWeeks(yearStart, week - 1));
-  const weekEnd = endOfISOWeek(weekStart);
-
-  // Fetch rides within that week
-  const rides = await Ride.find({
-    driverId: new mongoose.Types.ObjectId(driverId),
-    status: {
-      $in: [
-        'RIDE_COMPLETED',
-        'CANCELLED_BY_PASSENGER',
-        'CANCELLED_BY_DRIVER',
-        'CANCELLED_BY_SYSTEM',
-      ],
+  // Get daily breakdown of rides for the week
+  const dailyStats = await RideModel.aggregate([
+    {
+      $match: {
+        driverId: new mongoose.Types.ObjectId(driverId),
+        status: 'RIDE_COMPLETED',
+        createdAt: { $gte: weekStart, $lte: weekEnd },
+      },
     },
-    requestedAt: { $gte: weekStart, $lte: weekEnd },
-  })
-    .select('rideId actualDistance actualFare tipBreakdown requestedAt')
-    .lean();
+    {
+      $lookup: {
+        from: 'ridetransactions',
+        let: { rideId: '$_id' },
+        pipeline: [
+          {
+            $match: {
+              $expr: { $eq: ['$rideId', '$$rideId'] },
+              status: { $in: ['COMPLETED', 'REFUNDED'] },
+            },
+          },
+        ],
+        as: 'transactions',
+      },
+    },
+    {
+      $unwind: {
+        path: '$transactions',
+        preserveNullAndEmptyArrays: false,
+      },
+    },
+    {
+      $project: {
+        rideId: '$_id',
+        date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+        dayOfWeek: { $dayOfWeek: '$createdAt' },
+        fare: { $ifNull: ['$actualFare', 0] },
+        tip: { $ifNull: ['$tipBreakdown.amount', 0] },
+        commission: { $ifNull: ['$transactions.commission', 0] },
+        discount: { $ifNull: ['$transactions.discount', 0] },
+        driverEarning: { $ifNull: ['$transactions.driverEarning', 0] },
+        transactionStatus: '$transactions.status',
+        distance: { $ifNull: ['$actualDistance', 0] },
+      },
+    },
+    {
+      $group: {
+        _id: '$date',
+        date: { $first: '$date' },
+        dayOfWeek: { $first: '$dayOfWeek' },
+        rides: {
+          $push: {
+            $cond: [
+              { $eq: ['$transactionStatus', 'COMPLETED'] },
+              {
+                rideId: '$rideId',
+                distance: '$distance',
+                fare: '$fare',
+                tip: '$tip',
+                commission: '$commission',
+                discount: '$discount',
+                driverEarning: '$driverEarning',
+              },
+              null,
+            ],
+          },
+        },
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        date: 1,
+        dayOfWeek: 1,
+        dayName: {
+          $switch: {
+            branches: [
+              { case: { $eq: ['$dayOfWeek', 1] }, then: 'Sunday' },
+              { case: { $eq: ['$dayOfWeek', 2] }, then: 'Monday' },
+              { case: { $eq: ['$dayOfWeek', 3] }, then: 'Tuesday' },
+              { case: { $eq: ['$dayOfWeek', 4] }, then: 'Wednesday' },
+              { case: { $eq: ['$dayOfWeek', 5] }, then: 'Thursday' },
+              { case: { $eq: ['$dayOfWeek', 6] }, then: 'Friday' },
+              { case: { $eq: ['$dayOfWeek', 7] }, then: 'Saturday' },
+            ],
+          },
+        },
+        rides: {
+          $filter: {
+            input: '$rides',
+            as: 'ride',
+            cond: { $ne: ['$$ride', null] },
+          },
+        },
+      },
+    },
+    {
+      $sort: { date: 1 },
+    },
+  ]);
 
-  // Prepare daily stats array (1=Monday → 7=Sunday)
-  const dailyStats = Array.from({ length: 7 }, (_, i) => ({
-    dayOfWeek: i + 1,
-    rides: [],
-    totalRides: 0,
-    totalRevenue: 0,
-  }));
+  // Fill in missing days with empty arrays
+  const allDays = [];
+  for (let i = 0; i < 7; i++) {
+    const date = new Date(weekStart);
+    date.setDate(weekStart.getDate() + i);
+    const dateStr = date.toISOString().split('T')[0];
 
-  rides.forEach((ride) => {
-    const dayIndex = new Date(ride.requestedAt).getDay(); // 0=Sunday → 6=Saturday
-    const isoDay = dayIndex === 0 ? 7 : dayIndex; // Convert Sunday=0 → 7
-    const revenue = (ride.actualFare || 0) + (ride.tipBreakdown?.amount || 0);
+    const existingDay = dailyStats.find((day) => day.date === dateStr);
 
-    dailyStats[isoDay - 1].rides.push({
-      rideId: ride.rideId,
-      actualDistance: ride.actualDistance,
-      actualFare: ride.actualFare,
-      tip: ride.tipBreakdown?.amount || 0,
-      totalRevenue: revenue,
-    });
+    allDays.push(
+      existingDay || {
+        date: dateStr,
+        dayOfWeek: date.getDay() + 1,
+        dayName: [
+          'Sunday',
+          'Monday',
+          'Tuesday',
+          'Wednesday',
+          'Thursday',
+          'Friday',
+          'Saturday',
+        ][date.getDay()],
+        completedRides: [],
+      },
+    );
+  }
 
-    dailyStats[isoDay - 1].totalRides += 1;
-    dailyStats[isoDay - 1].totalRevenue += revenue;
-  });
-
-  return dailyStats;
+  return {
+    weekInfo: {
+      year,
+      week,
+      startDate: weekStart,
+      endDate: weekEnd,
+      display: `${formatDate(weekStart)} to ${formatDate(weekEnd)}`,
+    },
+    dailyStats: allDays,
+  };
 };
 
 export const findDrivingHours = async (driverId) => {
