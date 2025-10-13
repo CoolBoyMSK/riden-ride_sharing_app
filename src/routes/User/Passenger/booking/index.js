@@ -41,8 +41,8 @@ registerRoute({
 registerRoute({
   router,
   route: '/download',
-  // passenger_auth_enable: true,
-  post_method: downloadReceiptController,
+  passenger_auth_enable: true,
+  get_method: downloadReceiptController,
 });
 
 export default router;

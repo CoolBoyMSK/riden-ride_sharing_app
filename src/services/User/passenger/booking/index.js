@@ -95,6 +95,13 @@ export const addBookingReport = async (user, { id }, { reason }, resp) => {
 
 export const generateReceipt = async ({ id }, resp) => {
   try {
+    const exists = await findReceipt(id);
+    if (exists) {
+      resp.error = true;
+      resp.error_message = 'receipt already exists';
+      return resp;
+    }
+
     const success = await generateRideReceipt(id);
     if (!success) {
       resp.error = true;
@@ -126,6 +133,7 @@ export const downloadReceipt = async ({ id }, res, resp) => {
       'Content-Disposition',
       `attachment; filename="${success.fileName}"`,
     );
+    res.setHeader('Content-Length', success.pdfData.length);
 
     resp.data = success.pdfData;
     return resp;

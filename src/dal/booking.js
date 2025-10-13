@@ -248,4 +248,5 @@ export const createBookingReportByPassengerId = async (
   return report;
 };
 
-export const findReceipt = async (receiptId) => RideReceipt.findById(receiptId);
+export const findReceipt = async (BookingId) =>
+  RideReceipt.findOne({ rideId: BookingId });

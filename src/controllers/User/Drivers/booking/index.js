@@ -3,6 +3,8 @@ import {
   getAllBookings,
   getBookingById,
   addBookingReport,
+  downloadReceipt,
+  generateReceipt,
 } from '../../../../services/User/driver/booking/index.js';
 
 export const getAllBookingsController = (req, res) =>
@@ -36,6 +38,30 @@ export const addBookingReportController = (req, res) =>
       validationFn: null,
       handlerParams: [req.user, req.query, req.body],
       successMessage: 'Booking reported successfully',
+    },
+    req,
+    res,
+  );
+
+export const generateReceiptController = (req, res) =>
+  handleResponse(
+    {
+      handler: generateReceipt,
+      validationFn: null,
+      handlerParams: [req.query],
+      successMessage: 'Receipt generated successfully',
+    },
+    req,
+    res,
+  );
+
+export const downloadReceiptController = (req, res) =>
+  handleResponse(
+    {
+      handler: downloadReceipt,
+      validationFn: null,
+      handlerParams: [req.query, res],
+      successMessage: 'Receipt downloaded successfully',
     },
     req,
     res,
