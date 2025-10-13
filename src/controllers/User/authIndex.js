@@ -8,6 +8,7 @@ import {
   passKeyLogInAuthOptions,
   verifyPasskeyLoginAuth,
   updateFCMToken,
+  socialLoginUser,
 } from '../../services/User/auth/index.js';
 import { handleResponse } from '../../utils/handleRespone.js';
 import {
@@ -120,6 +121,18 @@ export const updateFCMTokenController = (req, res) =>
       validationFn: validateFCMToken,
       handlerParams: [req.user, req.body],
       successMessage: 'FCM token update successfully',
+    },
+    req,
+    res,
+  );
+
+export const socialLoginUserController = (req, res) =>
+  handleResponse(
+    {
+      handler: socialLoginUser,
+      validationFn: null,
+      handlerParams: [req.body, req],
+      successMessage: 'User social login successful',
     },
     req,
     res,

@@ -23,6 +23,8 @@ export const findUserByPhone = async (phoneNumber) =>
 
 export const createUser = async (payload) => new UserModel(payload).save();
 
+export const findUser = async (payload) => UserModel.findOne(payload).lean();
+
 export const updateUserById = (filter, update) =>
   UserModel.findByIdAndUpdate(filter, update, { new: true });
 
@@ -212,7 +214,7 @@ export const getPasskeyRegisterOptions = async (userId) => {
   user.passkeyChallenge = options.challenge;
   await user.save();
 
-  console.log(options)
+  console.log(options);
 
   return options;
 };

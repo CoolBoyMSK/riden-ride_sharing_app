@@ -5,6 +5,7 @@ import {
   verifyEmailUpdate,
   sendPhoneUpdateOtp,
   verifyPhoneUpdate,
+  verifyBothEmailAndPhoneUpdate,
 } from '../../services/User/profileService.js';
 import { handleResponse } from '../../utils/handleRespone.js';
 import { validateProfileUpdate } from '../../validations/user/profileValidations.js';
@@ -24,7 +25,7 @@ export const editProfile = (req, res) =>
   handleResponse(
     {
       handler: updateUserProfile,
-      validationFn: validateProfileUpdate,
+      // validationFn: validateProfileUpdate,
       handlerParams: [req.user, req.body, req.file],
       successMessage: 'Profile updated successfully',
     },
@@ -37,7 +38,7 @@ export const sendEmailUpdateOtpController = (req, res) =>
     {
       handler: sendEmailUpdateOtp,
       validationFn: null,
-      handlerParams: [req.body],
+      handlerParams: [req.user, req.body],
       successMessage: 'Email update otp sent successfully',
     },
     req,
@@ -49,7 +50,7 @@ export const verifyEmailUpdateController = (req, res) =>
     {
       handler: verifyEmailUpdate,
       validationFn: null,
-      handlerParams: [req.body],
+      handlerParams: [req.user, req.body],
       successMessage: 'Email otp verified successfully',
     },
     req,
@@ -61,7 +62,7 @@ export const sendPhoneUpdateOtpController = (req, res) =>
     {
       handler: sendPhoneUpdateOtp,
       validationFn: null,
-      handlerParams: [req.body],
+      handlerParams: [req.user, req.body],
       successMessage: 'Phone Number update otp sent successfully',
     },
     req,
@@ -73,8 +74,20 @@ export const verifyPhoneUpdateController = (req, res) =>
     {
       handler: verifyPhoneUpdate,
       validationFn: null,
-      handlerParams: [req.body],
+      handlerParams: [res.user, req.body],
       successMessage: 'Phone Number otp verified successfully',
+    },
+    req,
+    res,
+  );
+
+export const verifyBothEmailAndPhoneUpdateController = (req, res) =>
+  handleResponse(
+    {
+      handler: verifyBothEmailAndPhoneUpdate,
+      validationFn: null,
+      handlerParams: [res.user, req.body],
+      successMessage: 'Phone Number and email otp verified successfully',
     },
     req,
     res,

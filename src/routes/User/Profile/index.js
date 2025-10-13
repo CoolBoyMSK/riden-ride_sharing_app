@@ -7,6 +7,7 @@ import {
   verifyEmailUpdateController,
   sendPhoneUpdateOtpController,
   verifyPhoneUpdateController,
+  verifyBothEmailAndPhoneUpdateController,
 } from '../../../controllers/User/profile.js';
 import { registerRoute } from '../../../utils/registerRoute.js';
 import { anyUserAuth } from '../../../middlewares/anyUserAuth.js';
@@ -53,6 +54,13 @@ registerRoute({
   route: '/verify-phone',
   put_middlewares: [anyUserAuth],
   put_method: verifyPhoneUpdateController,
+});
+
+registerRoute({
+  router,
+  route: '/verify-both',
+  put_middlewares: [anyUserAuth],
+  put_method: verifyBothEmailAndPhoneUpdateController,
 });
 
 export default router;

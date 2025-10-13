@@ -12,6 +12,7 @@ import {
   createUser,
   updateUserById,
   findUserById,
+  findUser,
 } from '../../../dal/user/index.js';
 import {
   createPassengerProfile,
@@ -1150,4 +1151,282 @@ export const updateFCMToken = async (user, { userDeviceToken }, resp) => {
     resp.error_message = error.message || 'something went wrong';
     return resp;
   }
+};
+
+export const socialLoginUser = async (
+  {
+    name,
+    email,
+    gender,
+    role,
+    userSocialToken,
+    deviceId,
+    userDeviceType,
+    deviceModel,
+    deviceVendor,
+    os,
+  },
+  headers,
+  resp,
+) => {
+  let user = await findUserByEmail(email?.trim());
+
+  if (role === 'driver') {
+    if (user && user.roles.includes('driver')) {
+      if (user.userSocialToken?.trim()) {
+        let driver = await findDriverByUserId(user._id);
+        if (!driver) {
+          const uniqueId = generateUniqueId(user.roles[0], user._id);
+          driver = await createDriverProfile(user._id, uniqueId);
+          await updateDriverByUserId(user._id, {
+            status: driver.status === 'offline' ? 'online' : driver.status,
+            isActive: true,
+          });
+        } else {
+          driver = await updateDriverByUserId(user._id, {
+            status: driver.status === 'offline' ? 'online' : driver.status,
+            isActive: true,
+          });
+        }
+
+        const deviceInfo = await extractDeviceInfo(headers);
+        const device = {
+          userId: user._id,
+          deviceId,
+          deviceType: userDeviceType,
+          deviceModel,
+          deviceVendor,
+          os,
+          ...deviceInfo,
+          loginMethod: 'oauth',
+          lastLoginAt: new Date(),
+        };
+        await createDeviceInfo(device);
+
+        const payload = { id: user._id, roles: user.roles };
+        resp.data = {
+          user,
+          accessToken: generateAccessToken(payload),
+          refreshToken: generateRefreshToken(payload),
+        };
+        return resp;
+      } else {
+        resp.error = true;
+        resp.error_message = 'Email already registered';
+        return resp;
+      }
+    } else if (!user) {
+      user = await createUser({
+        name,
+        email,
+        gender,
+        roles: ['driver'],
+        userSocialToken,
+      });
+
+      let driver = await findDriverByUserId(user._id);
+      if (!driver) {
+        const uniqueId = generateUniqueId(user.roles[0], user._id);
+        driver = await createDriverProfile(user._id, uniqueId);
+        await updateDriverByUserId(user._id, {
+          status: driver.status === 'offline' ? 'online' : driver.status,
+          isActive: true,
+        });
+      } else {
+        driver = await updateDriverByUserId(user._id, {
+          status: driver.status === 'offline' ? 'online' : driver.status,
+          isActive: true,
+        });
+      }
+
+      const stripeAccountId = await createDriverStripeAccount(user, driver);
+      if (!stripeAccountId) {
+        resp.error = true;
+        resp.error_message = 'Failed to create stripe Account Id';
+        return resp;
+      }
+
+      const wallet = await createDriverWallet(driver._id);
+      if (!wallet) {
+        resp.error = true;
+        resp.error_message = 'Failed to create driver wallet';
+        return resp;
+      }
+
+      const deviceInfo = await extractDeviceInfo(headers);
+      const device = {
+        userId: user._id,
+        deviceId,
+        deviceType: userDeviceType,
+        deviceModel,
+        deviceVendor,
+        os,
+        ...deviceInfo,
+        loginMethod: 'oauth',
+        lastLoginAt: new Date(),
+      };
+      await createDeviceInfo(device);
+
+      const notify = await createAdminNotification({
+        title: 'New Driver Registered',
+        message: `${user.name} registered as drive successfully, Their Email: ${user.email}`,
+        metadata: user,
+        module: 'passenger_management',
+        type: 'ALERT',
+        actionLink: `${env.FRONTEND_URL}/api/admin/passengers/fetch/${driver._id}`,
+      });
+      if (!notify) {
+        resp.error = true;
+        resp.error_message = 'Failed to send notification';
+        return resp;
+      }
+
+      const payload = { id: user._id, roles: user.roles };
+      resp.data = {
+        user,
+        accessToken: generateAccessToken(payload),
+        refreshToken: generateRefreshToken(payload),
+      };
+      return resp;
+    } else {
+      resp.error = true;
+      resp.error_message = 'Unexpected Error';
+      return resp;
+    }
+  }
+
+  if (role === 'passenger') {
+    if (user && user.roles.includes('passenger')) {
+      if (user.userSocialToken?.trim()) {
+        let passenger = await findPassengerByUserId(user._id);
+        if (!passenger) {
+          const uniqueId = generateUniqueId(user.roles[0], user._id);
+          passenger = await createPassengerProfile(user._id, uniqueId);
+          await updatePassenger({ userId: user._id }, { isActive: true });
+        } else {
+          passenger = await updatePassenger(
+            { userId: user._id },
+            { isActive: true },
+          );
+          if (!passenger) {
+            resp.error = true;
+            resp.error_message = 'Failed to activate passenger';
+            return resp;
+          }
+        }
+
+        const deviceInfo = await extractDeviceInfo(headers);
+        const device = {
+          userId: user._id,
+          deviceId,
+          deviceType: userDeviceType,
+          deviceModel,
+          deviceVendor,
+          os,
+          ...deviceInfo,
+          loginMethod: 'oauth',
+          lastLoginAt: new Date(),
+        };
+        await createDeviceInfo(device);
+
+        const payload = { id: user._id, roles: user.roles };
+        resp.data = {
+          user,
+          accessToken: generateAccessToken(payload),
+          refreshToken: generateRefreshToken(payload),
+        };
+        return resp;
+      } else {
+        resp.error = true;
+        resp.error_message = 'Email already registered';
+        return resp;
+      }
+    } else if (!user) {
+      user = await createUser({
+        name,
+        email,
+        gender,
+        roles: ['passenger'],
+        userSocialToken,
+      });
+
+      let passenger = await findPassengerByUserId(user._id);
+      if (!passenger) {
+        const uniqueId = generateUniqueId(user.roles[0], user._id);
+        passenger = await createPassengerProfile(user._id, uniqueId);
+        await updatePassenger({ userId: user._id }, { isActive: true });
+      } else {
+        passenger = await updatePassenger(
+          { userId: user._id },
+          { isActive: true },
+        );
+        if (!passenger) {
+          resp.error = true;
+          resp.error_message = 'Failed to activate passenger';
+          return resp;
+        }
+      }
+
+      const stripeCustomerId = await createPassengerStripeCustomer(
+        user,
+        passenger,
+      );
+      if (!stripeCustomerId) {
+        resp.error = true;
+        resp.error_message = 'Failed to create stripe customer account';
+        return resp;
+      }
+
+      const wallet = await createPassengerWallet(passenger._id);
+      if (!wallet) {
+        resp.error = true;
+        resp.error_message = 'Failed to create In-App wallet';
+        return resp;
+      }
+
+      const deviceInfo = await extractDeviceInfo(headers);
+      const device = {
+        userId: user._id,
+        deviceId,
+        deviceType: userDeviceType,
+        deviceModel,
+        deviceVendor,
+        os,
+        ...deviceInfo,
+        loginMethod: 'oauth',
+        lastLoginAt: new Date(),
+      };
+      await createDeviceInfo(device);
+
+      const notify = await createAdminNotification({
+        title: 'New Passenger Registered',
+        message: `${user.name} registered as passenger successfully, Their  Email: ${user.email}`,
+        metadata: user,
+        module: 'passenger_management',
+        type: 'ALERT',
+        actionLink: `${env.FRONTEND_URL}/api/admin/passengers/fetch-passenger/${passenger._id}`,
+      });
+      if (!notify) {
+        resp.error = true;
+        resp.error_message = 'Failed to send notification';
+        return resp;
+      }
+
+      const payload = { id: user._id, roles: user.roles };
+      resp.data = {
+        user,
+        accessToken: generateAccessToken(payload),
+        refreshToken: generateRefreshToken(payload),
+      };
+      return resp;
+    } else {
+      resp.error = true;
+      resp.error_message = 'Unexpected Error';
+      return resp;
+    }
+  }
+
+  resp.error = true;
+  resp.error_message = 'Invalid User role';
+  return resp;
 };

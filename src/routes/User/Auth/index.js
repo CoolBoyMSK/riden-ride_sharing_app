@@ -10,6 +10,7 @@ import {
   passKeyLogInAuthOptionsController,
   verifyPasskeyLoginAuthController,
   updateFCMTokenController,
+  socialLoginUserController,
 } from '../../../controllers/User/authIndex.js';
 import { verifyFirebaseToken } from '../../../middlewares/firebaseAuth.js';
 import { driverAuthenticate } from '../../../middlewares/driverAuth.js';
@@ -72,6 +73,12 @@ registerRoute({
   route: '/fcm',
   put_middlewares: [anyUserAuth],
   put_method: updateFCMTokenController,
+});
+
+registerRoute({
+  router,
+  route: '/social',
+  post_method: socialLoginUserController,
 });
 
 export default router;

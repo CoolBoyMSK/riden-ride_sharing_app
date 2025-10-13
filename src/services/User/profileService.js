@@ -22,6 +22,7 @@ import {
   phonePendingKey,
 } from '../../utils/otpUtils.js';
 import redisConfig from '../../config/redisConfig.js';
+import bcrypt from 'bcrypt';
 
 export const getUserProfile = async (user, resp) => {
   const profile = await findUserById(user.id);
@@ -41,7 +42,7 @@ export const updateUserProfile = async (user, body, file, resp) => {
   try {
     const update = { ...body };
     const messages = {};
-    const otpRedirect = {};
+    const passwordRedirect = {}; // Changed from otpRedirect to passwordRedirect
 
     if (!user?.id) throw new Error('User ID is missing.');
 
@@ -170,43 +171,111 @@ export const updateUserProfile = async (user, body, file, resp) => {
       }
     }
 
-    // --- EMAIL ---
-    if (
+    // --- PASSWORD VERIFICATION FOR EMAIL/PHONE CHANGES ---
+    const emailChangeRequested =
       update.email?.trim() &&
-      update.email.trim() !== myUser.userId.email?.trim()
-    ) {
-      const newEmail = update.email.trim();
-      const isRegistered = await findUserByEmail(newEmail);
-      if (isRegistered) {
-        messages.emailMessage = `Email ${newEmail} is already registered`;
-      } else {
-        otpRedirect.email = {
-          success: true,
-          currentEmail: myUser.userId.email?.trim(),
-          newEmail,
-          name: myUser.userId.name?.trim(),
-          userId: myUser.userId._id,
-        };
-      }
-    }
-
-    // --- PHONE ---
-    if (
+      update.email.trim() !== myUser.userId.email?.trim();
+    const phoneChangeRequested =
       update.phoneNumber?.trim() &&
-      update.phoneNumber.trim() !== myUser.userId.phoneNumber?.trim()
-    ) {
-      const newPhone = update.phoneNumber?.trim();
-      const isRegistered = await findUserByPhone(newPhone);
-      if (isRegistered) {
-        messages.phoneNumberMessage = `Phone Number ${update.phoneNumber.trim()} is already registered`;
-      } else {
-        otpRedirect.phoneNumber = {
-          success: true,
-          currentPhone: myUser.userId.phoneNumber?.trim(),
-          newPhone,
-          name: myUser.userId.name?.trim(),
-          userId: myUser.userId._id,
-        };
+      update.phoneNumber.trim() !== myUser.userId.phoneNumber?.trim();
+
+    if (emailChangeRequested || phoneChangeRequested) {
+      // Check if password is provided for verification
+      if (!update.password) {
+        resp.error = true;
+        resp.error_message =
+          'Password is required to change email or phone number';
+        return resp;
+      }
+
+      // Verify password
+      const isPasswordValid = await bcrypt.compare(
+        update.password,
+        myUser.userId.password,
+      );
+      if (!isPasswordValid) {
+        resp.error = true;
+        resp.error_message = 'Invalid password';
+        return resp;
+      }
+
+      // Remove password from update object after verification
+      delete update.password;
+
+      // Handle email change
+      if (emailChangeRequested) {
+        const newEmail = update.email.trim();
+        const isRegistered = await findUserByEmail(newEmail);
+        if (isRegistered) {
+          messages.emailMessage = `Email ${newEmail} is already registered`;
+          delete update.email;
+        } else {
+          passwordRedirect.email = {
+            success: true,
+            currentEmail: myUser.userId.email?.trim(),
+            newEmail,
+            name: myUser.userId.name?.trim(),
+            userId: myUser.userId._id,
+            requiresPassword: false, // Password already verified
+          };
+          // Don't delete email yet - we'll handle it after OTP verification
+        }
+      }
+
+      // Handle phone change
+      if (phoneChangeRequested) {
+        const newPhone = update.phoneNumber.trim();
+        const isRegistered = await findUserByPhone(newPhone);
+        if (isRegistered) {
+          messages.phoneNumberMessage = `Phone Number ${newPhone} is already registered`;
+          delete update.phoneNumber;
+        } else {
+          passwordRedirect.phoneNumber = {
+            success: true,
+            currentPhone: myUser.userId.phoneNumber?.trim(),
+            newPhone,
+            name: myUser.userId.name?.trim(),
+            userId: myUser.userId._id,
+            requiresPassword: false, // Password already verified
+          };
+          // Don't delete phone yet - we'll handle it after OTP verification
+        }
+      }
+
+      // If both email and phone are being changed, store the context for coordinated update
+      if (emailChangeRequested && phoneChangeRequested) {
+        passwordRedirect.bothChanging = true;
+      }
+    } else {
+      // Handle email without password (if no change requested but email exists in update)
+      if (
+        update.email?.trim() &&
+        update.email.trim() !== myUser.userId.email?.trim()
+      ) {
+        const newEmail = update.email.trim();
+        const isRegistered = await findUserByEmail(newEmail);
+        if (isRegistered) {
+          messages.emailMessage = `Email ${newEmail} is already registered`;
+        } else {
+          messages.emailMessage = 'Password is required to change email';
+        }
+        delete update.email;
+      }
+
+      // Handle phone without password (if no change requested but phone exists in update)
+      if (
+        update.phoneNumber?.trim() &&
+        update.phoneNumber.trim() !== myUser.userId.phoneNumber?.trim()
+      ) {
+        const newPhone = update.phoneNumber.trim();
+        const isRegistered = await findUserByPhone(newPhone);
+        if (isRegistered) {
+          messages.phoneNumberMessage = `Phone Number ${newPhone} is already registered`;
+        } else {
+          messages.phoneNumberMessage =
+            'Password is required to change phone number';
+        }
+        delete update.phoneNumber;
       }
     }
 
@@ -237,7 +306,7 @@ export const updateUserProfile = async (user, body, file, resp) => {
 
     resp.data = {
       messages,
-      otpRedirect,
+      passwordRedirect, // Changed from otpRedirect to passwordRedirect
       updatedProfile: updated || null,
     };
     return resp;
@@ -252,14 +321,39 @@ export const updateUserProfile = async (user, body, file, resp) => {
 };
 
 export const sendEmailUpdateOtp = async (
-  { currentEmail, newEmail, name, userId },
+  user,
+  { newEmail, requiresPassword = true, password },
   resp,
 ) => {
   try {
-    // Context includes who requested and target new email
-    const context = { userId, newEmail };
+    const myUser = await findUserById(user.id);
+    if (!myUser) {
+      resp.error = true;
+      resp.error_message = 'User not found';
+      return resp;
+    }
 
-    const result = await requestEmailOtp(currentEmail, name, context, 'update');
+    if (requiresPassword) {
+      const isPasswordValid = await bcrypt.compare(
+        password,
+        myUser.userId.password,
+      );
+      if (!isPasswordValid) {
+        resp.error = true;
+        resp.error_message = 'Invalid password';
+        return resp;
+      }
+    }
+
+    // Context includes who requested and target new email
+    const context = { userId: user.id, newEmail };
+
+    const result = await requestEmailOtp(
+      newEmail,
+      myUser.name,
+      context,
+      'update',
+    ); // Send to NEW email
 
     if (!result.ok) {
       resp.error = true;
@@ -269,8 +363,8 @@ export const sendEmailUpdateOtp = async (
 
     resp.data = {
       success: true,
-      message: `OTP has been sent to ${currentEmail}`,
-      email: currentEmail,
+      message: `OTP has been sent to ${newEmail}`,
+      email: newEmail, // Confirm OTP sent to new email
     };
     return resp;
   } catch (error) {
@@ -281,11 +375,11 @@ export const sendEmailUpdateOtp = async (
   }
 };
 
-export const verifyEmailUpdate = async ({ email, otp }, resp) => {
+export const verifyEmailUpdate = async (user, { email, otp }, resp) => {
   try {
-    if (!email || !otp) {
+    if (!email || !otp || !user) {
       resp.error = true;
-      resp.error_message = 'Email and OTP are required';
+      resp.error_message = 'Email, OTP, and user ID are required';
       return resp;
     }
 
@@ -307,7 +401,14 @@ export const verifyEmailUpdate = async ({ email, otp }, resp) => {
       return resp;
     }
 
-    // Prevent email collision (someone else might’ve taken it in the meantime)
+    // Verify the user ID matches
+    if (pending.userId.toString() !== user.id.toString()) {
+      resp.error = true;
+      resp.error_message = 'User ID mismatch';
+      return resp;
+    }
+
+    // Prevent email collision (someone else might've taken it in the meantime)
     const isTaken = await findUserByEmail(pending.newEmail);
     if (isTaken) {
       resp.error = true;
@@ -315,7 +416,7 @@ export const verifyEmailUpdate = async ({ email, otp }, resp) => {
       return resp;
     }
 
-    // Update the user’s email and reset verification flag
+    // Update the user's email and reset verification flag
     const updated = await updateUserById(pending.userId, {
       email: pending.newEmail,
       isEmailVerified: false,
@@ -334,35 +435,10 @@ export const verifyEmailUpdate = async ({ email, otp }, resp) => {
       emailPendingKey(email),
     );
 
-    resp.data = updated;
-    return resp;
-  } catch (error) {
-    console.error(`API ERROR: ${error}`);
-    resp.error = true;
-    resp.error_message = error.message || 'Something went wrong';
-    return resp;
-  }
-};
-
-export const sendPhoneUpdateOtp = async (
-  { currentPhone, newPhone, name, userId },
-  resp,
-) => {
-  try {
-    const context = { userId, newPhone };
-
-    const result = await requestPhoneOtp(currentPhone, name, context, 'update');
-
-    if (!result.ok) {
-      resp.error = true;
-      resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
-      return resp;
-    }
-
     resp.data = {
       success: true,
-      message: `OTP has been sent to ${currentPhone}`,
-      phoneNumber: currentPhone,
+      message: 'Email updated successfully',
+      user: updated,
     };
     return resp;
   } catch (error) {
@@ -373,11 +449,65 @@ export const sendPhoneUpdateOtp = async (
   }
 };
 
-export const verifyPhoneUpdate = async ({ phoneNumber, otp }, resp) => {
+export const sendPhoneUpdateOtp = async (
+  user,
+  { newPhone, requiresPassword = true, password },
+  resp,
+) => {
   try {
-    if (!phoneNumber || !otp) {
+    const myUser = await findUserById(user.id);
+    if (!myUser) {
       resp.error = true;
-      resp.error_message = 'Phone number and OTP are required';
+      resp.error_message = 'User not found';
+      return resp;
+    }
+
+    if (requiresPassword) {
+      const isPasswordValid = await bcrypt.compare(
+        password,
+        myUser.userId.password,
+      );
+      if (!isPasswordValid) {
+        resp.error = true;
+        resp.error_message = 'Invalid password';
+        return resp;
+      }
+    }
+
+    const context = { userId: user.id, newPhone };
+
+    const result = await requestPhoneOtp(
+      newPhone,
+      myUser.name,
+      context,
+      'update',
+    ); // Send to NEW phone
+
+    if (!result.ok) {
+      resp.error = true;
+      resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
+      return resp;
+    }
+
+    resp.data = {
+      success: true,
+      message: `OTP has been sent to ${newPhone}`,
+      phoneNumber: newPhone, // Confirm OTP sent to new phone
+    };
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
+    return resp;
+  }
+};
+
+export const verifyPhoneUpdate = async (user, { phoneNumber, otp }, resp) => {
+  try {
+    if (!phoneNumber || !otp || !user) {
+      resp.error = true;
+      resp.error_message = 'Phone number, OTP, and user ID are required';
       return resp;
     }
 
@@ -408,6 +538,13 @@ export const verifyPhoneUpdate = async ({ phoneNumber, otp }, resp) => {
       return resp;
     }
 
+    // Verify the user ID matches
+    if (pending.userId.toString() !== user.id.toString()) {
+      resp.error = true;
+      resp.error_message = 'User ID mismatch';
+      return resp;
+    }
+
     // Prevent duplicate phone
     const isTaken = await findUserByPhone(pending.newPhone);
     if (isTaken) {
@@ -435,9 +572,118 @@ export const verifyPhoneUpdate = async ({ phoneNumber, otp }, resp) => {
       phonePendingKey(phoneNumber),
     );
 
-    resp.data = updated;
+    resp.data = {
+      success: true,
+      message: 'Phone number updated successfully',
+      user: updated,
+    };
     return resp;
   } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
+    return resp;
+  }
+};
+
+export const verifyBothEmailAndPhoneUpdate = async (
+  user,
+  { email, emailOtp, phoneNumber, phoneOtp },
+  resp,
+) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    if (!email || !emailOtp || !phoneNumber || !phoneOtp || !user) {
+      resp.error = true;
+      resp.error_message = 'All fields are required for simultaneous update';
+      return resp;
+    }
+
+    // Verify both OTPs
+    const [emailResult, phoneResult] = await Promise.all([
+      verifyEmailOtp(email, emailOtp),
+      verifyPhoneOtp(phoneNumber, phoneOtp),
+    ]);
+
+    if (!emailResult.ok || !phoneResult.ok) {
+      resp.error = true;
+      resp.error_message = 'One or both OTPs are invalid or expired';
+      return resp;
+    }
+
+    const emailPending = emailResult.pending;
+    const phonePending = phoneResult.pending;
+
+    // Validate both contexts
+    if (
+      !emailPending ||
+      !phonePending ||
+      emailPending.userId.toString() !== user.id.toString() ||
+      phonePending.userId.toString() !== user.id.toString()
+    ) {
+      resp.error = true;
+      resp.error_message = 'Invalid verification context';
+      return resp;
+    }
+
+    // Check for duplicates
+    const [emailTaken, phoneTaken] = await Promise.all([
+      findUserByEmail(emailPending.newEmail),
+      findUserByPhone(phonePending.newPhone),
+    ]);
+
+    if (emailTaken || phoneTaken) {
+      resp.error = true;
+      resp.error_message = 'Email or phone number is already in use';
+      return resp;
+    }
+
+    // Update both email and phone in a single transaction
+    const updated = await updateUserById(
+      user.id,
+      {
+        email: emailPending.newEmail,
+        phoneNumber: phonePending.newPhone,
+        isEmailVerified: false,
+        isPhoneVerified: false,
+      },
+      { session },
+    );
+
+    if (!updated) {
+      resp.error = true;
+      resp.error_message = 'User not found';
+      return resp;
+    }
+
+    // Cleanup both OTP sessions
+    await Promise.all([
+      redisConfig.del(
+        emailOtpKey(email),
+        emailCooldownKey(email),
+        emailPendingKey(email),
+      ),
+      redisConfig.del(
+        phoneOtpKey(phoneNumber),
+        phoneCooldownKey(phoneNumber),
+        phonePendingKey(phoneNumber),
+      ),
+    ]);
+
+    await session.commitTransaction();
+    session.endSession();
+
+    resp.data = {
+      success: true,
+      message: 'Email and phone number updated successfully',
+      user: updated,
+    };
+    return resp;
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
     console.error(`API ERROR: ${error}`);
     resp.error = true;
     resp.error_message = error.message || 'Something went wrong';
