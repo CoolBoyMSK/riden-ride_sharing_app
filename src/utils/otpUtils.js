@@ -53,6 +53,17 @@ export const requestEmailOtp = async (email, username, context = {}, type) => {
     const cdTtl = await redisConfig.ttl(emailCooldownKey(email));
     if (cdTtl > 0) return { ok: false, waitSeconds: cdTtl };
 
+    // Clear any existing OTP data before creating new one
+    const keys = [
+      emailOtpKey(email),
+      emailCooldownKey(email),
+      emailPendingKey(email),
+      emailAttemptsKey(email),
+      emailVerifiedKey(email),
+    ];
+
+    await redisConfig.del(...keys);
+
     const otp = generateOtp();
     const hashed = hashOtp(otp);
 
@@ -67,7 +78,6 @@ export const requestEmailOtp = async (email, username, context = {}, type) => {
       );
     }
 
-    // Instead of direct send, add a job to queue
     await emailQueue.add('sendEmailOtp', { email, otp, username, type });
 
     return { ok: true };
@@ -160,6 +170,14 @@ export const requestPhoneOtp = async (
     const ttl = await redisConfig.ttl(phoneCooldownKey(currentPhone));
     return { ok: false, reason: 'cooldown', waitSeconds: ttl };
   }
+
+  // 🚨 CLEAR PREVIOUS OTP DATA BEFORE CREATING NEW ONE
+  await redisConfig.del(
+    phoneOtpKey(currentPhone),
+    phonePendingKey(currentPhone),
+    phoneAttemptsKey(currentPhone),
+    phoneVerifiedKey(currentPhone),
+  );
 
   const otp = String(Math.floor(10000 + Math.random() * 90000));
   const otpHash = hashOtp(otp);

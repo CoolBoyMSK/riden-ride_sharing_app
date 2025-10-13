@@ -6,7 +6,7 @@ import {
   countTotalPendingRequests,
 } from '../../../dal/payout.js';
 import {
-  instantPayoutDriver,
+  transferToDriverAccount,
   refundCardPaymentToPassenger,
   refundWalletPaymentToPassenger,
 } from '../../../dal/stripe.js';
@@ -110,7 +110,7 @@ export const editInstantPayoutRequest = async (user, { id, status }, resp) => {
         return resp;
       }
 
-      success = await instantPayoutDriver(data.driverId, data._id);
+      success = await transferToDriverAccount(data.driverId, data._id);
       if (!success) {
         resp.error = true;
         resp.error_message = 'Failed to pay driver';
@@ -158,11 +158,9 @@ export const getInstantPayoutRequestsCount = async (user, resp) => {
   }
 };
 
-export const refundPassenger = async ({ id, reason }, resp) => {
+export const refundPassenger = async (user, { id, reason }, resp) => {
   try {
-    const ride = await findCompletedRide(id);
-    console.log(ride);
-
+    let ride = await findCompletedRide(id);
     if (!ride) {
       resp.error = true;
       resp.error_message = 'Failed to find completed ride';
@@ -173,23 +171,26 @@ export const refundPassenger = async ({ id, reason }, resp) => {
       const success = await refundCardPaymentToPassenger(ride._id, reason);
       if (!success) {
         resp.error = true;
-        resp.error_message = 'Failed to refund passenger';
+        resp.error_message = 'Failed to refund card passenger';
         return resp;
       }
 
       resp.data = success;
       return resp;
-    }
-
-    if (ride.paymentMethod === 'WALLET') {
+    } else if (ride.paymentMethod === 'WALLET') {
       const success = await refundWalletPaymentToPassenger(ride._id, reason);
+      console.log(success);
       if (!success) {
         resp.error = true;
-        resp.error_message = 'Failed to refund passenger';
+        resp.error_message = 'Failed to refund wallet passenger';
         return resp;
       }
 
       resp.data = success;
+      return resp;
+    } else {
+      resp.error = true;
+      resp.error_message = 'Invalid payment method';
       return resp;
     }
   } catch (error) {

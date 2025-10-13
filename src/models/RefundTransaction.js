@@ -9,7 +9,7 @@ const refundTransactionSchema = new mongoose.Schema(
     },
     passengerId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
+      ref: 'Passenger',
       required: true,
     },
     driverId: {
@@ -25,8 +25,7 @@ const refundTransactionSchema = new mongoose.Schema(
       type: String,
     },
     driverDeducted: {
-      type: Boolean,
-      default: false,
+      type: Number,
     },
     resolvedBy: {
       type: String,

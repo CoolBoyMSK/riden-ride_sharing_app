@@ -15,6 +15,7 @@ import {
   deleteExternalAccount,
   setDefaultExternalAccount,
   createPayoutRequest,
+  payoutToDriverBank,
 } from '../../../../dal/stripe.js';
 
 export const addPayoutMethod = async (user, { bankDetails }, resp) => {
@@ -409,6 +410,32 @@ export const sendInstantPayoutRequest = async (user, resp) => {
     if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to send payout request';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
+    return resp;
+  }
+};
+
+export const sendPayoutToDriverBank = async (user, { amount }, resp) => {
+  try {
+    const driver = await findDriverByUserId(user._id);
+    if (!driver) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch driver';
+      return resp;
+    }
+
+    const success = await payoutToDriverBank(driver, amount);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to send payout to bank';
       return resp;
     }
 

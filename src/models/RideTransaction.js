@@ -46,9 +46,16 @@ const rideTransactionSchema = new mongoose.Schema(
       type: String,
       enum: ['COMPLETED', 'REFUNDED', 'DISPUTED'],
     },
+    isRefunded: {
+      type: Boolean,
+      default: false,
+    },
     payoutWeek: {
       type: String, // Format: '25-10-2025' or 'week_2025_42'
       required: true,
+    },
+    metadata: {
+      type: Object,
     },
   },
   { timestamps: true },

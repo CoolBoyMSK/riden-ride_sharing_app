@@ -4,6 +4,7 @@ import UserModel from '../models/User.js';
 import UpdateRequestModel from '../models/updateRequest.js';
 import DestinationModel from '../models/Destination.js';
 import RideModel from '../models/Ride.js';
+import DriverWallet from '../models/DriverWallet.js';
 import { DOCUMENT_TYPES } from '../enums/driver.js';
 
 export const findDriverByUserId = (userId, { session } = {}) => {
@@ -11,6 +12,11 @@ export const findDriverByUserId = (userId, { session } = {}) => {
   if (session) query = query.session(session);
   return query.lean();
 };
+
+export const createDriverWallet = (driverId) =>
+  new DriverWallet({
+    driverId,
+  }).save();
 
 export const createDriverProfile = (userId, uniqueId) =>
   new DriverModel({
@@ -20,22 +26,17 @@ export const createDriverProfile = (userId, uniqueId) =>
   }).save();
 
 export const updateDriverByUserId = async (id, update, options = {}) => {
-  try {
-    const objectId = mongoose.Types.ObjectId.isValid(id)
-      ? new mongoose.Types.ObjectId(id)
-      : id;
+  const objectId = mongoose.Types.ObjectId.isValid(id)
+    ? new mongoose.Types.ObjectId(id)
+    : id;
 
-    const updatedDriver = await DriverModel.findOneAndUpdate(
-      { userId: objectId },
-      update,
-      { new: true, session: options.session },
-    );
+  const updatedDriver = await DriverModel.findOneAndUpdate(
+    { userId: objectId },
+    update,
+    { new: true, session: options.session },
+  );
 
-    return updatedDriver;
-  } catch (error) {
-    console.error('❌ Error in updateDriverByUserId:', error);
-    throw error;
-  }
+  return updatedDriver;
 };
 
 export const countDrivers = () => DriverModel.countDocuments();
@@ -752,18 +753,13 @@ export const findDriverWayBill = async (driverId) => {
 };
 
 export const findCompletedRide = async (rideId) => {
-  try {
-    const ride = await RideModel.findOne({
-      // _id: rideId,
-      status: 'RIDE_COMPLETED',
-      paymentStatus: 'COMPLETED',
-    })
-      .populate('passengerId driverId')
-      .lean();
+  const ride = await RideModel.findOne({
+    _id: rideId,
+    status: 'RIDE_COMPLETED',
+    paymentStatus: 'COMPLETED',
+  })
+    .populate('passengerId driverId')
+    .lean();
 
-    return ride;
-  } catch (error) {
-    console.error(`ERROR in findCompletedRide: ${error.message}`);
-    return false;
-  }
+  return ride;
 };

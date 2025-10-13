@@ -243,9 +243,7 @@ export const topUpInAppWallet = async (
       return resp;
     }
 
-    resp.data = {
-      success: success.status === 'succeeded' ? true : false,
-    };
+    resp.data = success;
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);

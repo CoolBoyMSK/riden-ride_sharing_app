@@ -22,6 +22,7 @@ import {
   createDriverProfile,
   findDriverByUserId,
   updateDriverByUserId,
+  createDriverWallet,
 } from '../../../dal/driver.js';
 import {
   createPassengerStripeCustomer,
@@ -72,8 +73,6 @@ export const signupUser = async (
           name,
           phoneNumber,
           password: hashed,
-          isPhoneVerified: true,
-          isEmailVerified: true,
           isCompleted: true,
         },
       );
@@ -84,8 +83,6 @@ export const signupUser = async (
           email,
           name,
           password: hashed,
-          isPhoneVerified: true,
-          isEmailVerified: true,
           isCompleted: true,
         },
       );
@@ -104,6 +101,13 @@ export const signupUser = async (
     if (!stripeAccountId) {
       resp.error = true;
       resp.error_message = 'Failed to create stripe Account Id';
+      return resp;
+    }
+
+    const wallet = await createDriverWallet(driverProfile._id);
+    if (!wallet) {
+      resp.error = true;
+      resp.error_message = 'Failed to create driver wallet';
       return resp;
     }
 
@@ -547,14 +551,20 @@ export const otpVerification = async (
       );
 
       if (user.roles.includes('driver')) {
-        const driver = await updateDriverByUserId(user._id, {
-          status: driver.status === 'offline' ? 'online' : driver.status,
-          isActive: true,
-        });
+        let driver = await findDriverByUserId(user._id);
         if (!driver) {
-          resp.error = true;
-          resp.error_message = 'Failed to activate driver';
-          return resp;
+          const uniqueId = generateUniqueId(user.roles[0], user._id);
+          driver = await createDriverProfile(user._id, uniqueId);
+          await updateDriverByUserId(user._id, {
+            status: driver.status === 'offline' ? 'online' : driver.status,
+            isActive: true,
+          });
+        } else {
+          console.log('Available');
+          driver = await updateDriverByUserId(user._id, {
+            status: driver.status === 'offline' ? 'online' : driver.status,
+            isActive: true,
+          });
         }
       } else if (user.roles.includes('passenger')) {
         const passenger = await updatePassenger(
@@ -638,14 +648,20 @@ export const otpVerification = async (
       );
 
       if (user.roles.includes('driver')) {
-        const driver = await updateDriverByUserId(user._id, {
-          status: driver.status === 'offline' ? 'online' : driver.status,
-          isActive: true,
-        });
+        let driver = await findDriverByUserId(user._id);
         if (!driver) {
-          resp.error = true;
-          resp.error_message = 'Failed to activate driver';
-          return resp;
+          const uniqueId = generateUniqueId(user.roles[0], user._id);
+          driver = await createDriverProfile(user._id, uniqueId);
+          await updateDriverByUserId(user._id, {
+            status: driver.status === 'offline' ? 'online' : driver.status,
+            isActive: true,
+          });
+        } else {
+          console.log('Available');
+          driver = await updateDriverByUserId(user._id, {
+            status: driver.status === 'offline' ? 'online' : driver.status,
+            isActive: true,
+          });
         }
       } else if (user.roles.includes('passenger')) {
         const passenger = await updatePassenger(

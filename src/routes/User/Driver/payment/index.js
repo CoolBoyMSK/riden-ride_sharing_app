@@ -17,6 +17,7 @@ import {
   deletePayoutMethodController,
   setDefaultPayoutMethodController,
   sendInstantPayoutRequestController,
+  sendPayoutToDriverBankController,
 } from '../../../../controllers/User/Drivers/payment/index.js';
 
 const router = express.Router();
@@ -127,5 +128,12 @@ registerRoute({
   route: '/request',
   driver_auth_enable: true,
   post_method: sendInstantPayoutRequestController,
+});
+
+registerRoute({
+  router,
+  route: '/transfer',
+  driver_auth_enable: true,
+  post_method: sendPayoutToDriverBankController,
 });
 export default router;

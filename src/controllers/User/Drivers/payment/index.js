@@ -15,6 +15,7 @@ import {
   deletePayoutMethod,
   setDefaultPayoutMethod,
   sendInstantPayoutRequest,
+  sendPayoutToDriverBank,
 } from '../../../../services/User/driver/payment/index.js';
 
 export const addPayoutMethodController = (req, res) =>
@@ -193,6 +194,18 @@ export const sendInstantPayoutRequestController = (req, res) =>
       validationFn: null,
       handlerParams: [req.user],
       successMessage: 'Payout request sent successfully',
+    },
+    req,
+    res,
+  );
+
+export const sendPayoutToDriverBankController = (req, res) =>
+  handleResponse(
+    {
+      handler: sendPayoutToDriverBank,
+      validationFn: null,
+      handlerParams: [req.user, req.body],
+      successMessage: 'Payout sent to bank successfully',
     },
     req,
     res,

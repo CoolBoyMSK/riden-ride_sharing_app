@@ -38,6 +38,8 @@ const transactionSchema = new mongoose.Schema(
         'INSTANT-PAYOUT',
         'TRANSFER',
         'REFUND',
+        'NEGATIVE_BALANCE_CLEARANCE',
+        'NEGATIVE_BALANCE',
       ],
       required: true,
       index: true,
@@ -48,9 +50,9 @@ const transactionSchema = new mongoose.Schema(
     },
     for: {
       type: String,
-      enum: ["admin", "driver", "passenger"],
+      enum: ['admin', 'driver', 'passenger'],
       required: true,
-      index: true
+      index: true,
     },
     amount: {
       type: Number,
@@ -77,6 +79,10 @@ const transactionSchema = new mongoose.Schema(
       type: String,
       trim: true,
       default: '',
+    },
+    isRefunded: {
+      type: Boolean,
+      default: false,
     },
   },
   { timestamps: true },
