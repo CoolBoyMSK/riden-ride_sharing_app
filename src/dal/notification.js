@@ -456,6 +456,8 @@ export const notifyUser = async ({
   metadata = {},
   type = 'ALERT',
   actionLink = null,
+  storeInDB = true,
+  isPush = true,
 }) => {
   try {
     if (!userId || !title || !message || !module) {
@@ -486,46 +488,51 @@ export const notifyUser = async ({
     }
 
     // --- Create Notification in DB ---
-    const createdNotification = await createUserNotification({
-      title,
-      message,
-      module,
-      userId,
-      metadata,
-      type,
-      actionLink,
-    });
-
-    if (!createdNotification.success) {
-      return createdNotification;
-    }
-
-    const notificationDoc = createdNotification.data;
-
-    // --- Check User Notification Preferences + Token ---
-    if (
-      user.userDeviceToken &&
-      user.notifications &&
-      user.notifications[module] === true
-    ) {
-      const pushResponse = await sendPushNotification({
-        deviceToken: user.userDeviceToken,
+    let notificationDoc = null;
+    if (storeInDB) {
+      const createdNotification = await createUserNotification({
         title,
-        body: message,
-        data: {
-          module,
-          type,
-          ...metadata,
-        },
-        imageUrl: actionLink || undefined,
+        message,
+        module,
+        userId,
+        metadata,
+        type,
+        actionLink,
       });
 
-      return {
-        success: true,
-        message: 'Notification created and push sent successfully.',
-        dbNotification: notificationDoc,
-        pushNotification: pushResponse,
-      };
+      if (!createdNotification.success) {
+        return createdNotification;
+      }
+
+      notificationDoc = createdNotification.data;
+    }
+
+    // --- Check User Notification Preferences + Token ---
+    if (isPush) {
+      if (
+        user.userDeviceToken &&
+        user.notifications &&
+        user.notifications[module] === true
+      ) {
+        const pushResponse = await sendPushNotification({
+          deviceToken: user.userDeviceToken,
+          title,
+          body: message,
+          data: {
+            module,
+            type,
+            ...metadata,
+          },
+          imageUrl: actionLink || undefined,
+        });
+
+        return {
+          success: true,
+          message: 'Notification created and push sent successfully.',
+          dbNotification: notificationDoc,
+          pushNotification: pushResponse,
+        };
+      }
     }
 
     return {

@@ -1187,6 +1187,21 @@ export const initSocket = (server) => {
             });
           }
 
+          // Notification Logic Start
+          const notify = await notifyUser({
+            userId: ride.passengerId?.userId,
+            title: 'Driver Rated You',
+            message: `You passenger has gave you ${rating} star rating.`,
+            module: 'ride',
+            metadata: ride,
+            type: 'ALERT',
+            actionLink: `passenger_rated`,
+          });
+          if (!notify) {
+            console.error('Failed to send notification');
+          }
+          // Notification Logic End
+
           // Notify passenger of new rating
           socket.join(`ride:${updatedRide._id}`);
           io.to(`ride:${ride._id}`).emit('ride:driver_rate_passenger', {
@@ -1832,7 +1847,7 @@ export const initSocket = (server) => {
           const notify = await notifyUser({
             userId: ride.driverId?.userId,
             title: 'Ride Cancelled',
-            message: `Your ride has been cancelled. We're sorry for the inconvenience. You can book a new ride anytime from the home screen.`,
+            message: `Passenger cancelled the ride — stay online to catch the next trip! `,
             module: 'ride',
             metadata: updatedRide,
             type: 'ALERT',
@@ -1965,6 +1980,21 @@ export const initSocket = (server) => {
               message: 'Failed to save driver rating',
             });
           }
+
+          // Notification Logic Start
+          const notify = await notifyUser({
+            userId: ride.driverId?.userId,
+            title: 'Passenger Rated You',
+            message: `You passenger has gave you ${rating} star rating.`,
+            module: 'ride',
+            metadata: ride,
+            type: 'ALERT',
+            actionLink: `driver_rated`,
+          });
+          if (!notify) {
+            console.error('Failed to send notification');
+          }
+          // Notification Logic End
 
           socket.join(`ride:${updatedRide._id}`);
           io.to(`ride:${ride._id}`).emit('ride:passenger_rate_driver', {
@@ -2212,6 +2242,35 @@ export const initSocket = (server) => {
               });
             }
 
+            // Notification Logic Start
+            const notifyPassenger = await notifyUser({
+              userId: ride.passengerId?.userId,
+              title: 'Payment Successful!',
+              message: `Thanks for riding with RIDEN. Your payment of ${ride.actualAmount} was completed successfully. Receipts are available in your ride history`,
+              module: 'payment',
+              metadata: ride,
+              type: 'ALERT',
+              actionLink: `pay_driver`,
+              isPush: false,
+            });
+            if (!notifyPassenger) {
+              console.error('Failed to send notification');
+            }
+
+            const notifyDriver = await notifyUser({
+              userId: ride.driverId?.userId,
+              title: 'Payment Done',
+              message: `Payment successful! ${fare} has been added to your Riden wallet`,
+              module: 'payment',
+              metadata: ride,
+              type: 'ALERT',
+              actionLink: `passenger_paid`,
+            });
+            if (!notifyDriver) {
+              console.error('Failed to send notification');
+            }
+            // Notification Logic End
+
             io.to(`ride:${ride._id}`).emit('ride:pay_driver', {
               success: true,
               objectType,
@@ -2274,6 +2333,46 @@ export const initSocket = (server) => {
               paymentStatus: 'COMPLETED',
               driverPaidAt: new Date(),
             });
+
+            const receipt = await generateRideReceipt(ride._id);
+            if (!receipt) {
+              return socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'RECEIPT_FAILED',
+                message: 'Failed to generate the receipt',
+              });
+            }
+
+            // Notification Logic Start
+            const notifyPassenger = await notifyUser({
+              userId: ride.passengerId?.userId,
+              title: 'Payment Successful!',
+              message: `Thanks for riding with RIDEN. Your payment of ${ride.actualAmount} was completed successfully. Receipts are available in your ride history`,
+              module: 'payment',
+              metadata: ride,
+              type: 'ALERT',
+              actionLink: `pay_driver`,
+              isPush: false,
+            });
+            if (!notifyPassenger) {
+              console.error('Failed to send notification');
+            }
+
+            const notifyDriver = await notifyUser({
+              userId: ride.driverId?.userId,
+              title: 'Payment Done',
+              message: `Payment successful! ${fare} has been added to your Riden wallet`,
+              module: 'payment',
+              metadata: ride,
+              type: 'ALERT',
+              actionLink: `passenger_paid`,
+            });
+            if (!notifyDriver) {
+              console.error('Failed to send notification');
+            }
+            // Notification Logic End
+
             io.to(`ride:${ride._id}`).emit('ride:pay_driver', {
               success: true,
               objectType,
@@ -2389,132 +2488,17 @@ export const initSocket = (server) => {
       }
     });
 
-    // socket.on(
-    //   'ride:send_message',
-    //   async ({ rideId, text, messageType = 'text', attachments }) => {
-    //     const objectType = 'ride-send-message';
-    //     try {
-    //       let sender;
-    //       if (socket.user.roles.includes('driver')) {
-    //         sender = await findDriverByUserId(userId);
-
-    //         if (
-    //           !sender ||
-    //           sender.isBlocked ||
-    //           sender.isSuspended ||
-    //           sender.backgroundCheckStatus !== 'approved' ||
-    //           !['online', 'on_ride'].includes(sender.status)
-    //         ) {
-    //           return socket.emit('error', {
-    //             success: false,
-    //             objectType,
-    //             code: 'FORBIDDEN',
-    //             message: 'Forbidden: Driver not eligible',
-    //           });
-    //         }
-    //       } else if (socket.user.roles.includes('passenger')) {
-    //         sender = await findPassengerByUserId(userId);
-
-    //         if (!sender || sender.isBlocked || sender.isSuspended) {
-    //           return socket.emit('error', {
-    //             success: false,
-    //             objectType,
-    //             code: 'FORBIDDEN',
-    //             message: 'Forbidden: Passenger not eligible',
-    //           });
-    //         }
-    //       }
-
-    //       if (!rideId) {
-    //         return socket.emit('error', {
-    //           success: false,
-    //           message: 'Ride Id is required',
-    //         });
-    //       } else if (!text || text.trim().length === 0) {
-    //         return socket.emit('error', {
-    //           success: false,
-    //           message: 'Empty message is not allowed',
-    //         });
-    //       } else if (
-    //         !['text', 'system', 'location', 'image'].includes(messageType)
-    //       ) {
-    //         return socket.emit('error', {
-    //           success: false,
-    //           message: 'Invalid message type',
-    //         });
-    //       }
-
-    //       const chat = await findChatRoomByRideId(rideId);
-    //       if (!chat) {
-    //         return socket.emit('error', {
-    //           success: false,
-    //           message: 'Chat not found',
-    //         });
-    //       }
-
-    //       const newMsg = await createMessage({
-    //         rideId,
-    //         senderId: sender.userId,
-    //         chatRoomId: chat._id,
-    //         text,
-    //         messageType,
-    //         attachments,
-    //       });
-
-    //       const payload = { $push: { messages: { messageId: newMsg._id } } };
-
-    //       const updatedChat = await updateChatById(chat._id, payload);
-    //       if (!updatedChat) {
-    //         return socket.emit('error', {
-    //           success: false,
-    //           objectType,
-    //           code: 'MESSAGE_FAILED',
-    //           message: 'Failed to send message',
-    //         });
-    //       }
-
-    //       // Notification Logic Start
-    //       const notify = await notifyUser({
-    //         userId: ride.passengerId?.userId,
-    //         title: 'Your Driver Wants to Chat',
-    //         message: `Your driver has sent you a message. Open the chat to respond quickly.`,
-    //         module: 'chat',
-    //         metadata: updatedChat,
-    //         type: 'ALERT',
-    //         actionLink: `${env.BASE_URL}/api/user/profile/me`,
-    //       });
-    //       if (!notify) {
-    //         console.error('Failed to send notification');
-    //       }
-    //       // Notification Logic End
-
-    //       socket.join(`ride:${rideId}`);
-    //       io.to(`ride:${rideId}`).emit('ride:send_message', {
-    //         success: true,
-    //         objectType,
-    //         data: updatedChat,
-    //         message: `${socket.user.roles[0]} send you a message`,
-    //       });
-    //     } catch (error) {
-    //       console.error(`SOCKET ERROR: ${error}`);
-    //       return socket.emit('error', {
-    //         success: false,
-    //         objectType,
-    //         code: `${error.code || 'SOCKET_ERROR'}`,
-    //         message: `SOCKET ERROR: ${error.message}`,
-    //       });
-    //     }
-    //   },
-    // );
-
     socket.on(
       'ride:send_message',
       async ({ rideId, text, messageType = 'text', attachments }) => {
         const objectType = 'ride-send-message';
+
         try {
           let sender;
+          let role;
           if (socket.user.roles.includes('driver')) {
             sender = await findDriverByUserId(userId);
+            role = 'driver';
 
             if (
               !sender ||
@@ -2532,6 +2516,7 @@ export const initSocket = (server) => {
             }
           } else if (socket.user.roles.includes('passenger')) {
             sender = await findPassengerByUserId(userId);
+            role = 'passenger';
 
             if (!sender || sender.isBlocked || sender.isSuspended) {
               return socket.emit('error', {
@@ -2591,63 +2576,35 @@ export const initSocket = (server) => {
             });
           }
 
-          // Get ride details to identify receiver
-          const ride = await findRideById(rideId); // Add this line to get ride details
-          if (!ride) {
-            return socket.emit('error', {
-              success: false,
-              message: 'Ride not found',
-            });
+          // Notification Logic Start
+          const notify = await notifyUser({
+            userId:
+              role === 'driver'
+                ? ride.passengerId?.userId
+                : ride.driverId?.userId,
+            title:
+              role === 'driver' ? 'Your Driver Wants to Chat' : 'New Message',
+            message:
+              role === 'driver'
+                ? `Your driver has sent you a message. Open the chat to respond quickly.`
+                : `Your Passenger just sent you a message.`,
+            module: 'chat',
+            metadata: updatedChat,
+            type: 'ALERT',
+            actionLink: `new_message`,
+            storeInDB: false,
+          });
+          if (!notify) {
+            console.error('Failed to send notification');
           }
+          // Notification Logic End
 
-          // Determine receiver ID based on sender role
-          let receiverId;
-          if (socket.user.roles.includes('driver')) {
-            receiverId = ride.passengerId?.userId;
-          } else if (socket.user.roles.includes('passenger')) {
-            receiverId = ride.driverId?.userId;
-          }
-
-          // Check if receiver is currently active (in the ride room)
-          const rideRoom = `ride:${rideId}`;
-          const clients = await io.in(rideRoom).fetchSockets();
-
-          let isReceiverActive = false;
-          for (const client of clients) {
-            if (
-              client.user &&
-              client.user._id.toString() === receiverId?.toString()
-            ) {
-              isReceiverActive = true;
-              break;
-            }
-          }
-
-          // Send notification ONLY if receiver is not active
-          if (!isReceiverActive && receiverId) {
-            // Notification Logic Start
-            const notify = await notifyUser({
-              userId: receiverId,
-              title: 'Your Driver Wants to Chat',
-              message: `Your driver has sent you a message. Open the chat to respond quickly.`,
-              module: 'chat',
-              metadata: updatedChat,
-              type: 'ALERT',
-              actionLink: `${env.BASE_URL}/api/user/profile/me`,
-            });
-            if (!notify) {
-              console.error('Failed to send notification');
-            }
-            // Notification Logic End
-          }
-
-          // Always emit socket event to all clients in the ride room
-          socket.join(rideRoom);
-          io.to(rideRoom).emit('ride:send_message', {
+          socket.join(`ride:${rideId}`);
+          io.to(`ride:${rideId}`).emit('ride:send_message', {
             success: true,
             objectType,
             data: updatedChat,
-            message: `${socket.user.roles[0]} sent you a message`,
+            message: `${socket.user.roles[0]} send you a message`,
           });
         } catch (error) {
           console.error(`SOCKET ERROR: ${error}`);
@@ -3095,14 +3052,7 @@ export const initSocket = (server) => {
                 message: `${caller._id} is calling you`,
               }),
             );
-            socket.emit('ride:start_call', {
-              success: true,
-              objectType,
-              data: callLog,
-              message: 'Call initiated successfully',
-            });
-          } else {
-            // receiver offline — fallback to push notification
+
             const notify = await notifyUser({
               userId: receiverId,
               title: 'Incoming Call 📞',
@@ -3110,7 +3060,34 @@ export const initSocket = (server) => {
               module: 'call',
               type: 'ALERT',
               metadata: callLog,
-              actionLink: '',
+              actionLink: 'call_started',
+              storeInDB: false,
+            });
+            if (!notify) {
+              socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'NOTIFICATION_FAILED',
+                message: 'Failed to send notification',
+              });
+            }
+
+            socket.emit('ride:start_call', {
+              success: true,
+              objectType,
+              data: callLog,
+              message: 'Call initiated successfully',
+            });
+          } else {
+            const notify = await notifyUser({
+              userId: receiverId,
+              title: 'Incoming Call 📞',
+              message: `Incoming call from your ${role} — tap to answer!`,
+              module: 'call',
+              type: 'ALERT',
+              metadata: callLog,
+              actionLink: 'call_started',
+              storeInDB: false,
             });
             if (!notify) {
               socket.emit('error', {

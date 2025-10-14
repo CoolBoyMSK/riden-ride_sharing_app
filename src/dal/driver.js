@@ -5,6 +5,7 @@ import UpdateRequestModel from '../models/updateRequest.js';
 import DestinationModel from '../models/Destination.js';
 import RideModel from '../models/Ride.js';
 import DriverWallet from '../models/DriverWallet.js';
+import DriverLocation from '../models/DriverLocation.js';
 import { DOCUMENT_TYPES } from '../enums/driver.js';
 
 export const findDriverByUserId = (userId, { session } = {}) => {
@@ -762,4 +763,100 @@ export const findCompletedRide = async (rideId) => {
     .lean();
 
   return ride;
+};
+
+export const findNearbyDriverUserIds = async (
+  carType,
+  location,
+  radius = 10000,
+  { excludeDriverIds = [], limit = 50, session = null } = {},
+) => {
+  try {
+    const aggregationPipeline = [
+      // Stage 1: Find nearby available driver locations
+      {
+        $geoNear: {
+          near: {
+            type: 'Point',
+            coordinates: location,
+          },
+          distanceField: 'distance',
+          maxDistance: radius,
+          spherical: true,
+          query: {
+            status: 'online',
+            isAvailable: true,
+            currentRideId: { $in: [null, undefined, ''] }, // ✅ No active ride
+            ...(excludeDriverIds.length > 0 && {
+              driverId: { $nin: excludeDriverIds },
+            }),
+          },
+        },
+      },
+      // Stage 2: Limit results
+      { $limit: limit },
+      // Stage 3: Lookup driver details
+      {
+        $lookup: {
+          from: 'drivers',
+          localField: 'driverId',
+          foreignField: '_id',
+          as: 'driver',
+        },
+      },
+      // Stage 4: Unwind driver array
+      { $unwind: '$driver' },
+      // Stage 5: Match driver criteria
+      {
+        $match: {
+          'driver.vehicle.type': carType,
+          'driver.isBlocked': false,
+          'driver.isSuspended': false,
+          'driver.isActive': true,
+          'driver.backgroundCheckStatus': 'approved',
+          'driver.status': 'online',
+        },
+      },
+      // Stage 6: Lookup user to ensure user exists and get user details if needed
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'driver.userId',
+          foreignField: '_id',
+          as: 'user',
+        },
+      },
+      // Stage 7: Ensure user exists and is not blocked
+      {
+        $match: {
+          user: { $ne: [] }, // User exists
+          'user.0.isBlocked': { $ne: true }, // User not blocked
+        },
+      },
+      // Stage 8: Project only the user ID
+      {
+        $project: {
+          userId: '$driver.userId',
+          distance: 1,
+          driverName: '$driver.userId.name', // Optional: if you need driver info
+        },
+      },
+      // Stage 9: Sort by distance (closest first)
+      {
+        $sort: {
+          distance: 1,
+        },
+      },
+    ];
+
+    const result = await DriverLocation.aggregate(aggregationPipeline).session(
+      session || null,
+    );
+
+    const userIds = result.map((item) => item.userId);
+    return userIds;
+  } catch (error) {
+    console.error('Error finding nearby driver user IDs:', error);
+    throw error;
+  }
 };

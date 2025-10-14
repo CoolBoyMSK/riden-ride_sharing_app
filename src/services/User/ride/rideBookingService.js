@@ -5,6 +5,7 @@ import {
   findRideByRideId,
 } from '../../../dal/ride.js';
 import { findPassengerByUserId } from '../../../dal/passenger.js';
+import { findNearbyDriverUserIds } from '../../../dal/driver.js';
 import { getPassengerWallet } from '../../../dal/stripe.js';
 import { validatePromoCode } from '../../../dal/promo_code.js';
 import { calculateEstimatedFare } from './fareCalculationService.js';
@@ -14,6 +15,7 @@ import {
 } from './driverMatchingService.js';
 import { notifyUser } from '../../../dal/notification.js';
 import env from '../../../config/envConfig.js';
+import { emitToUser } from '../../../realtime/socket.js';
 
 // Calculate distance using simple Haversine formula (for estimation)
 const calculateDistance = (pickup, dropoff) => {
@@ -214,8 +216,8 @@ export const bookRide = async (userId, rideData) => {
       // Notification Logic Start
       const notify = await notifyUser({
         userId: passenger.userId,
-        title: 'Your Ride is Booked!',
-        message: `Get ready to go! A RIDEN driver is on the way to pick you up. Sit back, relax, and track your ride in real-time.`,
+        title: 'New Ride',
+        message: `New ride request from ${pickupLocation.address} to ${dropoffLocation.address} — tap to respond! `,
         module: 'ride',
         metadata: newRide,
         type: 'ALERT',
@@ -224,6 +226,25 @@ export const bookRide = async (userId, rideData) => {
       if (!notify) {
         console.error('Failed to send notification');
       }
+
+      const availableDrivers = await findNearbyDriverUserIds(
+        carType,
+        pickupLocation.coordinates,
+      );
+
+      if (availableDrivers.length > 0) {
+        const rideNotificationData = {
+          success: true,
+          objectType: 'new-ride',
+          ride: newRide,
+          message: `New ride request from ${pickupLocation.address} to ${dropoffLocation.address} — tap to respond`,
+        };
+
+        availableDrivers.forEach((driver) => {
+          emitToUser(driver.userId, 'ride:new_request', rideNotificationData);
+        });
+      }
+
       // Notification Logic End
       return {
         success: true,
