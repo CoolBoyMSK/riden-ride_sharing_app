@@ -6,6 +6,7 @@ import {
   getWeeklyStatsController,
   getDailyStatsForWeekController,
   getDrivingHoursController,
+  fetchDriverBalanceController,
 } from '../../../../controllers/User/Drivers/Stats/index.js';
 
 const router = express.Router();
@@ -43,6 +44,13 @@ registerRoute({
   route: '/hours',
   driver_auth_enable: true,
   get_method: getDrivingHoursController,
+});
+
+registerRoute({
+  router,
+  route: '/balance',
+  driver_auth_enable: true,
+  get_method: fetchDriverBalanceController,
 });
 
 export default router;

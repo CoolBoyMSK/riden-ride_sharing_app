@@ -6,6 +6,7 @@ import Booking from '../../models/Ride.js';
 import Feedback from '../../models/Feedback.js';
 import Driver from '../../models/Driver.js';
 import DriverLocation from '../../models/DriverLocation.js';
+import RefundTransaction from '../../models/RefundTransaction.js';
 import Passenger from '../../models/Passenger.js';
 import Report from '../../models/Report.js';
 import CMS from '../../models/CMS.js';
@@ -235,105 +236,6 @@ export const findFinishedBookings = async ({
     totalPages: Math.ceil(total / safeLimit) || 0,
   };
 };
-
-// export const findOngoingBookings = async ({
-//   page = 1,
-//   limit = 10,
-//   search = '',
-//   fromDate,
-//   toDate,
-// }) => {
-//   const safePage = Number(page) > 0 ? Number(page) : 1;
-//   const safeLimit = Number(limit) > 0 ? Number(limit) : 10;
-
-//   const ongoingStatuses = [
-//     'REQUESTED',
-//     'DRIVER_ASSIGNED',
-//     'DRIVER_ARRIVING',
-//     'DRIVER_ARRIVED',
-//     'RIDE_STARTED',
-//     'RIDE_IN_PROGRESS',
-//   ];
-
-//   // ✅ Fixed date filter using DD-MM-YYYY safe parser
-//   const match = { status: { $in: ongoingStatuses } };
-//   if (fromDate || toDate) {
-//     match.createdAt = {};
-//     if (fromDate) match.createdAt.$gte = parseDate(fromDate, false);
-//     if (toDate) match.createdAt.$lte = parseDate(toDate, true);
-//   }
-
-//   // Load everything with passenger/driver populated
-//   const allBookings = await Booking.find(match)
-//     .populate({
-//       path: 'passengerId',
-//       populate: { path: 'userId', select: 'name email phoneNumber' },
-//     })
-//     .populate({
-//       path: 'driverId',
-//       populate: { path: 'userId', select: 'name email phoneNumber' },
-//     })
-//     .lean();
-
-//   // ✅ Fixed search (escape regex safely)
-//   const safeSearch = typeof search === 'string' ? search.trim() : '';
-//   const escapedSearch = safeSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-//   const regex = safeSearch ? new RegExp(escapedSearch, 'i') : null;
-
-//   // Filter in JS for guaranteed accuracy
-//   const filtered = regex
-//     ? allBookings.filter((b) => {
-//         const passenger = b.passengerId?.userId || {};
-//         const driver = b.driverId?.userId || {};
-//         const driverUniqueId = b.driverId?.uniqueId || ''; // ✅ include driver uniqueId
-//         return (
-//           regex.test(passenger.name || '') ||
-//           regex.test(passenger.email || '') ||
-//           regex.test(passenger.phoneNumber || '') ||
-//           regex.test(driver.name || '') ||
-//           regex.test(driver.email || '') ||
-//           regex.test(driver.phoneNumber || '') ||
-//           regex.test(driverUniqueId || '')
-//         );
-//       })
-//     : allBookings;
-
-//   // Sort newest first
-//   filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
-//   const total = filtered.length;
-//   const start = (safePage - 1) * safeLimit;
-//   const paged = filtered.slice(start, start + safeLimit);
-
-//   // Map to desired shape
-//   const data = paged.map((b) => ({
-//     _id: b._id,
-//     rideId: b.rideId,
-//     status: b.status,
-//     createdAt: b.createdAt,
-//     updatedAt: b.updatedAt,
-//     estimatedFare: b.estimatedFare,
-//     passenger: {
-//       name: b.passengerId?.userId?.name || '',
-//       email: b.passengerId?.userId?.email || '',
-//       phoneNumber: b.passengerId?.userId?.phoneNumber || '',
-//     },
-//     driver: {
-//       uniqueId: b.driverId?.uniqueId || '', // ✅ include in response
-//       name: b.driverId?.userId?.name || '',
-//       email: b.driverId?.userId?.email || '',
-//       phoneNumber: b.driverId?.userId?.phoneNumber || '',
-//     },
-//   }));
-
-//   return {
-//     data,
-//     total,
-//     page: safePage,
-//     limit: safeLimit,
-//     totalPages: Math.ceil(total / safeLimit) || 0,
-//   };
-// };
 
 export const findOngoingBookings = async ({
   page = 1,
@@ -2005,8 +1907,8 @@ export const financialAnalytics = async (filter = 'today') => {
         groupFormat = '%Y-%m-%d';
     }
 
-    // --- Aggregation ---
-    const results = await Booking.aggregate([
+    // --- Get Completed Rides Data ---
+    const completedRidesResults = await Booking.aggregate([
       {
         $match: {
           paymentStatus: 'COMPLETED',
@@ -2068,7 +1970,49 @@ export const financialAnalytics = async (filter = 'today') => {
       },
     ]);
 
-    if (!results.length) {
+    // --- Get Refund Data ---
+    const refundResults = await RefundTransaction.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: startDate, $lte: endDate },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalRefundedAmount: { $sum: '$refundAmount' },
+          totalRefundedRides: { $sum: 1 },
+          totalDriverDeducted: { $sum: '$driverDeducted' },
+        },
+      },
+    ]);
+
+    // Get refund data for chart (time-based grouping)
+    const refundChartResults = await RefundTransaction.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: startDate, $lte: endDate },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: groupFormat, date: '$createdAt' },
+          },
+          refundedAmount: { $sum: '$refundAmount' },
+          refundedRides: { $sum: 1 },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]);
+
+    if (!completedRidesResults.length) {
+      const refundData = refundResults[0] || {
+        totalRefundedAmount: 0,
+        totalRefundedRides: 0,
+        totalDriverDeducted: 0,
+      };
+
       return {
         totalRevenue: 0,
         totalCommission: 0,
@@ -2076,10 +2020,14 @@ export const financialAnalytics = async (filter = 'today') => {
         commissionPercentage: 0,
         paymentMethodRatio: { CARD: 0, WALLET: 0 },
         chart: [],
+        totalRefundedAmount: refundData.totalRefundedAmount,
+        totalRefundedRides: refundData.totalRefundedRides,
+        refundPercentage: 0,
+        totalDriverDeducted: refundData.totalDriverDeducted,
       };
     }
 
-    const overall = results[0].overall[0] || {};
+    const overall = completedRidesResults[0].overall[0] || {};
     const {
       totalRevenue = 0,
       totalCommission = 0,
@@ -2088,10 +2036,28 @@ export const financialAnalytics = async (filter = 'today') => {
       totalPayments = 0,
     } = overall;
 
-    const driverProfit = totalRevenue - totalCommission;
+    const refundData = refundResults[0] || {
+      totalRefundedAmount: 0,
+      totalRefundedRides: 0,
+      totalDriverDeducted: 0,
+    };
+
+    // Calculate net revenue (total revenue minus refunds)
+    const netRevenue = totalRevenue - refundData.totalRefundedAmount;
+
+    const driverProfit = netRevenue - totalCommission;
     const commissionPercentage =
-      totalRevenue > 0
-        ? Number(((totalCommission / totalRevenue) * 100).toFixed(2))
+      netRevenue > 0
+        ? Number(((totalCommission / netRevenue) * 100).toFixed(2))
+        : 0;
+
+    // Calculate refund percentage
+    const totalRides = totalPayments + refundData.totalRefundedRides;
+    const refundPercentage =
+      totalRides > 0
+        ? Number(
+            ((refundData.totalRefundedRides / totalRides) * 100).toFixed(2),
+          )
         : 0;
 
     const paymentMethodRatio = {
@@ -2105,7 +2071,7 @@ export const financialAnalytics = async (filter = 'today') => {
           : 0,
     };
 
-    const chartAgg = results[0].chart;
+    const chartAgg = completedRidesResults[0].chart;
     const chartData = [];
     const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const monthsOfYear = [
@@ -2123,24 +2089,31 @@ export const financialAnalytics = async (filter = 'today') => {
       'Dec',
     ];
 
+    // Merge completed rides data with refund data for chart
     if (filter === 'today') {
       for (let h = 0; h < 24; h++) {
         const hourStr = h.toString().padStart(2, '0');
-        const entry = chartAgg.find((r) => r._id === hourStr);
+        const revenueEntry = chartAgg.find((r) => r._id === hourStr);
+        const refundEntry = refundChartResults.find((r) => r._id === hourStr);
+
         chartData.push({
           hour: `${hourStr}:00`,
-          revenue: entry?.revenue || 0,
+          revenue: revenueEntry?.revenue || 0,
+          refundedAmount: refundEntry?.refundedAmount || 0,
         });
       }
     } else if (filter === 'this_week') {
       const curDate = new Date(startDate);
       for (let i = 0; i < 7; i++) {
         const dayKey = curDate.toISOString().split('T')[0];
-        const entry = chartAgg.find((r) => r._id === dayKey);
+        const revenueEntry = chartAgg.find((r) => r._id === dayKey);
+        const refundEntry = refundChartResults.find((r) => r._id === dayKey);
+
         chartData.push({
           day: dayKey,
           dayName: daysOfWeek[curDate.getDay()],
-          revenue: entry?.revenue || 0,
+          revenue: revenueEntry?.revenue || 0,
+          refundedAmount: refundEntry?.refundedAmount || 0,
         });
         curDate.setDate(curDate.getDate() + 1);
       }
@@ -2148,11 +2121,14 @@ export const financialAnalytics = async (filter = 'today') => {
       const allDays = getAllDaysInMonth(now.getFullYear(), now.getMonth());
       allDays.forEach((date) => {
         const dayKey = date.toISOString().split('T')[0];
-        const entry = chartAgg.find((r) => r._id === dayKey);
+        const revenueEntry = chartAgg.find((r) => r._id === dayKey);
+        const refundEntry = refundChartResults.find((r) => r._id === dayKey);
+
         chartData.push({
           day: dayKey,
           dayName: daysOfWeek[date.getDay()],
-          revenue: entry?.revenue || 0,
+          revenue: revenueEntry?.revenue || 0,
+          refundedAmount: refundEntry?.refundedAmount || 0,
         });
       });
     } else if (filter === 'last_year') {
@@ -2160,22 +2136,29 @@ export const financialAnalytics = async (filter = 'today') => {
         const monthKey = `${startDate.getFullYear()}-${(m + 1)
           .toString()
           .padStart(2, '0')}`;
-        const entry = chartAgg.find((r) => r._id === monthKey);
+        const revenueEntry = chartAgg.find((r) => r._id === monthKey);
+        const refundEntry = refundChartResults.find((r) => r._id === monthKey);
+
         chartData.push({
           month: monthKey,
           monthName: monthsOfYear[m],
-          revenue: entry?.revenue || 0,
+          revenue: revenueEntry?.revenue || 0,
+          refundedAmount: refundEntry?.refundedAmount || 0,
         });
       }
     }
 
     return {
-      totalRevenue,
+      totalRevenue: netRevenue, // Net revenue (after refunds)
       totalCommission,
       driverProfit,
       commissionPercentage,
       paymentMethodRatio,
       chart: chartData,
+      totalRefundedAmount: refundData.totalRefundedAmount,
+      totalRefundedRides: refundData.totalRefundedRides,
+      refundPercentage,
+      totalDriverDeducted: refundData.totalDriverDeducted,
     };
   } catch (error) {
     console.error('Error in financialAnalytics:', error);

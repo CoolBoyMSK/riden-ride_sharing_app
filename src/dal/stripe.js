@@ -118,7 +118,8 @@ const decreasePassengerNegativeBalance = async (passengerId, amount) =>
 export const createDriverWallet = async (driverId) =>
   DriverWallet.create({ driverId });
 
-const getDriverBalance = async (driverId) => DriverWallet.findOne({ driverId });
+export const getDriverBalance = async (driverId) =>
+  DriverWallet.findOne({ driverId });
 
 const increaseDriverPendingBalance = async (driverId, amount) =>
   DriverWallet.findOneAndUpdate(
@@ -2147,7 +2148,10 @@ export const refundCardPaymentToPassenger = async (
           payment_intent: referenceId,
         });
 
-        if (existingRefunds.data.length > 0 && existingRefunds.data[0].status === 'succeeded') {
+        if (
+          existingRefunds.data.length > 0 &&
+          existingRefunds.data[0].status === 'succeeded'
+        ) {
           // Use existing refund
           refund = existingRefunds.data[0];
           console.log('Using existing Stripe refund:', refund.id);
@@ -2166,12 +2170,14 @@ export const refundCardPaymentToPassenger = async (
       } catch (error) {
         if (error.message.includes('already been refunded')) {
           // If already refunded, we still need to process our internal refund
-          console.log('Charge already refunded in Stripe, processing internal refund only');
+          console.log(
+            'Charge already refunded in Stripe, processing internal refund only',
+          );
           stripeErrorOccurred = true;
-          refund = { 
-            id: `already_refunded_${Date.now()}`, 
+          refund = {
+            id: `already_refunded_${Date.now()}`,
             status: 'succeeded',
-            receipt_url: null 
+            receipt_url: null,
           };
         } else {
           throw error;
@@ -2189,7 +2195,7 @@ export const refundCardPaymentToPassenger = async (
         await DriverWallet.findOneAndUpdate(
           { driverId: driver._id },
           { $inc: { pendingBalance: -pendingUsed } },
-          { session }
+          { session },
         );
         refundRemaining -= pendingUsed;
       }
@@ -2198,62 +2204,77 @@ export const refundCardPaymentToPassenger = async (
         await DriverWallet.findOneAndUpdate(
           { driverId: driver._id },
           { $inc: { negativeBalance: refundRemaining } },
-          { session }
+          { session },
         );
       }
 
       // 5. Log refund transactions atomically using direct model creation
       await Promise.all([
-        TransactionModel.create([{
-          passengerId,
-          driverId,
-          rideId,
-          type: 'CREDIT',
-          category: 'REFUND',
-          amount: actualAmountPaid, // Full refund to passenger
-          for: 'passenger',
-          metadata: { 
-            ...refund, 
-            alreadyRefunded: stripeErrorOccurred,
-            originalReferenceId: referenceId
-          },
-          status: 'succeeded',
-          referenceId: refund.id,
-          receiptUrl: refund.receipt_url || refund.id,
-        }], { session }).then(res => res[0]),
-        
-        TransactionModel.create([{
-          passengerId,
-          driverId,
-          rideId,
-          type: 'DEBIT',
-          category: 'REFUND',
-          amount: driverAmountReceived, // Only what driver received
-          for: 'driver',
-          metadata: { 
-            ...refund, 
-            alreadyRefunded: stripeErrorOccurred,
-            originalReferenceId: referenceId
-          },
-          status: 'succeeded',
-          referenceId: refund.id,
-          receiptUrl: refund.receipt_url || refund.id,
-        }], { session }).then(res => res[0]),
-        
-        RefundTransaction.create([{
-          rideId: ride._id,
-          passengerId: passenger._id,
-          driverId: driver._id,
-          refundAmount: actualAmountPaid,
-          refundReason: reason,
-          driverDeducted: driverAmountReceived,
-          commissionRefunded: adminCommission.commissionAmount,
-          resolvedBy: 'admin',
-          metadata: {
-            stripeRefundId: refund.id,
-            alreadyRefunded: stripeErrorOccurred
-          }
-        }], { session }).then(res => res[0]),
+        TransactionModel.create(
+          [
+            {
+              passengerId,
+              driverId,
+              rideId,
+              type: 'CREDIT',
+              category: 'REFUND',
+              amount: actualAmountPaid, // Full refund to passenger
+              for: 'passenger',
+              metadata: {
+                ...refund,
+                alreadyRefunded: stripeErrorOccurred,
+                originalReferenceId: referenceId,
+              },
+              status: 'succeeded',
+              referenceId: refund.id,
+              receiptUrl: refund.receipt_url || refund.id,
+            },
+          ],
+          { session },
+        ).then((res) => res[0]),
+
+        TransactionModel.create(
+          [
+            {
+              passengerId,
+              driverId,
+              rideId,
+              type: 'DEBIT',
+              category: 'REFUND',
+              amount: driverAmountReceived, // Only what driver received
+              for: 'driver',
+              metadata: {
+                ...refund,
+                alreadyRefunded: stripeErrorOccurred,
+                originalReferenceId: referenceId,
+              },
+              status: 'succeeded',
+              referenceId: refund.id,
+              receiptUrl: refund.receipt_url || refund.id,
+            },
+          ],
+          { session },
+        ).then((res) => res[0]),
+
+        RefundTransaction.create(
+          [
+            {
+              rideId: ride._id,
+              passengerId: passenger._id,
+              driverId: driver._id,
+              refundAmount: actualAmountPaid,
+              refundReason: reason,
+              driverDeducted: driverAmountReceived,
+              commissionRefunded: adminCommission.commissionAmount,
+              resolvedBy: 'admin',
+              metadata: {
+                stripeRefundId: refund.id,
+                alreadyRefunded: stripeErrorOccurred,
+              },
+            },
+          ],
+          { session },
+        ).then((res) => res[0]),
       ]);
     });
 
@@ -2277,7 +2298,7 @@ export const refundCardPaymentToPassenger = async (
       driverId,
       amount: actualAmountPaid,
     } = passengerDebitTx;
-    
+
     const [passenger, driver] = await Promise.all([
       PassengerModel.findById(passengerId),
       DriverModel.findById(driverId),
@@ -2323,7 +2344,7 @@ export const refundCardPaymentToPassenger = async (
       success: true,
       message: 'Refund processed successfully',
       refundId: refund.id,
-      alreadyRefunded: stripeErrorOccurred
+      alreadyRefunded: stripeErrorOccurred,
     };
   } catch (error) {
     console.error(`STRIPE REFUND FAILED: ${error.message}`);
@@ -2337,7 +2358,9 @@ export const refundCardPaymentToPassenger = async (
       });
 
       if (passengerDebitTx) {
-        const passenger = await PassengerModel.findById(passengerDebitTx.passengerId);
+        const passenger = await PassengerModel.findById(
+          passengerDebitTx.passengerId,
+        );
         if (passenger) {
           await notifyUser({
             userId: passenger.userId,
@@ -2368,7 +2391,12 @@ export const refundWalletPaymentToPassenger = async (
 
   try {
     // First, check if transactions exist and are refundable
-    const [existingDebitTx, existingCreditTx, existingAdminCommission, existingRideTransaction] = await Promise.all([
+    const [
+      existingDebitTx,
+      existingCreditTx,
+      existingAdminCommission,
+      existingRideTransaction,
+    ] = await Promise.all([
       TransactionModel.findOne({
         rideId,
         type: 'DEBIT',
@@ -2379,7 +2407,7 @@ export const refundWalletPaymentToPassenger = async (
       TransactionModel.findOne({
         rideId,
         type: 'CREDIT',
-        status: 'succeeded', 
+        status: 'succeeded',
         for: 'driver',
         isRefunded: false,
       }),
@@ -2390,8 +2418,8 @@ export const refundWalletPaymentToPassenger = async (
       RideTransaction.findOne({
         rideId,
         isRefunded: false,
-        status: 'COMPLETED'
-      })
+        status: 'COMPLETED',
+      }),
     ]);
 
     // Detailed error messages
@@ -2401,7 +2429,7 @@ export const refundWalletPaymentToPassenger = async (
         type: 'DEBIT',
         isRefunded: true,
       });
-      
+
       if (alreadyRefunded) {
         throw new Error('Payment already refunded');
       } else {
@@ -2460,9 +2488,12 @@ export const refundWalletPaymentToPassenger = async (
         ]);
 
       // These should not fail since we checked above
-      if (!originalTx) throw new Error('Failed to mark original payment as refunded');
-      if (!adminCommission) throw new Error('Failed to mark admin commission as refunded');
-      if (!rideTransaction) throw new Error('Failed to mark ride transaction as refunded');
+      if (!originalTx)
+        throw new Error('Failed to mark original payment as refunded');
+      if (!adminCommission)
+        throw new Error('Failed to mark admin commission as refunded');
+      if (!rideTransaction)
+        throw new Error('Failed to mark ride transaction as refunded');
 
       const { passengerId, driverId, amount } = originalTx;
 
@@ -2493,7 +2524,7 @@ export const refundWalletPaymentToPassenger = async (
         await DriverWallet.findOneAndUpdate(
           { driverId: driver._id },
           { $inc: { pendingBalance: -pendingUsed } },
-          { session }
+          { session },
         );
         refundRemaining -= pendingUsed;
       }
@@ -2502,7 +2533,7 @@ export const refundWalletPaymentToPassenger = async (
         await DriverWallet.findOneAndUpdate(
           { driverId: driver._id },
           { $inc: { negativeBalance: refundRemaining } },
-          { session }
+          { session },
         );
       }
 
@@ -2511,66 +2542,81 @@ export const refundWalletPaymentToPassenger = async (
       await PassengerWallet.findOneAndUpdate(
         { passengerId: passenger._id },
         { $inc: { availableBalance: refundAmount } },
-        { session }
+        { session },
       );
 
       // 5. Log refund transactions atomically using direct model creation
       await Promise.all([
-        TransactionModel.create([{
-          passengerId,
-          driverId,
-          rideId,
-          walletId: passengerWallet._id,
-          type: 'CREDIT',
-          category: 'REFUND',
-          amount: refundAmount,
-          for: 'passenger',
-          metadata: { 
-            reason, 
-            originalTransactionId: originalTx._id,
-            commissionRefunded: adminCommission.commissionAmount,
-            refundType: 'WALLET_REFUND'
-          },
-          status: 'succeeded',
-          referenceId: `wallet_refund_${rideId}_${Date.now()}`,
-          receiptUrl: passengerWallet._id,
-        }], { session }).then(res => res[0]),
-        
-        TransactionModel.create([{
-          passengerId,
-          driverId,
-          rideId,
-          walletId: driverWallet._id,
-          type: 'DEBIT',
-          category: 'REFUND',
-          amount: refundAmount,
-          for: 'driver',
-          metadata: { 
-            reason, 
-            originalTransactionId: driverCreditTx?._id,
-            amountDeducted: amount,
-            commissionRefunded: adminCommission.commissionAmount,
-            refundType: 'WALLET_REFUND'
-          },
-          status: 'succeeded',
-          referenceId: `wallet_refund_${rideId}_${Date.now()}`,
-          receiptUrl: driverWallet._id,
-        }], { session }).then(res => res[0]),
-        
-        RefundTransaction.create([{
-          rideId: ride._id,
-          passengerId: passenger._id,
-          driverId: driver._id,
-          refundAmount: refundAmount,
-          refundReason: reason,
-          driverDeducted: amount,
-          commissionRefunded: adminCommission.commissionAmount,
-          resolvedBy: 'admin',
-          metadata: {
-            refundType: 'WALLET_REFUND',
-            originalAmount: amount
-          }
-        }], { session }).then(res => res[0]),
+        TransactionModel.create(
+          [
+            {
+              passengerId,
+              driverId,
+              rideId,
+              walletId: passengerWallet._id,
+              type: 'CREDIT',
+              category: 'REFUND',
+              amount: refundAmount,
+              for: 'passenger',
+              metadata: {
+                reason,
+                originalTransactionId: originalTx._id,
+                commissionRefunded: adminCommission.commissionAmount,
+                refundType: 'WALLET_REFUND',
+              },
+              status: 'succeeded',
+              referenceId: `wallet_refund_${rideId}_${Date.now()}`,
+              receiptUrl: passengerWallet._id,
+            },
+          ],
+          { session },
+        ).then((res) => res[0]),
+
+        TransactionModel.create(
+          [
+            {
+              passengerId,
+              driverId,
+              rideId,
+              walletId: driverWallet._id,
+              type: 'DEBIT',
+              category: 'REFUND',
+              amount: refundAmount,
+              for: 'driver',
+              metadata: {
+                reason,
+                originalTransactionId: driverCreditTx?._id,
+                amountDeducted: amount,
+                commissionRefunded: adminCommission.commissionAmount,
+                refundType: 'WALLET_REFUND',
+              },
+              status: 'succeeded',
+              referenceId: `wallet_refund_${rideId}_${Date.now()}`,
+              receiptUrl: driverWallet._id,
+            },
+          ],
+          { session },
+        ).then((res) => res[0]),
+
+        RefundTransaction.create(
+          [
+            {
+              rideId: ride._id,
+              passengerId: passenger._id,
+              driverId: driver._id,
+              refundAmount: refundAmount,
+              refundReason: reason,
+              driverDeducted: amount,
+              commissionRefunded: adminCommission.commissionAmount,
+              resolvedBy: 'admin',
+              metadata: {
+                refundType: 'WALLET_REFUND',
+                originalAmount: amount,
+              },
+            },
+          ],
+          { session },
+        ).then((res) => res[0]),
       ]);
     });
 
@@ -2623,23 +2669,23 @@ export const refundWalletPaymentToPassenger = async (
       }),
     ]);
 
-    return { 
-      success: true, 
+    return {
+      success: true,
       message: 'Refund completed successfully',
       refundAmount,
-      amountDeductedFromDriver: amount
+      amountDeductedFromDriver: amount,
     };
   } catch (error) {
     console.error(`WALLET REFUND FAILED: ${error.message}`);
 
     // Send failure notification
     try {
-      const originalTx = await TransactionModel.findOne({ 
-        rideId, 
-        type: 'DEBIT', 
-        isRefunded: false 
+      const originalTx = await TransactionModel.findOne({
+        rideId,
+        type: 'DEBIT',
+        isRefunded: false,
       });
-      
+
       if (originalTx) {
         const passenger = await PassengerModel.findById(originalTx.passengerId);
         if (passenger) {

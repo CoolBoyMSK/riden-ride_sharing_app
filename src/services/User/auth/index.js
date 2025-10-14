@@ -52,6 +52,7 @@ import {
   phonePendingKey,
 } from '../../../utils/otpUtils.js';
 import redisConfig from '../../../config/redisConfig.js';
+import { notifyUser } from '../../../dal/notification.js';
 import crypto from 'crypto';
 
 export const signupUser = async (
@@ -310,6 +311,24 @@ export const loginUser = async (
           resp.error_message = 'Failed to update Device Type';
           return resp;
         }
+
+        // Notification Logic Start
+        console.log('start');
+        const notify = await notifyUser({
+          userId: user._id,
+          title: 'Passenger Login successful 😎',
+          message: `${user.name} has logged in successfully with ${user.email}`,
+          module: 'support',
+          metadata: user,
+          type: 'ALERT',
+          actionLink: `${env.BASE_URL}/api/user/profile/me`,
+        });
+        console.log('Notify: ', notify);
+        if (!notify) {
+          console.error('Failed to send notification');
+        }
+        console.log('end');
+        // Notification Logic End
 
         const payload = { id: userId, roles: user.roles };
         resp.data = {
@@ -1133,7 +1152,6 @@ export const verifyPasskeyLoginAuth = async (
 
 export const updateFCMToken = async (user, { userDeviceToken }, resp) => {
   try {
-    console.log(userDeviceToken);
     const success = await updateUserById(user.id, {
       userDeviceToken,
     });
@@ -1173,7 +1191,7 @@ export const socialLoginUser = async (
 
   if (role === 'driver') {
     if (user && user.roles.includes('driver')) {
-      if (user.userSocialToken?.trim()) {
+      if (user.userSocialToken && user.userSocialToken === userSocialToken) {
         let driver = await findDriverByUserId(user._id);
         if (!driver) {
           const uniqueId = generateUniqueId(user.roles[0], user._id);
@@ -1297,7 +1315,7 @@ export const socialLoginUser = async (
 
   if (role === 'passenger') {
     if (user && user.roles.includes('passenger')) {
-      if (user.userSocialToken?.trim()) {
+      if (user.userSocialToken && user.userSocialToken === userSocialToken) {
         let passenger = await findPassengerByUserId(user._id);
         if (!passenger) {
           const uniqueId = generateUniqueId(user.roles[0], user._id);

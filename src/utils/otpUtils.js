@@ -2,7 +2,6 @@ import crypto from 'crypto';
 import redisConfig from '../config/redisConfig.js';
 import { emailQueue } from '../queues/emailQueue.js';
 import { smsQueue } from '../queues/smsQueue.js';
-import { otpQueue } from '../queues/otpQueue.js';
 import { getTwilioClient, TWILIO_CONFIG } from '../config/twilioConfig.js';
 import env from '../config/envConfig.js';
 
@@ -35,6 +34,14 @@ export const phoneCooldownKey = (phone) => `phone_otp_cooldown:${phone}`;
 export const phonePendingKey = (phone) => `phone_pending_update:${phone}`;
 export const phoneVerifiedKey = (phone) => `phone_otp_verified:${phone}`;
 export const phoneAttemptsKey = (phone) => `phone_otp_attempts:${phone}`;
+
+const TOKEN_PREFIX = 'otp_token:';
+const TOKEN_EXPIRY = 5 * 60;
+
+// Helper functions
+const getTokenKey = (token) => `${TOKEN_PREFIX}${token}`;
+const getUserTokenKey = (userId, purpose) =>
+  `${TOKEN_PREFIX}user:${userId}:${purpose}`;
 
 // Set with TTL
 const setWithTTL = async (key, ttlSeconds, value) => {
@@ -275,5 +282,123 @@ export const verifyOtp = async (phoneNumber, code) => {
   } catch (err) {
     console.error(`OTP VERIFICATION ERROR for ${phoneNumber}: ${err.message}`);
     throw new Error('Failed to verify OTP, please try again later.');
+  }
+};
+
+export const generateOtpToken = async (userId, purpose, metadata = {}) => {
+  try {
+    const token = crypto.randomBytes(32).toString('hex');
+    const tokenKey = getTokenKey(token);
+
+    const tokenData = {
+      userId,
+      purpose, // 'email-update', 'phone-update', 'both-update'
+      createdAt: new Date().toISOString(),
+      ...metadata,
+    };
+
+    // Remove any existing tokens for same user and purpose
+    await revokeUserTokens(userId, purpose);
+
+    // Store token in Redis with expiry
+    const multi = redisConfig.multi();
+    multi.setex(tokenKey, TOKEN_EXPIRY, JSON.stringify(tokenData));
+
+    // Store in user index for easy cleanup
+    const userTokenKey = getUserTokenKey(userId, purpose);
+    multi.setex(userTokenKey, TOKEN_EXPIRY, token);
+
+    await multi.exec();
+
+    console.log(`OTP token generated for user ${userId}, purpose: ${purpose}`);
+    return token;
+  } catch (error) {
+    console.error('Error generating OTP token:', error);
+    throw new Error('Failed to generate authentication token');
+  }
+};
+
+export const verifyOtpToken = async (token, userId, purpose) => {
+  const tokenKey = getTokenKey(token);
+
+  try {
+    const tokenDataStr = await redisConfig.get(tokenKey);
+
+    if (!tokenDataStr) {
+      return { valid: false, reason: 'Token not found' };
+    }
+
+    const tokenData = JSON.parse(tokenDataStr);
+
+    if (tokenData.userId !== userId) {
+      return { valid: false, reason: 'User mismatch' };
+    }
+
+    if (tokenData.purpose !== purpose) {
+      return { valid: false, reason: 'Purpose mismatch' };
+    }
+
+    const ttl = await redisConfig.ttl(tokenKey);
+    if (ttl <= 0) {
+      await revokeToken(token);
+      return { valid: false, reason: 'Token expired' };
+    }
+
+    return { valid: true, data: tokenData };
+  } catch (error) {
+    console.error('Token verification error:', error);
+    return { valid: false, reason: 'Token verification failed' };
+  }
+};
+
+export const revokeToken = async (token) => {
+  const tokenKey = getTokenKey(token);
+
+  try {
+    const tokenDataStr = await redisConfig.get(tokenKey);
+
+    if (tokenDataStr) {
+      const tokenData = JSON.parse(tokenDataStr);
+      const userTokenKey = getUserTokenKey(tokenData.userId, tokenData.purpose);
+
+      const multi = redisConfig.multi();
+      multi.del(tokenKey);
+      multi.del(userTokenKey);
+      await multi.exec();
+
+      console.log(
+        `OTP token revoked for user ${tokenData.userId}, purpose: ${tokenData.purpose}`,
+      );
+    } else {
+      await redisConfig.del(tokenKey);
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Token revocation error:', error);
+    return false;
+  }
+};
+
+export const revokeUserTokens = async (userId, purpose) => {
+  try {
+    const userTokenKey = getUserTokenKey(userId, purpose);
+    const currentToken = await redisConfig.get(userTokenKey);
+
+    if (currentToken) {
+      const multi = redisConfig.multi();
+      multi.del(getTokenKey(currentToken));
+      multi.del(userTokenKey);
+      await multi.exec();
+
+      console.log(
+        `All OTP tokens revoked for user ${userId}, purpose: ${purpose}`,
+      );
+    }
+
+    return true;
+  } catch (error) {
+    console.error('User tokens revocation error:', error);
+    return false;
   }
 };

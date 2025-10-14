@@ -244,7 +244,6 @@ const driverSchema = new mongoose.Schema(
     payoutMethodIds: [
       {
         type: String,
-        unique: true,
       },
     ],
     stripeAccountId: {
