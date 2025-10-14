@@ -57,6 +57,7 @@ import { findDashboardData } from '../dal/admin/index.js';
 import { notifyUser } from '../dal/notification.js';
 import { generateAgoraToken } from '../utils/agoraTokenGenerator.js';
 import { generateRideReceipt } from '../utils/receiptGenerator.js';
+import mongoose from 'mongoose';
 
 let ioInstance = null;
 
@@ -471,6 +472,7 @@ export const initSocket = (server) => {
 
     socket.on('ride:driver_cancel_ride', async ({ rideId, reason }) => {
       const objectType = 'cancel-ride-driver';
+      const session = await mongoose.startSession();
       try {
         const driver = await findDriverByUserId(userId);
         if (
@@ -568,13 +570,16 @@ export const initSocket = (server) => {
           });
         }
 
+        session.startTransaction();
+
         const updateAvailability = await updateDriverAvailability(
           driver._id,
           true,
           null,
+          { session },
         );
-
         if (!updateAvailability) {
+          await session.abortTransaction();
           return socket.emit('ride:driver_cancel_ride', {
             success: false,
             objectType,
@@ -583,32 +588,15 @@ export const initSocket = (server) => {
           });
         }
 
-        const updatedRide = await updateRideById(ride._id, {
-          status: 'CANCELLED_BY_DRIVER',
-          cancelledBy: 'driver',
-          cancellationReason: reason.trim(),
-          paymentStatus: 'CANCELLED',
-        });
-        if (!updatedRide) {
-          return socket.emit('ride:driver_cancel_ride', {
-            success: false,
-            objectType,
-            code: 'RIDE_UPDATE_FAILED',
-            message: 'Failed to update ride status',
-          });
-        }
-
-        const updatedDriver = await updateDriverByUserId(userId, {
-          status: 'online',
-        });
+        const updatedDriver = await updateDriverByUserId(
+          userId,
+          {
+            status: 'online',
+          },
+          { session },
+        );
         if (!updatedDriver) {
-          // Rollback ride update inside the transaction
-          await updateRideById(ride._id, {
-            status: 'DRIVER_ASSIGNED',
-            cancelledBy: null,
-            cancellationReason: null,
-            paymentStatus: 'PENDING',
-          });
+          await session.abortTransaction();
           return socket.emit('error', {
             success: false,
             objectType,
@@ -617,14 +605,59 @@ export const initSocket = (server) => {
           });
         }
 
+        const updatedRide = await updateRideById(
+          ride._id,
+          {
+            status: 'CANCELLED_BY_DRIVER',
+            cancelledBy: 'driver',
+            cancellationReason: reason.trim(),
+            paymentStatus: 'CANCELLED',
+          },
+          { session },
+        );
+        if (!updatedRide) {
+          await session.abortTransaction();
+          return socket.emit('ride:driver_cancel_ride', {
+            success: false,
+            objectType,
+            code: 'CANCELLATION_FAILED',
+            message: 'Failed to cancel ride',
+          });
+        } else if (updatedRide.status !== 'CANCELLED_BY_DRIVER') {
+          await session.abortTransaction();
+          return socket.emit('ride:driver_cancel_ride', {
+            success: false,
+            objectType,
+            code: 'RIDE_UPDATE_FAILED',
+            message: 'Failed to update ride status',
+          });
+        }
+
+        await session.commitTransaction();
+
         // Notify passenger of ride cancellation
         socket.join(`ride:${updatedRide._id}`);
-        io.to(`ride:${ride._id}`).emit('ride:driver_cancel_ride', {
+        io.to(`ride:${updatedRide._id}`).emit('ride:driver_cancel_ride', {
           success: true,
           objectType,
           data: updatedRide,
           message: 'Ride cancelled by driver',
         });
+
+        // Notification Logic Start
+        const notify = await notifyUser({
+          userId: ride.passengerId?.userId,
+          title: 'Ride Cancelled',
+          message: `Your ride has been cancelled. We're sorry for the inconvenience. You can book a new ride anytime from the home screen.`,
+          module: 'ride',
+          metadata: updatedRide,
+          type: 'ALERT',
+          actionLink: `ride_cancelled`,
+        });
+        if (!notify) {
+          console.error('Failed to send notification');
+        }
+        // Notification Logic End
 
         const rooms = Array.from(socket.rooms);
         if (rooms.includes(`ride:${ride._id}`)) {
@@ -647,6 +680,8 @@ export const initSocket = (server) => {
           code: `${error.code || 'SOCKET_ERROR'}`,
           message: `SOCKET ERROR: ${error.message}`,
         });
+      } finally {
+        session.endSession();
       }
     });
 
@@ -1635,6 +1670,7 @@ export const initSocket = (server) => {
 
     socket.on('ride:passenger_cancel_ride', async ({ rideId, reason }) => {
       const objectType = 'cancel-ride-passenger';
+      const session = await mongoose.startSession();
       try {
         const passenger = await findPassengerByUserId(userId);
         if (!passenger || passenger.isBlocked || passenger.isSuspended) {
@@ -1690,13 +1726,6 @@ export const initSocket = (server) => {
             code: 'RIDE_COMPLETED',
             message: 'Cannot cancel a completed ride',
           });
-        } else if (!ride.driverId) {
-          return socket.emit('ride:passenger_cancel_ride', {
-            success: false,
-            objectType,
-            code: 'NO_DRIVER_ASSIGNED',
-            message: 'Cannot cancel ride. No driver assigned yet',
-          });
         }
 
         const cancellableStatuses = [
@@ -1723,13 +1752,63 @@ export const initSocket = (server) => {
           });
         }
 
-        const updatedRide = await updateRideById(ride._id, {
-          status: 'CANCELLED_BY_PASSENGER',
-          cancelledBy: 'passenger',
-          cancellationReason: reason.trim(),
-          paymentStatus: 'CANCELLED',
-        });
+        session.startTransaction();
+
+        if (ride.driverId) {
+          const updateAvailability = await updateDriverAvailability(
+            ride.driverId,
+            true,
+            null,
+            { session },
+          );
+          if (!updateAvailability) {
+            await session.abortTransaction();
+            return socket.emit('ride:passenger_cancel_ride', {
+              success: false,
+              objectType,
+              code: 'DRIVER_AVAILABILITY_FAILED',
+              message: 'Failed to update driver availability',
+            });
+          }
+
+          const updatedDriver = await updateDriverByUserId(
+            ride.driverId?.userId,
+            {
+              status: 'online',
+            },
+            { session },
+          );
+          if (!updatedDriver) {
+            await session.abortTransaction();
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'DRIVER_UPDATE_FAILED',
+              message: 'Failed to update driver status',
+            });
+          }
+        }
+
+        const updatedRide = await updateRideById(
+          ride._id,
+          {
+            status: 'CANCELLED_BY_PASSENGER',
+            cancelledBy: 'passenger',
+            cancellationReason: reason.trim(),
+            paymentStatus: 'CANCELLED',
+          },
+          { session },
+        );
         if (!updatedRide) {
+          await session.abortTransaction();
+          return socket.emit('ride:passenger_cancel_ride', {
+            success: false,
+            objectType,
+            code: 'CANCELLATION_FAILED',
+            message: 'Failed to cancel ride',
+          });
+        } else if (updatedRide.status !== 'CANCELLED_BY_PASSENGER') {
+          await session.abortTransaction();
           return socket.emit('ride:passenger_cancel_ride', {
             success: false,
             objectType,
@@ -1738,26 +1817,32 @@ export const initSocket = (server) => {
           });
         }
 
-        const updateAvailability = await updateDriverAvailability(
-          updatedRide.driverId,
-          true,
-          null,
-        );
-        if (!updateAvailability) {
-          return socket.emit('ride:passenger_cancel_ride', {
-            success: false,
-            objectType,
-            code: 'DRIVER AVAILABILITY_FAILED',
-            message: 'Failed to update driver availability',
-          });
-        }
+        await session.commitTransaction();
 
-        io.to(`ride:${ride._id}`).emit('ride:passenger_cancel_ride', {
+        socket.join(`ride:${updatedRide._id}`);
+        io.to(`ride:${updatedRide._id}`).emit('ride:passenger_cancel_ride', {
           success: true,
           objectType,
           data: updatedRide,
           message: 'Ride successfully cancelled by passenger',
         });
+
+        // Notification Logic Start
+        if (ride.driverId) {
+          const notify = await notifyUser({
+            userId: ride.driverId?.userId,
+            title: 'Ride Cancelled',
+            message: `Your ride has been cancelled. We're sorry for the inconvenience. You can book a new ride anytime from the home screen.`,
+            module: 'ride',
+            metadata: updatedRide,
+            type: 'ALERT',
+            actionLink: `ride_cancelled`,
+          });
+          if (!notify) {
+            console.error('Failed to send notification');
+          }
+        }
+        // Notification Logic End
 
         const rooms = Array.from(socket.rooms);
         if (rooms.includes(`ride:${ride._id}`)) {
@@ -1773,6 +1858,7 @@ export const initSocket = (server) => {
           message: 'You have left the ride room after cancellation.',
         });
       } catch (error) {
+        await session.abortTransaction();
         console.error(`SOCKET ERROR: ${error}`);
         return socket.emit('error', {
           success: false,
@@ -1780,6 +1866,8 @@ export const initSocket = (server) => {
           code: `${error.code || 'SOCKET_ERROR'}`,
           message: `SOCKET ERROR: ${error.message}`,
         });
+      } finally {
+        session.endSession();
       }
     });
 
@@ -2301,6 +2389,124 @@ export const initSocket = (server) => {
       }
     });
 
+    // socket.on(
+    //   'ride:send_message',
+    //   async ({ rideId, text, messageType = 'text', attachments }) => {
+    //     const objectType = 'ride-send-message';
+    //     try {
+    //       let sender;
+    //       if (socket.user.roles.includes('driver')) {
+    //         sender = await findDriverByUserId(userId);
+
+    //         if (
+    //           !sender ||
+    //           sender.isBlocked ||
+    //           sender.isSuspended ||
+    //           sender.backgroundCheckStatus !== 'approved' ||
+    //           !['online', 'on_ride'].includes(sender.status)
+    //         ) {
+    //           return socket.emit('error', {
+    //             success: false,
+    //             objectType,
+    //             code: 'FORBIDDEN',
+    //             message: 'Forbidden: Driver not eligible',
+    //           });
+    //         }
+    //       } else if (socket.user.roles.includes('passenger')) {
+    //         sender = await findPassengerByUserId(userId);
+
+    //         if (!sender || sender.isBlocked || sender.isSuspended) {
+    //           return socket.emit('error', {
+    //             success: false,
+    //             objectType,
+    //             code: 'FORBIDDEN',
+    //             message: 'Forbidden: Passenger not eligible',
+    //           });
+    //         }
+    //       }
+
+    //       if (!rideId) {
+    //         return socket.emit('error', {
+    //           success: false,
+    //           message: 'Ride Id is required',
+    //         });
+    //       } else if (!text || text.trim().length === 0) {
+    //         return socket.emit('error', {
+    //           success: false,
+    //           message: 'Empty message is not allowed',
+    //         });
+    //       } else if (
+    //         !['text', 'system', 'location', 'image'].includes(messageType)
+    //       ) {
+    //         return socket.emit('error', {
+    //           success: false,
+    //           message: 'Invalid message type',
+    //         });
+    //       }
+
+    //       const chat = await findChatRoomByRideId(rideId);
+    //       if (!chat) {
+    //         return socket.emit('error', {
+    //           success: false,
+    //           message: 'Chat not found',
+    //         });
+    //       }
+
+    //       const newMsg = await createMessage({
+    //         rideId,
+    //         senderId: sender.userId,
+    //         chatRoomId: chat._id,
+    //         text,
+    //         messageType,
+    //         attachments,
+    //       });
+
+    //       const payload = { $push: { messages: { messageId: newMsg._id } } };
+
+    //       const updatedChat = await updateChatById(chat._id, payload);
+    //       if (!updatedChat) {
+    //         return socket.emit('error', {
+    //           success: false,
+    //           objectType,
+    //           code: 'MESSAGE_FAILED',
+    //           message: 'Failed to send message',
+    //         });
+    //       }
+
+    //       // Notification Logic Start
+    //       const notify = await notifyUser({
+    //         userId: ride.passengerId?.userId,
+    //         title: 'Your Driver Wants to Chat',
+    //         message: `Your driver has sent you a message. Open the chat to respond quickly.`,
+    //         module: 'chat',
+    //         metadata: updatedChat,
+    //         type: 'ALERT',
+    //         actionLink: `${env.BASE_URL}/api/user/profile/me`,
+    //       });
+    //       if (!notify) {
+    //         console.error('Failed to send notification');
+    //       }
+    //       // Notification Logic End
+
+    //       socket.join(`ride:${rideId}`);
+    //       io.to(`ride:${rideId}`).emit('ride:send_message', {
+    //         success: true,
+    //         objectType,
+    //         data: updatedChat,
+    //         message: `${socket.user.roles[0]} send you a message`,
+    //       });
+    //     } catch (error) {
+    //       console.error(`SOCKET ERROR: ${error}`);
+    //       return socket.emit('error', {
+    //         success: false,
+    //         objectType,
+    //         code: `${error.code || 'SOCKET_ERROR'}`,
+    //         message: `SOCKET ERROR: ${error.message}`,
+    //       });
+    //     }
+    //   },
+    // );
+
     socket.on(
       'ride:send_message',
       async ({ rideId, text, messageType = 'text', attachments }) => {
@@ -2385,12 +2591,63 @@ export const initSocket = (server) => {
             });
           }
 
-          socket.join(`ride:${rideId}`);
-          io.to(`ride:${rideId}`).emit('ride:send_message', {
+          // Get ride details to identify receiver
+          const ride = await findRideById(rideId); // Add this line to get ride details
+          if (!ride) {
+            return socket.emit('error', {
+              success: false,
+              message: 'Ride not found',
+            });
+          }
+
+          // Determine receiver ID based on sender role
+          let receiverId;
+          if (socket.user.roles.includes('driver')) {
+            receiverId = ride.passengerId?.userId;
+          } else if (socket.user.roles.includes('passenger')) {
+            receiverId = ride.driverId?.userId;
+          }
+
+          // Check if receiver is currently active (in the ride room)
+          const rideRoom = `ride:${rideId}`;
+          const clients = await io.in(rideRoom).fetchSockets();
+
+          let isReceiverActive = false;
+          for (const client of clients) {
+            if (
+              client.user &&
+              client.user._id.toString() === receiverId?.toString()
+            ) {
+              isReceiverActive = true;
+              break;
+            }
+          }
+
+          // Send notification ONLY if receiver is not active
+          if (!isReceiverActive && receiverId) {
+            // Notification Logic Start
+            const notify = await notifyUser({
+              userId: receiverId,
+              title: 'Your Driver Wants to Chat',
+              message: `Your driver has sent you a message. Open the chat to respond quickly.`,
+              module: 'chat',
+              metadata: updatedChat,
+              type: 'ALERT',
+              actionLink: `${env.BASE_URL}/api/user/profile/me`,
+            });
+            if (!notify) {
+              console.error('Failed to send notification');
+            }
+            // Notification Logic End
+          }
+
+          // Always emit socket event to all clients in the ride room
+          socket.join(rideRoom);
+          io.to(rideRoom).emit('ride:send_message', {
             success: true,
             objectType,
             data: updatedChat,
-            message: `${socket.user.roles[0]} send you a message`,
+            message: `${socket.user.roles[0]} sent you a message`,
           });
         } catch (error) {
           console.error(`SOCKET ERROR: ${error}`);

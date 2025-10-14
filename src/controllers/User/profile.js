@@ -5,7 +5,7 @@ import {
   verifyEmailUpdate,
   sendPhoneUpdateOtp,
   verifyPhoneUpdate,
-  // verifyBothEmailAndPhoneUpdate,
+  verifyBothEmailAndPhoneUpdate,
 } from '../../services/User/profileService.js';
 import { handleResponse } from '../../utils/handleRespone.js';
 import { validateProfileUpdate } from '../../validations/user/profileValidations.js';
@@ -81,14 +81,14 @@ export const verifyPhoneUpdateController = (req, res) =>
     res,
   );
 
-// export const verifyBothEmailAndPhoneUpdateController = (req, res) =>
-//   handleResponse(
-//     {
-//       handler: verifyBothEmailAndPhoneUpdate,
-//       validationFn: null,
-//       handlerParams: [res.user, req.body],
-//       successMessage: 'Phone Number and email otp verified successfully',
-//     },
-//     req,
-//     res,
-//   );
+export const verifyBothEmailAndPhoneUpdateController = (req, res) =>
+  handleResponse(
+    {
+      handler: verifyBothEmailAndPhoneUpdate,
+      validationFn: null,
+      handlerParams: [res.user, req.body],
+      successMessage: 'Phone Number and email otp verified successfully',
+    },
+    req,
+    res,
+  );

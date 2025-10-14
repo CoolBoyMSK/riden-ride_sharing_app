@@ -17,6 +17,8 @@ const env = {
   NODE_ENV,
   PORT: process.env.PORT || 4000,
   DB_URI: required(process.env.DB_URI, 'DB_URI'),
+  BASE_URL: required(process.env.BASE_URL, 'BASE_URL'),
+  FRONTEND_URL: required(process.env.FRONTEND_URL, 'FRONTEND_URL'),
   SALT_ROUNDS: parseInt(process.env.SALT_ROUNDS || '10', 10),
   JWT_ACCESS_SECRET: required(
     process.env.JWT_ACCESS_SECRET,

@@ -12,7 +12,7 @@ const notificationSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
-    cancellation: {
+    ride: {
       type: Boolean,
       default: true,
     },

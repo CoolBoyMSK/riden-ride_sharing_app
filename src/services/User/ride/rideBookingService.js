@@ -12,6 +12,8 @@ import {
   findAndAssignDriver,
   getNearbyDriversCount,
 } from './driverMatchingService.js';
+import { notifyUser } from '../../../dal/notification.js';
+import env from '../../../config/envConfig.js';
 
 // Calculate distance using simple Haversine formula (for estimation)
 const calculateDistance = (pickup, dropoff) => {
@@ -208,21 +210,42 @@ export const bookRide = async (userId, rideData) => {
     };
 
     const newRide = await createRide(ridePayload);
-    return {
-      success: true,
-      message: 'Ride requested successfully',
-      ride: {
-        rideId: newRide.rideId,
-        _id: newRide._id,
-        status: 'REQUESTED',
-        estimatedFare: fareResult.estimatedFare,
-        fareBreakdown: fareResult.fareBreakdown,
-        promoDetails: promoDetails,
-        pickupLocation,
-        dropoffLocation,
-        scheduledTime: newRide.scheduledTime,
-      },
-    };
+    if (newRide) {
+      // Notification Logic Start
+      const notify = await notifyUser({
+        userId: passenger.userId,
+        title: 'Your Ride is Booked!',
+        message: `Get ready to go! A RIDEN driver is on the way to pick you up. Sit back, relax, and track your ride in real-time.`,
+        module: 'ride',
+        metadata: newRide,
+        type: 'ALERT',
+        actionLink: `${env.BASE_URL}/api/user/profile/me`,
+      });
+      if (!notify) {
+        console.error('Failed to send notification');
+      }
+      // Notification Logic End
+      return {
+        success: true,
+        message: 'Ride requested successfully',
+        ride: {
+          rideId: newRide.rideId,
+          _id: newRide._id,
+          status: 'REQUESTED',
+          estimatedFare: fareResult.estimatedFare,
+          fareBreakdown: fareResult.fareBreakdown,
+          promoDetails: promoDetails,
+          pickupLocation,
+          dropoffLocation,
+          scheduledTime: newRide.scheduledTime,
+        },
+      };
+    } else {
+      return {
+        success: false,
+        message: 'Failed to book a ride',
+      };
+    }
   } catch (error) {
     console.error('Ride booking error:', error);
     return {

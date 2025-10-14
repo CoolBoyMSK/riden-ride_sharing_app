@@ -313,7 +313,6 @@ export const loginUser = async (
         }
 
         // Notification Logic Start
-        console.log('start');
         const notify = await notifyUser({
           userId: user._id,
           title: 'Passenger Login successful 😎',
@@ -323,11 +322,9 @@ export const loginUser = async (
           type: 'ALERT',
           actionLink: `${env.BASE_URL}/api/user/profile/me`,
         });
-        console.log('Notify: ', notify);
         if (!notify) {
           console.error('Failed to send notification');
         }
-        console.log('end');
         // Notification Logic End
 
         const payload = { id: userId, roles: user.roles };

@@ -485,8 +485,6 @@ export const notifyUser = async ({
       return { success: false, message: 'User not found.' };
     }
 
-    console.log('User: ', user);
-
     // --- Create Notification in DB ---
     const createdNotification = await createUserNotification({
       title,
@@ -497,14 +495,12 @@ export const notifyUser = async ({
       type,
       actionLink,
     });
-    console.log('createdNotification: ', createdNotification);
 
     if (!createdNotification.success) {
       return createdNotification;
     }
 
     const notificationDoc = createdNotification.data;
-    console.log('notificationDoc: ', notificationDoc);
 
     // --- Check User Notification Preferences + Token ---
     if (
@@ -523,8 +519,6 @@ export const notifyUser = async ({
         },
         imageUrl: actionLink || undefined,
       });
-
-      console.log('pushResponse: ', pushResponse);
 
       return {
         success: true,
