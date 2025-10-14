@@ -12,8 +12,10 @@ import DriverModel from '../models/Driver.js';
 import PassengerWallet from '../models/Wallet.js';
 import PayoutModel from '../models/Payout.js';
 import RideModel from '../models/Ride.js';
+import User from '../models/User.js';
 import env from '../config/envConfig.js';
 import { notifyUser } from '../dal/notification.js';
+import { sendDriverPaymentProcessedEmail } from '../templates/emails/user/index.js';
 
 const stripe = new Stripe(env.STRIPE_SECRET_KEY);
 
@@ -1792,6 +1794,13 @@ export const payoutToDriverBank = async (driver, amount) => {
         );
       }
 
+      const user = await User.findById(driver._id).session(session);
+      if (!user) {
+        throw new Error(
+          `Stripe payout failed: ${payout?.failure_message || 'Unknown error'}`,
+        );
+      }
+
       // Get driver wallet within transaction
       const wallet = await DriverWallet.findOne({
         driverId: driver._id,
@@ -1838,7 +1847,7 @@ export const payoutToDriverBank = async (driver, amount) => {
       );
 
       // Create payout transaction record
-      await TransactionModel.create(
+      const transaction = await TransactionModel.create(
         [
           {
             driverId: driver._id,
@@ -1877,6 +1886,17 @@ export const payoutToDriverBank = async (driver, amount) => {
           },
         ],
         { session },
+      );
+
+      const formattedDate = new Date()
+        .toLocaleDateString('en-GB')
+        .replace(/\//g, '-');
+      await sendDriverPaymentProcessedEmail(
+        user.email,
+        user.name,
+        parsedAmount,
+        formattedDate,
+        transaction._id,
       );
     });
 

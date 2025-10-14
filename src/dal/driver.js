@@ -7,6 +7,8 @@ import RideModel from '../models/Ride.js';
 import DriverWallet from '../models/DriverWallet.js';
 import DriverLocation from '../models/DriverLocation.js';
 import { DOCUMENT_TYPES } from '../enums/driver.js';
+import { findUserById } from './user/index.js';
+import { sendDocumentEditRequestApprovalEmail } from '../templates/emails/user/index.js';
 
 export const findDriverByUserId = (userId, { session } = {}) => {
   let query = DriverModel.findOne({ userId });
@@ -568,6 +570,14 @@ export const updateDriverRequest = async (requestId, status, options = {}) => {
     );
 
     if (!updatedDriver) throw new Error('Driver not found');
+
+    const user = await findUserById(updatedDriver.userId);
+    if (!user) throw new Error('User not found');
+
+    await sendDocumentEditRequestApprovalEmail(
+      user.userId?.email,
+      user.userId.name,
+    );
     return updatedDriver;
   }
 

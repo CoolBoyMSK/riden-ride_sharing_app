@@ -55,7 +55,13 @@ const setWithTTL = async (key, ttlSeconds, value) => {
 // // -------- Services -------- //
 
 // Request Email OTP
-export const requestEmailOtp = async (email, username, context = {}, type) => {
+export const requestEmailOtp = async (
+  email,
+  username,
+  context = {},
+  type,
+  role,
+) => {
   try {
     const cdTtl = await redisConfig.ttl(emailCooldownKey(email));
     if (cdTtl > 0) return { ok: false, waitSeconds: cdTtl };
@@ -85,7 +91,7 @@ export const requestEmailOtp = async (email, username, context = {}, type) => {
       );
     }
 
-    await emailQueue.add('sendEmailOtp', { email, otp, username, type });
+    await emailQueue.add('sendEmailOtp', { email, otp, username, type, role });
 
     return { ok: true };
   } catch (error) {

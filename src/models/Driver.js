@@ -5,7 +5,6 @@ import {
   DOCUMENT_STATUS,
   WAYBILL_STATUS,
 } from '../enums/driver.js';
-import { NewFactorListInstance } from 'twilio/lib/rest/verify/v2/service/entity/newFactor.js';
 
 const suspensionSchema = new mongoose.Schema(
   {

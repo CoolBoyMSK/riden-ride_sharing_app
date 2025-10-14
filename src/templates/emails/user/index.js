@@ -3,6 +3,8 @@ import path from 'path';
 import handlebars from 'handlebars';
 import sendEmail from '../../../utils/email.js';
 
+// Passenger Mails
+
 export const sendEmailVerificationOtp = async (toEmail, code, username) => {
   const emailVerificationTplPath = path.join(
     process.cwd(),
@@ -104,7 +106,11 @@ export const sendWelcomePassengerEmail = async (toEmail, username) => {
   });
 };
 
-export const sendResetPasswordEmail = async (toEmail, username, lastDigits) => {
+export const sendPassengerResetPasswordEmail = async (
+  toEmail,
+  username,
+  lastDigits,
+) => {
   const resetPasswordTplPath = path.join(
     process.cwd(),
     'src',
@@ -125,7 +131,10 @@ export const sendResetPasswordEmail = async (toEmail, username, lastDigits) => {
   });
 };
 
-export const sendProfileEditRequestEmail = async (toEmail, username) => {
+export const sendPassengerProfileEditRequestEmail = async (
+  toEmail,
+  username,
+) => {
   const profileEditRequestTplPath = path.join(
     process.cwd(),
     'src',
@@ -149,7 +158,7 @@ export const sendProfileEditRequestEmail = async (toEmail, username) => {
   });
 };
 
-export const sendApprovedProfileEditRequestEmail = async (
+export const sendPassengerApprovedProfileEditRequestEmail = async (
   toEmail,
   username,
 ) => {
@@ -202,7 +211,10 @@ export const sendPassengerSuspendedEmail = async (toEmail, username) => {
   });
 };
 
-export const sendRideCancellationWarningEmail = async (toEmail, username) => {
+export const sendPassengerRideCancellationWarningEmail = async (
+  toEmail,
+  username,
+) => {
   const TplPath = path.join(
     process.cwd(),
     'src',
@@ -219,6 +231,214 @@ export const sendRideCancellationWarningEmail = async (toEmail, username) => {
   await sendEmail({
     to: toEmail,
     subject: 'Your RIDEN Account Has Been Suspended',
+    html,
+  });
+};
+
+// Driver Mails
+
+export const sendDriverEmailVerificationEmail = async (toEmail, code) => {
+  const TplPath = path.join(
+    process.cwd(),
+    'src',
+    'templates',
+    'emails',
+    'user',
+    'html',
+    'driverEmailVerificationEmail.html',
+  );
+
+  const TplSource = fs.readFileSync(TplPath, 'utf-8');
+  const Tpl = handlebars.compile(TplSource);
+  const html = Tpl({ code });
+  await sendEmail({
+    to: toEmail,
+    subject: 'Verify Your Riden Driver Account',
+    html,
+  });
+};
+
+export const sendWelcomeDriverEmail = async (toEmail, username) => {
+  const TplPath = path.join(
+    process.cwd(),
+    'src',
+    'templates',
+    'emails',
+    'user',
+    'html',
+    'welcomeDriver.html',
+  );
+
+  const TplSource = fs.readFileSync(TplPath, 'utf-8');
+  const Tpl = handlebars.compile(TplSource);
+  const html = Tpl({ username });
+  await sendEmail({
+    to: toEmail,
+    subject: 'Welcome to Riden Driver!',
+    html,
+  });
+};
+
+export const sendDriverDocumentsApprovalEmail = async (toEmail, username) => {
+  const TplPath = path.join(
+    process.cwd(),
+    'src',
+    'templates',
+    'emails',
+    'user',
+    'html',
+    'driverDocumentsApprovalEmail.html',
+  );
+
+  const TplSource = fs.readFileSync(TplPath, 'utf-8');
+  const Tpl = handlebars.compile(TplSource);
+  const html = Tpl({ username });
+  await sendEmail({
+    to: toEmail,
+    subject: 'Your Documents Have Been Approved!',
+    html,
+  });
+};
+
+export const sendDriverDocumentsRejectedEmail = async (toEmail, username) => {
+  const TplPath = path.join(
+    process.cwd(),
+    'src',
+    'templates',
+    'emails',
+    'user',
+    'html',
+    'driverDocumentsRejectedEmail.html',
+  );
+
+  const TplSource = fs.readFileSync(TplPath, 'utf-8');
+  const Tpl = handlebars.compile(TplSource);
+  const html = Tpl({ username });
+  await sendEmail({
+    to: toEmail,
+    subject: 'Action Needed: Document Rejected',
+    html,
+  });
+};
+
+export const sendDocumentEditRequestApprovalEmail = async (
+  toEmail,
+  username,
+) => {
+  const TplPath = path.join(
+    process.cwd(),
+    'src',
+    'templates',
+    'emails',
+    'user',
+    'html',
+    'documentEditRequestApprovalEmail.html',
+  );
+
+  const TplSource = fs.readFileSync(TplPath, 'utf-8');
+  const Tpl = handlebars.compile(TplSource);
+  const html = Tpl({ username });
+  await sendEmail({
+    to: toEmail,
+    subject: 'Document Edit Request Approved',
+    html,
+  });
+};
+
+export const sendDriverPasswordResetOtpEmail = async (
+  toEmail,
+  username,
+  code,
+) => {
+  const TplPath = path.join(
+    process.cwd(),
+    'src',
+    'templates',
+    'emails',
+    'user',
+    'html',
+    'driverPasswordResetOtpEmail.html',
+  );
+
+  const TplSource = fs.readFileSync(TplPath, 'utf-8');
+  const Tpl = handlebars.compile(TplSource);
+  const html = Tpl({ username, code });
+  await sendEmail({
+    to: toEmail,
+    subject: 'Document Edit Request Approved',
+    html,
+  });
+};
+
+export const sendDriverPaymentProcessedEmail = async (
+  toEmail,
+  username,
+  amount,
+  date,
+  transactionId,
+) => {
+  const TplPath = path.join(
+    process.cwd(),
+    'src',
+    'templates',
+    'emails',
+    'user',
+    'html',
+    'driverPaymentProcessedEmail.html',
+  );
+
+  const TplSource = fs.readFileSync(TplPath, 'utf-8');
+  const Tpl = handlebars.compile(TplSource);
+  const html = Tpl({ username, amount, date, transactionId });
+  await sendEmail({
+    to: toEmail,
+    subject: 'Your Payment Has Been Processed',
+    html,
+  });
+};
+
+export const sendDriverAccountSuspendedEmail = async (
+  toEmail,
+  username,
+  reason,
+) => {
+  const TplPath = path.join(
+    process.cwd(),
+    'src',
+    'templates',
+    'emails',
+    'user',
+    'html',
+    'driverAccountSuspendedEmail.html',
+  );
+
+  const TplSource = fs.readFileSync(TplPath, 'utf-8');
+  const Tpl = handlebars.compile(TplSource);
+  const html = Tpl({ username, reason });
+  await sendEmail({
+    to: toEmail,
+    subject: 'Important: Your Riden Driver Account Has Been Suspended',
+    html,
+  });
+};
+
+export const sendDriverRideCancellationEmail = async (toEmail, username) => {
+  const TplPath = path.join(
+    process.cwd(),
+    'src',
+    'templates',
+    'emails',
+    'user',
+    'html',
+    'driverRideCancellationEmail.html',
+  );
+
+  const TplSource = fs.readFileSync(TplPath, 'utf-8');
+  const Tpl = handlebars.compile(TplSource);
+  const html = Tpl({ username });
+  await sendEmail({
+    to: toEmail,
+    subject: 'Warning: Multiple Ride Cancellations Detected',
     html,
   });
 };

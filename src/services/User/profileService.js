@@ -26,6 +26,7 @@ import {
 } from '../../utils/otpUtils.js';
 import redisConfig from '../../config/redisConfig.js';
 import bcrypt from 'bcrypt';
+import { sendPassengerProfileEditRequestEmail } from '../../templates/emails/user/index.js';
 
 export const getUserProfile = async (user, resp) => {
   const profile = await findUserById(user.id);
@@ -307,6 +308,10 @@ export const updateUserProfile = async (user, body, file, resp) => {
 
     await session.commitTransaction();
     session.endSession();
+
+    if (messages.length > 0) {
+      await sendPassengerProfileEditRequestEmail(myUser.userId?.email, myUser.userId?.name);
+    }
 
     resp.data = {
       messages,

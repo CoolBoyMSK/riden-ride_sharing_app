@@ -16,7 +16,13 @@ import {
   updateDriverByUserId,
 } from '../../../dal/driver.js';
 import { getAllExternalAccounts } from '../../../dal/stripe.js';
+import { findUserById } from '../../../dal/user/index.js';
 import { uploadDriverDocumentToS3 } from '../../../utils/s3Uploader.js';
+import {
+  sendDriverDocumentsApprovalEmail,
+  sendDriverDocumentsRejectedEmail,
+  sendDriverAccountSuspendedEmail,
+} from '../../../templates/emails/user/index.js';
 
 export const getAllDrivers = async (
   { page, limit, search, fromDate, toDate, isApproved },
@@ -55,6 +61,20 @@ export const suspendDriver = async (driverId, { reason, endDate }, resp) => {
       resp.error_message = 'Driver not found';
       return resp;
     }
+
+    const user = await findUserById(updated.userId);
+    if (!user) {
+      resp.error = true;
+      resp.error_message = 'User not found';
+      return resp;
+    }
+
+    await sendDriverAccountSuspendedEmail(
+      user.userId?.email,
+      user.userId?.name,
+      reason,
+    );
+
     resp.data = {
       id: updated._id,
       isBlocked: updated.isBlocked,
@@ -77,6 +97,7 @@ export const unsuspendDriver = async (driverId, resp) => {
       resp.error_message = 'Driver not found';
       return resp;
     }
+
     resp.data = { id: updated._id, isBlocked: updated.isBlocked };
     return resp;
   } catch (error) {
@@ -159,6 +180,32 @@ export const updateDriverDocumentStatus = async (
       resp.error = true;
       resp.error_message = 'Failed to Update Document Status';
       return resp;
+    }
+
+    let user = await findUserById(updated.userId);
+    if (!user) {
+      await session.abortTransaction();
+      session.endSession();
+      resp.error = true;
+      resp.error_message = 'User not found';
+      return resp;
+    }
+
+    if (status === 'rejected') {
+      await sendDriverDocumentsRejectedEmail(
+        user.userId?.email,
+        user.userId?.name,
+      );
+    }
+
+    const unverified = Object.values(updated.documents).filter(
+      (doc) => doc.status !== 'verified',
+    );
+    if (unverified.length == 0) {
+      await sendDriverDocumentsApprovalEmail(
+        user.userId?.email,
+        user.userId?.name,
+      );
     }
 
     await session.commitTransaction();

@@ -54,9 +54,14 @@ import { findPassengerByUserId, findPassengerById } from '../dal/passenger.js';
 import { passengerPaysDriver, payDriverFromWallet } from '../dal/stripe.js';
 import { createCallLog, findCallById, updateCallLogById } from '../dal/call.js';
 import { findDashboardData } from '../dal/admin/index.js';
+import { findUserById } from '../dal/user/index.js';
 import { notifyUser } from '../dal/notification.js';
 import { generateAgoraToken } from '../utils/agoraTokenGenerator.js';
 import { generateRideReceipt } from '../utils/receiptGenerator.js';
+import {
+  sendPassengerRideCancellationWarningEmail,
+  sendDriverRideCancellationEmail,
+} from '../templates/emails/user/index.js';
 import mongoose from 'mongoose';
 
 let ioInstance = null;
@@ -632,6 +637,22 @@ export const initSocket = (server) => {
             message: 'Failed to update ride status',
           });
         }
+
+        const mailTo = await findUserById(ride.driverId?.userId);
+        if (!mailTo) {
+          await session.abortTransaction();
+          return socket.emit('ride:driver_cancel_ride', {
+            success: false,
+            objectType,
+            code: 'NOT_FOUND',
+            message: 'Driver not found',
+          });
+        }
+
+        await sendDriverRideCancellationEmail(
+          mailTo.userId?.email,
+          mailTo.userId?.name,
+        );
 
         await session.commitTransaction();
 
@@ -1831,6 +1852,22 @@ export const initSocket = (server) => {
             message: 'Failed to update ride status',
           });
         }
+
+        const mailTo = await findUserById(ride.passengerId?.userId);
+        if (!mailTo) {
+          await session.abortTransaction();
+          return socket.emit('ride:passenger_cancel_ride', {
+            success: false,
+            objectType,
+            code: 'NOT_FOUND',
+            message: 'Passenger not found',
+          });
+        }
+
+        await sendPassengerRideCancellationWarningEmail(
+          mailTo.userId?.email,
+          mailTo.userId?.name,
+        );
 
         await session.commitTransaction();
 

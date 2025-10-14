@@ -54,6 +54,12 @@ import {
 import redisConfig from '../../../config/redisConfig.js';
 import { notifyUser } from '../../../dal/notification.js';
 import crypto from 'crypto';
+import {
+  sendPhoneOtpEmail,
+  sendWelcomePassengerEmail,
+  sendPassengerResetPasswordEmail,
+  sendWelcomeDriverEmail,
+} from '../../../templates/emails/user/index.js';
 
 export const signupUser = async (
   users,
@@ -127,6 +133,8 @@ export const signupUser = async (
       return resp;
     }
 
+    await sendWelcomeDriverEmail(user.email, user.name);
+
     const userObj = user.toObject();
     delete userObj.password;
     resp.data = userObj;
@@ -193,6 +201,8 @@ export const signupUser = async (
       return resp;
     }
 
+    await sendWelcomePassengerEmail(user.email, user.name);
+
     const userObj = user.toObject();
     delete userObj.password;
     resp.data = userObj;
@@ -258,6 +268,12 @@ export const loginUser = async (
             resp.error = true;
             resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
             return resp;
+          } else {
+            await sendPhoneOtpEmail(
+              user.email,
+              user.name,
+              user.phoneNumber.slice(-4),
+            );
           }
         }
       }
@@ -418,7 +434,13 @@ export const loginUser = async (
       if (email) {
         let user = await findUserByEmail(email);
         if (user) {
-          const result = await requestEmailOtp(user.email, user.name);
+          const result = await requestEmailOtp(
+            user.email,
+            user.name,
+            {},
+            null,
+            user.roles[0],
+          );
           if (!result.ok) {
             resp.error = true;
             resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
@@ -467,7 +489,13 @@ export const loginUser = async (
           };
           await createDeviceInfo(device);
 
-          const result = await requestEmailOtp(user.email, user.name);
+          const result = await requestEmailOtp(
+            user.email,
+            user.name,
+            {},
+            null,
+            user.roles[0],
+          );
           if (!result.ok) {
             resp.error = true;
             resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
@@ -927,9 +955,15 @@ export const forgotPassword = async ({ phoneNumber, email }, resp) => {
         return resp;
       }
 
-      const result = await requestEmailOtp(user.email, user.name, {
-        purpose: 'password_reset',
-      });
+      const result = await requestEmailOtp(
+        user.email,
+        user.name,
+        {
+          purpose: 'password_reset',
+        },
+        'password_reset',
+        user.roles[0],
+      );
       if (!result.ok) {
         resp.error = true;
         resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
@@ -962,6 +996,12 @@ export const forgotPassword = async ({ phoneNumber, email }, resp) => {
         resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
         return resp;
       }
+
+      await sendPassengerResetPasswordEmail(
+        user.email,
+        user.name,
+        user.phoneNumber.slice(-4),
+      );
 
       resp.data = {
         forgotPasswordPhoneOtp: true,
