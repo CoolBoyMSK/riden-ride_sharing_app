@@ -213,19 +213,19 @@ export const bookRide = async (userId, rideData) => {
 
     const newRide = await createRide(ridePayload);
     if (newRide) {
-      // Notification Logic Start
-      const notify = await notifyUser({
-        userId: passenger.userId,
-        title: 'New Ride',
-        message: `New ride request from ${pickupLocation.address} to ${dropoffLocation.address} — tap to respond! `,
-        module: 'ride',
-        metadata: newRide,
-        type: 'ALERT',
-        actionLink: `${env.BASE_URL}/api/user/profile/me`,
-      });
-      if (!notify) {
-        console.error('Failed to send notification');
-      }
+    //   // Notification Logic Start
+    //   const notify = await notifyUser({
+    //     userId: passenger.userId,
+    //     title: 'New Ride',
+    //     message: `New ride request from ${pickupLocation.address} to ${dropoffLocation.address} — tap to respond! `,
+    //     module: 'ride',
+    //     metadata: newRide,
+    //     type: 'ALERT',
+    //     actionLink: `${env.BASE_URL}/api/user/profile/me`,
+    //   });
+    //   if (!notify) {
+    //     console.error('Failed to send notification');
+    //   }
 
       const availableDrivers = await findNearbyDriverUserIds(
         carType,
