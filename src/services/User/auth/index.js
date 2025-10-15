@@ -246,7 +246,13 @@ export const loginUser = async (
         }
 
         if (user && !user.isEmailVerified) {
-          const result = await requestEmailOtp(user.email, user.name);
+          const result = await requestEmailOtp(
+            user.email,
+            user.name,
+            {},
+            '',
+            'passenger',
+          );
           if (!result.ok) {
             resp.error = true;
             resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
@@ -1125,7 +1131,10 @@ export const resetUserPassword = async (
   }
 };
 
-export const resendOtp = async ({ emailOtp, phoneOtp, email, phoneNumber }, resp) => {
+export const resendOtp = async (
+  { emailOtp, phoneOtp, email, phoneNumber },
+  resp,
+) => {
   try {
     if (emailOtp) {
       let user = await findUserByEmail(email);
