@@ -4,6 +4,7 @@ import {
   resetUserPassword,
   signupUser,
   otpVerification,
+  sendPassengerPhoneOtp,
   forgotPassword,
   passKeyLogInAuthOptions,
   verifyPasskeyLoginAuth,
@@ -50,6 +51,18 @@ export const otpVerificationController = (req, res) =>
       validationFn: null, // you may add validateOtp if you create one
       handlerParams: [req.body, req],
       successMessage: 'OTP verified successfully',
+    },
+    req,
+    res,
+  );
+
+export const sendPassengerPhoneOtpController = (req, res) =>
+  handleResponse(
+    {
+      handler: sendPassengerPhoneOtp,
+      validationFn: null, // you may add validateOtp if you create one
+      handlerParams: [req.body],
+      successMessage: 'Passenger phone OTP sent successfully',
     },
     req,
     res,

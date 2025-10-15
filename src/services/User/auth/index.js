@@ -62,6 +62,7 @@ import {
   sendPassengerResetPasswordEmail,
   sendWelcomeDriverEmail,
 } from '../../../templates/emails/user/index.js';
+import mongoose from 'mongoose';
 
 export const signupUser = async (
   users,
@@ -149,65 +150,40 @@ export const signupUser = async (
       resp.error_message = 'Email already in use';
       return resp;
     }
-
-    if (await findUserByPhone(phoneNumber)) {
+    user = await findUserByPhone(phoneNumber);
+    if (user && user.isPhoneVerified) {
       resp.error = true;
       resp.error_message = 'Phone number already in use';
       return resp;
     }
 
-    user = await createUser({
+    const userData = {
       name,
       email,
-      phoneNumber,
       gender,
       roles: ['passenger'],
       password: hashed,
       isCompleted: true,
-    });
+    };
 
-    let passengerProfile = await findPassengerByUserId(user._id);
-    if (!passengerProfile) {
-      const uniqueId = generateUniqueId(user.roles[0], user._id);
-      passengerProfile = await createPassengerProfile(user._id, uniqueId);
-    }
-
-    const stripeCustomerId = await createPassengerStripeCustomer(
-      user,
-      passengerProfile,
+    const result = await requestEmailOtp(
+      email,
+      name,
+      userData,
+      'signup',
+      'passenger',
     );
-    if (!stripeCustomerId) {
+    if (!result.ok) {
       resp.error = true;
-      resp.error_message = 'Failed to create stripe customer account';
+      resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
       return resp;
     }
 
-    const wallet = await createPassengerWallet(passengerProfile._id);
-    if (!wallet) {
-      resp.error = true;
-      resp.error_message = 'Failed to create In-App wallet';
-      return resp;
-    }
-
-    const notify = await createAdminNotification({
-      title: 'New Passenger Registered',
-      message: `${user.name} registered as passenger successfully, Their Phone No: ${user.phoneNumber} and Email: ${user.email}`,
-      metadata: user,
-      module: 'passenger_management',
-      type: 'ALERT',
-      actionLink: `${env.FRONTEND_URL}/api/admin/passengers/fetch-passenger/${passengerProfile._id}`,
-    });
-    if (!notify) {
-      resp.error = true;
-      resp.error_message = 'Failed to send notification';
-      return resp;
-    }
-
-    await sendWelcomePassengerEmail(user.email, user.name);
-
-    const userObj = user.toObject();
-    delete userObj.password;
-    resp.data = userObj;
+    resp.data = {
+      signupOtp: true,
+      message: `Email verification OTP to register passenger has been sent to ${email}`,
+      email: email,
+    };
     return resp;
   }
 
@@ -236,8 +212,20 @@ export const loginUser = async (
     if (role === 'passenger') {
       let user;
 
+      if (!password) {
+        resp.error = true;
+        resp.error_message = 'Password is required';
+        return resp;
+      }
+
       if (email) {
         user = await findUserByEmail(email);
+        if (!user) {
+          resp.error = true;
+          resp.error_message = `User not found`;
+          return resp;
+        }
+
         const match = await comparePasswords(password, user.password);
         if (!match) {
           resp.error = true;
@@ -245,7 +233,7 @@ export const loginUser = async (
           return resp;
         }
 
-        if (user && !user.isEmailVerified) {
+        if (user) {
           const result = await requestEmailOtp(
             user.email,
             user.name,
@@ -257,12 +245,25 @@ export const loginUser = async (
             resp.error = true;
             resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
             return resp;
+          } else {
+            resp.data = {
+              emailOtp: true,
+              message: `OTP has been sent to ${user.email}`,
+              email: user.email,
+            };
+            return resp;
           }
         }
       }
 
       if (phoneNumber) {
         user = await findUserByPhone(phoneNumber);
+        if (!user) {
+          resp.error = true;
+          resp.error_message = `User not found`;
+          return resp;
+        }
+
         const match = await comparePasswords(password, user.password);
         if (!match) {
           resp.error = true;
@@ -284,12 +285,6 @@ export const loginUser = async (
             );
           }
         }
-      }
-
-      if (!password) {
-        resp.error = true;
-        resp.error_message = 'Password is required';
-        return resp;
       }
 
       if (!user) {
@@ -533,6 +528,8 @@ export const loginUser = async (
 
 export const otpVerification = async (
   {
+    verifyPhoneNumberOtp,
+    signupOtp,
     phoneOtp,
     emailOtp,
     forgotPasswordPhoneOtp,
@@ -551,6 +548,264 @@ export const otpVerification = async (
 ) => {
   try {
     let user;
+
+    if (signupOtp) {
+      if (!email || !otp) {
+        resp.error = true;
+        resp.error_message = 'Email and OTP are required';
+        return resp;
+      }
+
+      const result = await verifyEmailOtp(email, otp);
+      if (!result.ok) {
+        resp.error = true;
+        resp.error_message =
+          result.reason === 'expired_or_not_requested'
+            ? 'OTP expired or not requested'
+            : 'Invalid OTP';
+        return resp;
+      }
+
+      const user = await createUser({
+        ...result.pending,
+        isEmailVerified: true,
+      });
+      if (!user) {
+        resp.error = true;
+        resp.error_message = 'Failed to register passenger';
+        return resp;
+      }
+
+      const uniqueId = generateUniqueId(user.roles[0], user._id);
+      const passengerProfile = await createPassengerProfile(user._id, uniqueId);
+      if (!passengerProfile) {
+        resp.error = true;
+        resp.error_message = 'Failed to create passenger profile';
+        return resp;
+      }
+
+      const stripeCustomerId = await createPassengerStripeCustomer(
+        user,
+        passengerProfile,
+      );
+      if (!stripeCustomerId) {
+        resp.error = true;
+        resp.error_message = 'Failed to create stripe customer account';
+        return resp;
+      }
+
+      const wallet = await createPassengerWallet(passengerProfile._id);
+      if (!wallet) {
+        resp.error = true;
+        resp.error_message = 'Failed to create In-App wallet';
+        return resp;
+      }
+
+      const notify = await createAdminNotification({
+        title: 'New Passenger Registered',
+        message: `${user.name} registered as passenger successfully, Their Phone No: ${user.phoneNumber} and Email: ${user.email}`,
+        metadata: user,
+        module: 'passenger_management',
+        type: 'ALERT',
+        actionLink: `${env.FRONTEND_URL}/api/admin/passengers/fetch-passenger/${passengerProfile._id}`,
+      });
+      if (!notify) {
+        console.error('Failed to send notification');
+      }
+
+      await sendWelcomePassengerEmail(user.email, user.name);
+
+      // Final cleanup
+      await redisConfig.del(
+        emailOtpKey(email),
+        emailCooldownKey(email),
+        emailPendingKey(email),
+      );
+
+      const userObj = user.toObject();
+      delete userObj.password;
+      resp.data = userObj;
+      return resp;
+    }
+
+    if (emailOtp) {
+      if (!email || !otp) {
+        resp.error = true;
+        resp.error_message = 'Email and OTP are required';
+        return resp;
+      }
+
+      const result = await verifyEmailOtp(email, otp);
+      if (!result.ok) {
+        resp.error = true;
+        resp.error_message =
+          result.reason === 'expired_or_not_requested'
+            ? 'OTP expired or not requested'
+            : 'Invalid OTP';
+        return resp;
+      }
+
+      user = await findUserByEmail(email);
+      if (!user) {
+        resp.error = true;
+        resp.error_message = 'User not found';
+        return resp;
+      } else if (
+        user.roles.includes('passenger') &&
+        (!user.phoneNumber || !user.isPhoneVerified)
+      ) {
+        resp.data = {
+          verifyPhone: true,
+          message: `Phone Number verification is required. Please verify your phone number to complete the login process.`,
+          userId: user._id,
+        };
+        return resp;
+      }
+
+      user = await updateUserById(user._id, {
+        userDeviceType,
+      });
+      if (!user) {
+        resp.error = true;
+        resp.error_message = 'Failed to update Device Type';
+        return resp;
+      }
+
+      // Final cleanup
+      await redisConfig.del(
+        emailOtpKey(email),
+        emailCooldownKey(email),
+        emailPendingKey(email),
+      );
+
+      if (user.roles.includes('driver')) {
+        let driver = await findDriverByUserId(user._id);
+        if (!driver) {
+          const uniqueId = generateUniqueId(user.roles[0], user._id);
+          driver = await createDriverProfile(user._id, uniqueId);
+          await updateDriverByUserId(user._id, {
+            status: driver.status === 'offline' ? 'online' : driver.status,
+            isActive: true,
+          });
+        } else {
+          console.log('Available');
+          driver = await updateDriverByUserId(user._id, {
+            status: driver.status === 'offline' ? 'online' : driver.status,
+            isActive: true,
+          });
+        }
+      } else if (user.roles.includes('passenger')) {
+        const passenger = await updatePassenger(
+          { userId: user._id },
+          { isActive: true },
+        );
+        if (!passenger) {
+          resp.error = true;
+          resp.error_message = 'Failed to activate passenger';
+          return resp;
+        }
+      } else {
+        resp.error = true;
+        resp.error_message = 'Invalid user role';
+        return resp;
+      }
+
+      const deviceInfo = await extractDeviceInfo(headers);
+      const device = {
+        userId: user._id,
+        deviceId,
+        deviceType: userDeviceType,
+        deviceModel,
+        deviceVendor,
+        os,
+        ...deviceInfo,
+        loginMethod: 'email',
+        lastLoginAt: new Date(),
+      };
+      await createDeviceInfo(device);
+
+      const payload = { id: user._id, roles: user.roles };
+      resp.data = {
+        user: user,
+        accessToken: generateAccessToken(payload),
+        refreshToken: generateRefreshToken(payload),
+      };
+      return resp;
+    }
+
+    if (verifyPhoneNumberOtp) {
+      if (!phoneNumber || !otp) {
+        resp.error = true;
+        resp.error_message = 'Phone number and OTP are required';
+        return resp;
+      }
+
+      const result = await verifyPhoneOtp(phoneNumber, otp);
+      if (!result.ok) {
+        resp.error = true;
+        switch (result.reason) {
+          case 'expired_or_not_requested':
+            resp.error_message = 'OTP expired or not requested';
+            break;
+          case 'invalid_otp':
+            resp.error_message = 'Invalid OTP';
+            break;
+          case 'too_many_attempts':
+            resp.error_message = 'Too many failed attempts, try later';
+            break;
+          default:
+            resp.error_message = 'Verification failed';
+        }
+        return resp;
+      }
+
+      user = await findUserByPhone(phoneNumber);
+      if (user) {
+        resp.error = true;
+        resp.error_message = 'Phone Number already exists';
+        return resp;
+      }
+
+      user = await updateUserById(result.pending?.userId, {
+        phoneNumber: result.pending?.phoneNumber,
+        isPhoneVerified: true,
+        userDeviceType,
+      });
+      if (!user) {
+        resp.error = true;
+        resp.error_message = 'Failed to verify phone number';
+        return resp;
+      }
+
+      await redisConfig.del(
+        phoneOtpKey(phoneNumber),
+        phoneCooldownKey(phoneNumber),
+        phonePendingKey(phoneNumber),
+      );
+
+      const deviceInfo = await extractDeviceInfo(headers);
+      const device = {
+        userId: user._id,
+        deviceId,
+        deviceType: userDeviceType,
+        deviceModel,
+        deviceVendor,
+        os,
+        ...deviceInfo,
+        loginMethod: 'phone',
+        lastLoginAt: new Date(),
+      };
+      await createDeviceInfo(device);
+
+      const payload = { id: user._id, roles: user.roles };
+      resp.data = {
+        user: user,
+        accessToken: generateAccessToken(payload),
+        refreshToken: generateRefreshToken(payload),
+      };
+      return resp;
+    }
+
     if (phoneOtp) {
       if (!phoneNumber || !otp) {
         resp.error = true;
@@ -656,104 +911,9 @@ export const otpVerification = async (
         refreshToken: generateRefreshToken(payload),
       };
       return resp;
-    } else if (emailOtp) {
-      if (!email || !otp) {
-        resp.error = true;
-        resp.error_message = 'Email and OTP are required';
-        return resp;
-      }
+    }
 
-      const result = await verifyEmailOtp(email, otp);
-      if (!result.ok) {
-        resp.error = true;
-        resp.error_message =
-          result.reason === 'expired_or_not_requested'
-            ? 'OTP expired or not requested'
-            : 'Invalid OTP';
-        return resp;
-      }
-
-      user = await findUserByEmail(email);
-      if (!user) {
-        resp.error = true;
-        resp.error_message = 'User not found';
-        return resp;
-      } else if (!user.isPhoneVerified) {
-        user = await updateUserById(user._id, {
-          isEmailVerified: true,
-        });
-      }
-
-      user = await updateUserById(user._id, {
-        userDeviceType,
-      });
-      if (!user) {
-        resp.error = true;
-        resp.error_message = 'Failed to update Device Type';
-        return resp;
-      }
-
-      // Final cleanup
-      await redisConfig.del(
-        emailOtpKey(email),
-        emailCooldownKey(email),
-        emailPendingKey(email),
-      );
-
-      if (user.roles.includes('driver')) {
-        let driver = await findDriverByUserId(user._id);
-        if (!driver) {
-          const uniqueId = generateUniqueId(user.roles[0], user._id);
-          driver = await createDriverProfile(user._id, uniqueId);
-          await updateDriverByUserId(user._id, {
-            status: driver.status === 'offline' ? 'online' : driver.status,
-            isActive: true,
-          });
-        } else {
-          console.log('Available');
-          driver = await updateDriverByUserId(user._id, {
-            status: driver.status === 'offline' ? 'online' : driver.status,
-            isActive: true,
-          });
-        }
-      } else if (user.roles.includes('passenger')) {
-        const passenger = await updatePassenger(
-          { userId: user._id },
-          { isActive: true },
-        );
-        if (!passenger) {
-          resp.error = true;
-          resp.error_message = 'Failed to activate passenger';
-          return resp;
-        }
-      } else {
-        resp.error = true;
-        resp.error_message = 'Invalid user role';
-        return resp;
-      }
-
-      const deviceInfo = await extractDeviceInfo(headers);
-      const device = {
-        userId: user._id,
-        deviceId,
-        deviceType: userDeviceType,
-        deviceModel,
-        deviceVendor,
-        os,
-        ...deviceInfo,
-        loginMethod: 'email',
-        lastLoginAt: new Date(),
-      };
-      await createDeviceInfo(device);
-
-      const payload = { id: user._id, roles: user.roles };
-      resp.data = {
-        user: user,
-        accessToken: generateAccessToken(payload),
-        refreshToken: generateRefreshToken(payload),
-      };
-      return resp;
-    } else if (forgotPasswordPhoneOtp) {
+    if (forgotPasswordPhoneOtp) {
       if (!phoneNumber || !otp) {
         resp.error = true;
         resp.error_message = 'Phone number and OTP are required';
@@ -848,7 +1008,9 @@ export const otpVerification = async (
       }
 
       return resp;
-    } else if (forgotPasswordEmailOtp) {
+    }
+
+    if (forgotPasswordEmailOtp) {
       if (!email || !otp) {
         resp.error = true;
         resp.error_message = 'Email and OTP are required';
@@ -934,9 +1096,61 @@ export const otpVerification = async (
       }
 
       return resp;
-    } else {
-      resp.error = true;
-      resp.error_message = 'Invalid OTP Type';
+    }
+
+    resp.error = true;
+    resp.error_message = 'Invalid OTP Type';
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
+    return resp;
+  }
+};
+
+export const sendPassengerPhoneOtp = async (
+  { userId, phoneNumber, verifyPhone },
+  resp,
+) => {
+  try {
+    if (verifyPhone) {
+      if (!phoneNumber || !userId) {
+        resp.error = true;
+        resp.error_message = 'Phone number and userId is required is required';
+        return resp;
+      }
+      const user = await findUserById(userId);
+      if (!user) {
+        resp.error = true;
+        resp.error_message = 'User not found';
+        return resp;
+      }
+
+      const isUser = await findUserByPhone(phoneNumber);
+      if (isUser) {
+        resp.error = true;
+        resp.error_message = 'Phone Number already exists';
+        return resp;
+      }
+
+      const result = await requestPhoneOtp(phoneNumber, user.userId?.name, {
+        userId: user.userId?._id,
+        phoneNumber,
+      });
+      if (!result.ok) {
+        resp.error = true;
+        resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
+        return resp;
+      } else {
+        await sendPhoneOtpEmail(user.email, user.name, phoneNumber.slice(-4));
+      }
+
+      resp.data = {
+        verifyPhoneNumberOtp: true,
+        message: `Phone Number verification OTP has been sent to ${phoneNumber}`,
+        phoneNumber,
+      };
       return resp;
     }
   } catch (error) {

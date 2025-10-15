@@ -90,7 +90,7 @@ export const sendWelcomePassengerEmail = async (toEmail, username) => {
     'emails',
     'user',
     'html',
-    'phoneOtp.html',
+    'welcomePassenger.html',
   );
 
   const welcomePassengerTplSource = fs.readFileSync(

@@ -6,6 +6,7 @@ import {
   loginController,
   refreshController,
   otpVerificationController,
+  sendPassengerPhoneOtpController,
   forgotPasswordController,
   passKeyLogInAuthOptionsController,
   verifyPasskeyLoginAuthController,
@@ -43,6 +44,12 @@ registerRoute({
   router,
   route: '/verify-otp',
   post_method: otpVerificationController,
+});
+
+registerRoute({
+  router,
+  route: '/send-phone-otp',
+  post_method: sendPassengerPhoneOtpController,
 });
 
 registerRoute({

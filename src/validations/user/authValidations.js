@@ -10,8 +10,7 @@ export const validateSignup = (body) => {
       .pattern(/^\+?[0-9]{7,15}$/)
       .when('type', {
         is: Joi.array()
-          .items(Joi.string().valid('passenger', 'driver'))
-          .has('passenger'),
+          .items(Joi.string().valid('driver')),
         then: Joi.required(),
         otherwise: Joi.optional(),
       }),
