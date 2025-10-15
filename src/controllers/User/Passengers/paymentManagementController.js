@@ -7,6 +7,7 @@ import {
   deletePaymentMethod,
   topUpInAppWallet,
   getInAppWallet,
+  getTransactions,
 } from '../../../services/User/passenger/paymentManagement.js';
 import { handleResponse } from '../../../utils/handleRespone.js';
 import {
@@ -109,6 +110,18 @@ export const getInAppWalletController = (req, res) =>
       handler: getInAppWallet,
       validationFn: null,
       handlerParams: [req.user],
+      successMessage: 'Wallet fetched successfully',
+    },
+    req,
+    res,
+  );
+
+export const getTransactionsController = (req, res) =>
+  handleResponse(
+    {
+      handler: getTransactions,
+      validationFn: null,
+      handlerParams: [req.user, req.query],
       successMessage: 'Wallet fetched successfully',
     },
     req,

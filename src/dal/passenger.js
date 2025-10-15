@@ -1,6 +1,11 @@
 import PassengerModel from '../models/Passenger.js';
 import UserModel from '../models/User.js';
 import UpdateRequestModel from '../models/updateRequest.js';
+import Transaction from '../models/Transaction.js';
+import env from '../config/envConfig.js';
+import Stripe from 'stripe';
+
+const stripe = new Stripe(env.STRIPE_SECRET_KEY);
 
 export const findPassenger = (filter, project = {}, options = {}) =>
   PassengerModel.findOne(filter, project, options);
@@ -306,4 +311,79 @@ export const findPassengersWithSearch = async (
     limit: limitNum,
     totalPages: Math.ceil(total / limitNum),
   };
+};
+
+export const findPassengerTransactions = async (
+  passengerId,
+  page = 1,
+  limit = 10,
+) => {
+  try {
+    // Ensure valid pagination
+    const skip = (page - 1) * limit;
+
+    // Fetch paginated transactions
+    const transactions = await Transaction.find({ passengerId })
+      .populate({
+        path: 'rideId',
+        select: 'rideId',
+      })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    // If no transactions found
+    if (!transactions.length) {
+      return {
+        success: true,
+        transactions: [],
+        pagination: { page, limit, totalPages: 0, totalTransactions: 0 },
+      };
+    }
+
+    // Fetch total count for pagination metadata
+    const totalTransactions = await Transaction.countDocuments({ passengerId });
+    const totalPages = Math.ceil(totalTransactions / limit);
+
+    // Attach formatted payment method info for each transaction
+    const enrichedTransactions = await Promise.all(
+      transactions.map(async (txn) => {
+        try {
+          if (txn.metadata?.payment_method) {
+            const paymentMethod = await stripe.paymentMethods.retrieve(
+              txn.metadata.payment_method,
+            );
+
+            txn.paymentMethod = {
+              brand: paymentMethod.card?.brand || null,
+              display_brand: paymentMethod.card?.display_brand || null,
+              last4: paymentMethod.card?.last4 || null,
+            };
+          } else {
+            txn.paymentMethod = null;
+          }
+        } catch (err) {
+          txn.paymentMethod = null;
+        }
+
+        return txn;
+      }),
+    );
+
+    // Final response
+    return {
+      transactions: enrichedTransactions,
+      page: page ? parseInt(page) : null,
+      limit: limit ? parseInt(limit) : null,
+      totalPages,
+      totalTransactions,
+    };
+  } catch (error) {
+    console.error('Error fetching passenger transactions:', error);
+    return {
+      success: false,
+      message: 'Failed to fetch passenger transactions',
+    };
+  }
 };
