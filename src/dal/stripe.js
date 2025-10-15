@@ -537,20 +537,6 @@ export const addFundsToWallet = async (
       notificationMessage = `Payment successful! $${amount} has been added to your Riden wallet. $${clearedAmount} was used to clear your negative balance.`;
     }
 
-    const notify = await notifyUser({
-      userId: passenger.userId,
-      title: 'Payment Done 🎉',
-      message: notificationMessage,
-      module: 'payment',
-      metadata: { amount, negativeBalance: updatedWallet.negativeBalance },
-      type: 'ALERT',
-      actionLink: `${env.FRONTEND_URL}/api/user/passenger/payment-method/wallet`,
-    });
-
-    if (!notify) {
-      console.log('Failed to send notification, but payment was processed');
-    }
-
     return {
       success: true,
       amountAdded: Number(amount),
@@ -579,134 +565,6 @@ export const addFundsToWallet = async (
     await session.endSession();
   }
 };
-
-// export const payDriverFromWallet = async (
-//   passenger,
-//   driver,
-//   ride,
-//   amount,
-//   actualAmount,
-//   category,
-// ) => {
-//   try {
-//     const wallet = await getPassengerWallet(passenger._id);
-//     if (!wallet) throw new Error('Passenger wallet not found');
-
-//     let parsedAmount = Number(amount);
-//     if (isNaN(parsedAmount) || parsedAmount <= 0) {
-//       throw new Error('Invalid amount provided');
-//     }
-
-//     if (wallet.availableBalance < parsedAmount) {
-//       throw new Error('Insufficient wallet balance');
-//     }
-
-//     const driverWallet = await getDriverBalance(driver._id);
-//     if (!driverWallet) throw new Error('Driver wallet not found');
-
-//     await decreasePassengerAvailableBalance(passenger._id, parsedAmount);
-
-//     if (driverWallet.negativeBalance > 0) {
-//       const negative = driverWallet.negativeBalance;
-
-//       if (parsedAmount >= negative) {
-//         // Enough to clear all negative balance
-//         await decreaseDriverNegativeBalance(driver._id, negative);
-//         driverWallet.negativeBalance = 0;
-
-//         const remaining = parsedAmount - negative;
-//         if (remaining > 0) {
-//           await increaseDriverPendingBalance(driver._id, remaining);
-//         }
-//       } else {
-//         // Not enough to clear all negative balance
-//         await decreaseDriverNegativeBalance(driver._id, parsedAmount);
-//         driverWallet.negativeBalance = negative - parsedAmount;
-//       }
-//     } else {
-//       // No negative balance — normal case
-//       await increaseDriverPendingBalance(driver._id, parsedAmount);
-//     }
-
-//     const transaction = await createTransaction({
-//       passengerId: passenger._id,
-//       driverId: driver._id,
-//       rideId: ride._id,
-//       walletId: wallet._id,
-//       type: 'DEBIT',
-//       category,
-//       for: 'passenger',
-//       amount: actualAmount,
-//       metadata: {},
-//       status: 'succeeded',
-//       referenceId: wallet._id,
-//       receiptUrl: wallet._id,
-//     });
-
-//     await createTransaction({
-//       passengerId: passenger._id,
-//       driverId: driver._id,
-//       rideId: ride._id,
-//       walletId: wallet._id,
-//       type: 'CREDIT',
-//       category: 'PAYOUT',
-//       amount,
-//       for: 'driver',
-//       metadata: {},
-//       status: 'succeeded',
-//       referenceId: wallet._id,
-//       receiptUrl: wallet._id,
-//     });
-
-//     const notify = await notifyUser({
-//       userId: passenger.userId,
-//       title: '✅ Payment Successful!',
-//       message: `Thanks for riding with RIDEN. Your payment of $${amount} was completed successfully. Receipt is available in your ride history.`,
-//       module: 'payment',
-//       metadata: ride,
-//       type: 'ALERT',
-//       actionLink: `${env.FRONTEND_URL}/ride?rideId=${ride._id}`,
-//     });
-
-//     const notifyDriver = await notifyUser({
-//       userId: driver.userId,
-//       title: '💰 Payment Received',
-//       message: `You’ve received ${amount} for your recent ride.`,
-//       module: 'payment',
-//       metadata: ride,
-//       type: 'ALERT',
-//       actionLink: `${env.FRONTEND_URL}/ride?rideId=${ride._id}`,
-//     });
-
-//     if (!notify || !notifyDriver) {
-//       console.log('Failed to send notification');
-//     }
-
-//     return { success: true, transaction };
-//   } catch (error) {
-//     console.error(`Payment Failed: ${error.message}`);
-
-//     // 🔔 Failure Notification
-//     try {
-//       await notifyUser({
-//         userId: passenger.userId,
-//         title: '❌ Payment Failed',
-//         message: `We couldn’t complete your wallet payment of PKR ${amount}. ${error.message}. Please try again.`,
-//         module: 'payment',
-//         metadata: { rideId: ride?._id, error: error.message },
-//         type: 'ALERT',
-//         actionLink: `${env.FRONTEND_URL}/wallet`,
-//       });
-//     } catch (notifyErr) {
-//       console.error(
-//         '❌ Failed to send payment failure notification:',
-//         notifyErr,
-//       );
-//     }
-
-//     return { error: error.message };
-//   }
-// };
 
 export const payDriverFromWallet = async (
   passenger,
@@ -891,30 +749,30 @@ export const payDriverFromWallet = async (
     const updatedWallet = await getPassengerWallet(passenger._id);
     const negativeBalanceUsed = updatedWallet.negativeBalance > 0;
 
-    const [notify, notifyDriver] = await Promise.allSettled([
-      notifyUser({
-        userId: passenger.userId,
-        title: negativeBalanceUsed
-          ? '⚠️ Payment Processed with Negative Balance'
-          : '✅ Payment Successful!',
-        message: negativeBalanceUsed
-          ? `Your ride payment of $${amount} was processed. Insufficient wallet balance - $${updatedWallet.negativeBalance} added to negative balance. Please settle this before your next ride.`
-          : `Thanks for riding with RIDEN. Your payment of $${amount} was completed successfully. Receipt is available in your ride history.`,
-        module: 'payment',
-        metadata: ride,
-        type: 'ALERT',
-        actionLink: `${env.FRONTEND_URL}/ride?rideId=${ride._id}`,
-      }),
-      notifyUser({
-        userId: driver.userId,
-        title: '💰 Payment Received',
-        message: `You've received $${amount} for your recent ride.`,
-        module: 'payment',
-        metadata: ride,
-        type: 'ALERT',
-        actionLink: `${env.FRONTEND_URL}/ride?rideId=${ride._id}`,
-      }),
-    ]);
+    // const [notify, notifyDriver] = await Promise.allSettled([
+    //   notifyUser({
+    //     userId: passenger.userId,
+    //     title: negativeBalanceUsed
+    //       ? '⚠️ Payment Processed with Negative Balance'
+    //       : '✅ Payment Successful!',
+    //     message: negativeBalanceUsed
+    //       ? `Your ride payment of $${amount} was processed. Insufficient wallet balance - $${updatedWallet.negativeBalance} added to negative balance. Please settle this before your next ride.`
+    //       : `Thanks for riding with RIDEN. Your payment of $${amount} was completed successfully. Receipt is available in your ride history.`,
+    //     module: 'payment',
+    //     metadata: ride,
+    //     type: 'ALERT',
+    //     actionLink: `${env.FRONTEND_URL}/ride?rideId=${ride._id}`,
+    //   }),
+    //   notifyUser({
+    //     userId: driver.userId,
+    //     title: '💰 Payment Received',
+    //     message: `You've received $${amount} for your recent ride.`,
+    //     module: 'payment',
+    //     metadata: ride,
+    //     type: 'ALERT',
+    //     actionLink: `${env.FRONTEND_URL}/ride?rideId=${ride._id}`,
+    //   }),
+    // ]);
 
     if (notify.status === 'rejected' || notifyDriver.status === 'rejected') {
       console.log('Failed to send notification');
@@ -1156,34 +1014,34 @@ export const passengerPaysDriver = async (
     const updatedPassengerWallet = await getPassengerWallet(passenger._id);
     const hadNegativeBalance = updatedPassengerWallet.negativeBalance === 0;
 
-    const [notify, notifyDriver] = await Promise.allSettled([
-      notifyUser({
-        userId: passenger.userId,
-        title: hadNegativeBalance
-          ? '✅ Payment Successful + Negative Balance Cleared!'
-          : '✅ Payment Successful!',
-        message: hadNegativeBalance
-          ? `Thanks for riding with RIDEN. Your payment of $${actualAmount} was completed successfully and your negative balance has been cleared. Receipt is available in your ride history.`
-          : `Thanks for riding with RIDEN. Your payment of $${actualAmount} was completed successfully. Receipt is available in your ride history.`,
-        module: 'payment',
-        metadata: ride,
-        type: 'ALERT',
-        actionLink: `${env.FRONTEND_URL}/ride?rideId=${ride._id}`,
-      }),
-      notifyUser({
-        userId: driver.userId,
-        title: '💰 Payment Received',
-        message: `You've received $${amount} for your recent ride.`,
-        module: 'payment',
-        metadata: ride,
-        type: 'ALERT',
-        actionLink: `${env.FRONTEND_URL}/ride?rideId=${ride._id}`,
-      }),
-    ]);
+    // const [notify, notifyDriver] = await Promise.allSettled([
+    //   notifyUser({
+    //     userId: passenger.userId,
+    //     title: hadNegativeBalance
+    //       ? '✅ Payment Successful + Negative Balance Cleared!'
+    //       : '✅ Payment Successful!',
+    //     message: hadNegativeBalance
+    //       ? `Thanks for riding with RIDEN. Your payment of $${actualAmount} was completed successfully and your negative balance has been cleared. Receipt is available in your ride history.`
+    //       : `Thanks for riding with RIDEN. Your payment of $${actualAmount} was completed successfully. Receipt is available in your ride history.`,
+    //     module: 'payment',
+    //     metadata: ride,
+    //     type: 'ALERT',
+    //     actionLink: `${env.FRONTEND_URL}/ride?rideId=${ride._id}`,
+    //   }),
+    //   notifyUser({
+    //     userId: driver.userId,
+    //     title: '💰 Payment Received',
+    //     message: `You've received $${amount} for your recent ride.`,
+    //     module: 'payment',
+    //     metadata: ride,
+    //     type: 'ALERT',
+    //     actionLink: `${env.FRONTEND_URL}/ride?rideId=${ride._id}`,
+    //   }),
+    // ]);
 
-    if (notify.status === 'rejected' || notifyDriver.status === 'rejected') {
-      console.log('Failed to send notification');
-    }
+    // if (notify.status === 'rejected' || notifyDriver.status === 'rejected') {
+    //   console.log('Failed to send notification');
+    // }
 
     // Get the transaction for return value
     const transaction = await TransactionModel.findOne({
@@ -1900,22 +1758,22 @@ export const payoutToDriverBank = async (driver, amount) => {
       );
     });
 
-    // Transaction committed successfully, send notification
-    const notify = await notifyUser({
-      userId: driver.userId,
-      title: '💰 Payout Initiated',
-      message: `Your payout of $${amount} has been successfully initiated and should arrive in your bank account within 1-2 business days.`,
-      module: 'payout',
-      metadata: { amount, payoutMethod: 'bank_transfer' },
-      type: 'ALERT',
-      actionLink: `${env.FRONTEND_URL}/driver/payouts`,
-    });
+    // // Transaction committed successfully, send notification
+    // const notify = await notifyUser({
+    //   userId: driver.userId,
+    //   title: '💰 Payout Initiated',
+    //   message: `Your payout of $${amount} has been successfully initiated and should arrive in your bank account within 1-2 business days.`,
+    //   module: 'payout',
+    //   metadata: { amount, payoutMethod: 'bank_transfer' },
+    //   type: 'ALERT',
+    //   actionLink: `${env.FRONTEND_URL}/driver/payouts`,
+    // });
 
-    if (!notify) {
-      console.log(
-        'Failed to send payout notification, but payout was processed',
-      );
-    }
+    // if (!notify) {
+    //   console.log(
+    //     'Failed to send payout notification, but payout was processed',
+    //   );
+    // }
 
     return {
       success: true,
