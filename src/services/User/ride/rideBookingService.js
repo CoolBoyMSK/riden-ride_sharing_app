@@ -232,7 +232,11 @@ export const bookRide = async (userId, rideData) => {
         pickupLocation.coordinates,
       );
 
-      if (availableDrivers.length > 0) {
+      console.log(availableDrivers);
+
+      if (!availableDrivers) {
+        console.error('No Drivers found to notify');
+      } else if (availableDrivers.length > 0) {
         const rideNotificationData = {
           success: true,
           objectType: 'new-ride',

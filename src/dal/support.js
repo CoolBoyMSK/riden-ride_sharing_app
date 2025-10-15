@@ -7,7 +7,6 @@ import Report from '../models/Report.js';
 import mongoose, { Error } from 'mongoose';
 import { generateUniqueId } from '../utils/auth.js';
 import { COMPLAIN_TYPES } from '../enums/complainTypes.js';
-import env from '../config/envConfig.js';
 import { notifyUser } from '../dal/notification.js';
 
 export const findComplainTypes = () => {
@@ -51,22 +50,6 @@ export const createComplain = async (payload) => {
     complain.uniqueId = generateUniqueId('complain', complain._id);
     await complain.save();
   }
-
-  // Notification Logic Start
-  const notify = await notifyUser({
-    userId: complain.userId,
-    title: 'Ticket Submitted 📩',
-    message:
-      'Your support request has been submitted — our team will get back to you soon.',
-    module: 'support',
-    metadata: complain,
-    type: 'ALERT',
-    actionLink: `${env.FRONTEND_URL}/api/user/support/${complain._id}`,
-  });
-  if (!notify) {
-    throw new Error('Failed to send notification');
-  }
-  // Notification Logic End
 
   return complain;
 };
@@ -242,7 +225,7 @@ export const adminComplainReply = async (id, text, attachments) => {
     module: 'support',
     metadata: reply,
     type: 'ALERT',
-    actionLink: `${env.FRONTEND_URL}/api/admin/support/reply?id=${reply._id}`,
+    actionLink: `support_reply`,
   });
   if (!notify) {
     throw new Error('Failed to send notification');

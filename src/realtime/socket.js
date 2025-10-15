@@ -1215,7 +1215,7 @@ export const initSocket = (server) => {
             module: 'ride',
             metadata: ride,
             type: 'ALERT',
-            actionLink: `passenger_rated`,
+            actionLink: `user_rated`,
           });
           if (!notify) {
             console.error('Failed to send notification');
@@ -2024,7 +2024,7 @@ export const initSocket = (server) => {
             module: 'ride',
             metadata: ride,
             type: 'ALERT',
-            actionLink: `driver_rated`,
+            actionLink: `user_rated`,
           });
           if (!notify) {
             console.error('Failed to send notification');
@@ -2299,7 +2299,7 @@ export const initSocket = (server) => {
               module: 'payment',
               metadata: ride,
               type: 'ALERT',
-              actionLink: `passenger_paid`,
+              actionLink: `driver_get_paid`,
             });
             if (!notifyDriver) {
               console.error('Failed to send notification');
@@ -2401,7 +2401,7 @@ export const initSocket = (server) => {
               module: 'payment',
               metadata: ride,
               type: 'ALERT',
-              actionLink: `passenger_paid`,
+              actionLink: `driver_get_paid`,
             });
             if (!notifyDriver) {
               console.error('Failed to send notification');

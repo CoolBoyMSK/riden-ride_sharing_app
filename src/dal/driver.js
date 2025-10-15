@@ -793,6 +793,7 @@ export const findNearbyDriverUserIds = async (
           distanceField: 'distance',
           maxDistance: radius,
           spherical: true,
+          key: 'location',
           query: {
             status: 'online',
             isAvailable: true,

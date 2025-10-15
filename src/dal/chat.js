@@ -2,8 +2,6 @@ import ChatMessage from '../models/ChatMessage.js';
 import ChatRoom from '../models/ChatRoom.js';
 import Ride from '../models/Ride.js';
 import mongoose from 'mongoose';
-import { notifyUser } from '../dal/notification.js';
-import env from '../config/envConfig.js';
 
 export const findChatRoomByRideId = async (rideId) => {
   const chatRoom = await ChatRoom.aggregate([
@@ -243,25 +241,6 @@ export const createMessage = async ({
     } else {
       throw new Error('Sender does not belong to this ride.');
     }
-
-    const notify = await notifyUser({
-      userId: recipientUserId,
-      title:
-        role === 'Driver' ? 'New Message 💬' : '🚗 Your Driver Wants to Chat',
-      message:
-        role === 'Driver'
-          ? `Your Passenger just sent you a message.`
-          : 'Your driver has sent you a message. Open the chat to respond quickly.',
-      module: 'chat',
-      metadata: message,
-      type: 'ALERT',
-      actionLink: `${env.FRONTEND_URL}/chat?rideId=${rideId}`,
-    });
-
-    if (!notify) {
-      throw new Error('Failed to send notification');
-    }
-    // Notification Logic End
 
     return savedMessage.toObject();
   } catch (error) {

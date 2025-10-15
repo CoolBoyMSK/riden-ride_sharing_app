@@ -230,7 +230,7 @@ export const sendPassengerRideCancellationWarningEmail = async (
   const html = Tpl({ username });
   await sendEmail({
     to: toEmail,
-    subject: 'Your RIDEN Account Has Been Suspended',
+    subject: 'Ride Cancellation Warning',
     html,
   });
 };

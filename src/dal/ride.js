@@ -71,55 +71,6 @@ export const updateRideById = async (
     { path: 'chatRoomId' }, // simple top-level ref
   ]);
 
-  // Notification Logic Start
-  if (updateData.status === 'DRIVER_ASSIGNED') {
-    const notify = await notifyUser({
-      userId: result.passengerId?.userId,
-      title: 'Your Ride is Booked!',
-      message:
-        'Get ready to go! A RIDEN driver is on the way to pick you up. Sit back, relax, and track your ride in real-time.',
-      module: 'ride',
-      metadata: result,
-      type: 'ALERT',
-      actionLink: `${env.FRONTEND_URL}/ride?rideId=${rideId}`,
-    });
-
-    if (!notify) {
-      throw new Error('Failed to send notification');
-    }
-  } else if (updateData.cancelledBy === 'passenger') {
-    const notify = await notifyUser({
-      userId: result.driverId?.userId,
-      title: '🚗 Your Driver Wants to Chat',
-      message:
-        'Your driver has sent you a message. Open the chat to respond quickly.',
-      module: 'ride',
-      metadata: result,
-      type: 'ALERT',
-      actionLink: `${env.FRONTEND_URL}/ride?rideId=${rideId}`,
-    });
-
-    if (!notify) {
-      throw new Error('Failed to send notification');
-    }
-  } else if (updateData.cancelledBy === 'driver') {
-    const notify = await notifyUser({
-      userId: result.passengerId?.userId,
-      title: '❌ Ride Cancelled',
-      message:
-        "Your ride has been cancelled. We're sorry for the inconvenience. You can book a new ride anytime from the home screen.",
-      module: 'ride',
-      metadata: result,
-      type: 'ALERT',
-      actionLink: `${env.FRONTEND_URL}/ride?rideId=${rideId}`,
-    });
-
-    if (!notify) {
-      throw new Error('Failed to send notification');
-    }
-  }
-  // Notification Logic End
-
   return result;
 };
 
