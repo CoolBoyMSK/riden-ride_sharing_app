@@ -638,10 +638,11 @@ export const initSocket = (server) => {
           });
         }
 
+        await session.commitTransaction();
+
         const mailTo = await findUserById(ride.driverId?.userId);
         if (!mailTo) {
-          await session.abortTransaction();
-          return socket.emit('ride:driver_cancel_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'NOT_FOUND',
@@ -653,8 +654,6 @@ export const initSocket = (server) => {
           mailTo.userId?.email,
           mailTo.userId?.name,
         );
-
-        await session.commitTransaction();
 
         // Notify passenger of ride cancellation
         socket.join(`ride:${updatedRide._id}`);
@@ -1853,10 +1852,11 @@ export const initSocket = (server) => {
           });
         }
 
+        await session.commitTransaction();
+
         const mailTo = await findUserById(ride.passengerId?.userId);
         if (!mailTo) {
-          await session.abortTransaction();
-          return socket.emit('ride:passenger_cancel_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'NOT_FOUND',
@@ -1868,8 +1868,6 @@ export const initSocket = (server) => {
           mailTo.userId?.email,
           mailTo.userId?.name,
         );
-
-        await session.commitTransaction();
 
         socket.join(`ride:${updatedRide._id}`);
         io.to(`ride:${updatedRide._id}`).emit('ride:passenger_cancel_ride', {
