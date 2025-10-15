@@ -165,8 +165,14 @@ export const verifyEmailOtp = async (email, otpRaw, expectedPurpose = null) => {
   return { ok: true, pending: pendingData };
 };
 
-export const resendEmailOtp = async (email, username, context = {}) => {
-  return requestEmailOtp(email, username, context);
+export const resendEmailOtp = async (
+  email,
+  username,
+  context = {},
+  type,
+  role,
+) => {
+  return requestEmailOtp(email, username, context, type, role);
 };
 
 // Phone Number verification Otp Services
@@ -257,6 +263,10 @@ export const verifyPhoneOtp = async (phoneNumber, otpRaw) => {
   await redisConfig.setex(verifiedKeyName, 300, 'true');
 
   return { ok: true, pending: pending ? JSON.parse(pending) : null };
+};
+
+export const resendPhoneOtp = async (currentPhone, username, context, type) => {
+  return requestPhoneOtp(currentPhone, username, context, type);
 };
 
 export const sendOtp = async (phoneNumber) => {

@@ -11,6 +11,7 @@ import {
   verifyPasskeyLoginAuthController,
   updateFCMTokenController,
   socialLoginUserController,
+  resendOtpController,
 } from '../../../controllers/User/authIndex.js';
 import { verifyFirebaseToken } from '../../../middlewares/firebaseAuth.js';
 import { driverAuthenticate } from '../../../middlewares/driverAuth.js';
@@ -48,6 +49,12 @@ registerRoute({
   router,
   route: '/forgot-password',
   post_method: forgotPasswordController,
+});
+
+registerRoute({
+  router,
+  route: '/resend-otp',
+  post_method: resendOtpController,
 });
 
 registerRoute({

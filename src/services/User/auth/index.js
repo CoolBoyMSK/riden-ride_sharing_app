@@ -42,8 +42,10 @@ import env from '../../../config/envConfig.js';
 import {
   requestEmailOtp,
   verifyEmailOtp,
+  resendEmailOtp,
   requestPhoneOtp,
   verifyPhoneOtp,
+  resendPhoneOtp,
   emailOtpKey,
   emailCooldownKey,
   emailPendingKey,
@@ -1119,6 +1121,63 @@ export const resetUserPassword = async (
     console.error(`API ERROR: ${err}`);
     resp.error = true;
     resp.error_message = err.message || 'Something went wrong';
+    return resp;
+  }
+};
+
+export const resendOtp = async ({ emailOtp, phoneOtp, email, phoneNumber }, resp) => {
+  try {
+    if (emailOtp) {
+      let user = await findUserByEmail(email);
+      if (!user) {
+        resp.error = true;
+        resp.error_message = `User not found`;
+        return resp;
+      }
+      const result = await resendEmailOtp(
+        user.email,
+        user.name,
+        {},
+        null,
+        user.roles[0],
+      );
+      if (!result.ok) {
+        resp.error = true;
+        resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
+        return resp;
+      }
+
+      resp.data = {
+        emailOtp: true,
+        message: `OTP has been sent to ${user.email}`,
+        email: user.email,
+      };
+      return resp;
+    } else if (phoneOtp) {
+      let user = await findUserByPhone(phoneNumber);
+      if (!user) {
+        resp.error = true;
+        resp.error_message = `User not found`;
+        return resp;
+      }
+      const result = await resendPhoneOtp(user.phoneNumber, user.name);
+      if (!result.ok) {
+        resp.error = true;
+        resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
+        return resp;
+      }
+
+      resp.data = {
+        phoneOtp: true,
+        message: `OTP has been sent to ${user.phoneNumber}`,
+        phoneNumber: user.phoneNumber,
+      };
+      return resp;
+    }
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
     return resp;
   }
 };

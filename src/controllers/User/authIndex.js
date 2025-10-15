@@ -9,6 +9,7 @@ import {
   verifyPasskeyLoginAuth,
   updateFCMToken,
   socialLoginUser,
+  resendOtp,
 } from '../../services/User/auth/index.js';
 import { handleResponse } from '../../utils/handleRespone.js';
 import {
@@ -73,6 +74,18 @@ export const resetPasswordController = (req, res) =>
       // validationFn: validateResetPassword,
       handlerParams: [req.body],
       successMessage: 'Password has been reset',
+    },
+    req,
+    res,
+  );
+
+export const resendOtpController = (req, res) =>
+  handleResponse(
+    {
+      handler: resendOtp,
+      // validationFn: validateresendOtp,
+      handlerParams: [req.body],
+      successMessage: 'OTP resent successfully',
     },
     req,
     res,
