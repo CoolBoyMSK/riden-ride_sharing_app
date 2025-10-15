@@ -261,7 +261,7 @@ export const update2FAStatus = async (userId) => {
   return { is2FAEnabled: user.is2FAEnabled };
 };
 
-export const findCMSPages = async () => CMS.find().select('page').lean();
+export const findCMSPages = async () => CMS.find().select('page icon').lean();
 
 export const findCMSPageById = async (id) => CMS.findById(id).lean();
 
