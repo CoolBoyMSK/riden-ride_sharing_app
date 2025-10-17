@@ -22,7 +22,6 @@ export const handleResponse = async (options, req, res) => {
     }
 
     const RESP = createResponseObject();
-    console.log(RESP);
     const resp = await handler(...handlerParams, RESP);
 
     if (resp.error) {

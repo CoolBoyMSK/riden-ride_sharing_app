@@ -72,7 +72,8 @@ registerRoute({
 registerRoute({
   router,
   route: '/fcm',
-  post_method: updateFCMTokenController,
+  passenger_auth_enable: true,
+  put_method: updateFCMTokenController,
 });
 
 export default router;

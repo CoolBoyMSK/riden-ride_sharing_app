@@ -8,32 +8,52 @@ export const findChatRoomByRideId = async (rideId) => {
     // Match by rideId
     { $match: { rideId: new mongoose.Types.ObjectId(rideId) } },
 
-    // Lookup messages.messageId -> ChatMessage
+    // Lookup messages with sorting
     {
       $lookup: {
         from: 'chatmessages',
-        localField: 'messages.messageId',
-        foreignField: '_id',
-        as: 'messagesData',
+        let: { messageIds: '$messages.messageId' },
+        pipeline: [
+          {
+            $match: {
+              $expr: { $in: ['$_id', '$$messageIds'] },
+            },
+          },
+          { $sort: { createdAt: -1 } }, // Sort messages here
+          {
+            $lookup: {
+              from: 'users',
+              localField: 'senderId',
+              foreignField: '_id',
+              as: 'senderInfo',
+            },
+          },
+          {
+            $addFields: {
+              sender: {
+                $arrayElemAt: ['$senderInfo', 0],
+              },
+            },
+          },
+          {
+            $project: {
+              senderInfo: 0,
+              'sender.password': 0,
+              'sender.__v': 0,
+              // Include other fields you want to exclude
+            },
+          },
+        ],
+        as: 'messages',
       },
     },
 
-    // Lookup sender details for each message
-    {
-      $lookup: {
-        from: 'users',
-        localField: 'messagesData.senderId',
-        foreignField: '_id',
-        as: 'senders',
-      },
-    },
-
-    // Merge sender info into messagesData
+    // Clean up sender object in messages
     {
       $addFields: {
         messages: {
           $map: {
-            input: '$messagesData',
+            input: '$messages',
             as: 'msg',
             in: {
               _id: '$$msg._id',
@@ -46,33 +66,16 @@ export const findChatRoomByRideId = async (rideId) => {
               createdAt: '$$msg.createdAt',
               updatedAt: '$$msg.updatedAt',
               sender: {
-                $let: {
-                  vars: {
-                    sender: {
-                      $arrayElemAt: [
-                        {
-                          $filter: {
-                            input: '$senders',
-                            as: 's',
-                            cond: { $eq: ['$$s._id', '$$msg.senderId'] },
-                          },
-                        },
-                        0,
-                      ],
-                    },
-                  },
-                  in: {
-                    _id: '$$sender._id',
-                    name: '$$sender.name',
-                    profileImg: '$$sender.profileImg',
-                  },
-                },
+                _id: '$$msg.sender._id',
+                name: '$$msg.sender.name',
+                profileImg: '$$msg.sender.profileImg',
               },
             },
           },
         },
       },
     },
+
     // Clean fields
     {
       $project: {
@@ -80,8 +83,6 @@ export const findChatRoomByRideId = async (rideId) => {
         createdAt: 0,
         updatedAt: 0,
         type: 0,
-        messagesData: 0,
-        senders: 0,
       },
     },
   ]);

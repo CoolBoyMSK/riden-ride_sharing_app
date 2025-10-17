@@ -2563,10 +2563,11 @@ export const initSocket = (server) => {
             }
           }
 
-          if (!rideId) {
+          const ride = await findRideById(rideId);
+          if (!ride) {
             return socket.emit('error', {
               success: false,
-              message: 'Ride Id is required',
+              message: 'Ride not found',
             });
           } else if (!text || text.trim().length === 0) {
             return socket.emit('error', {
@@ -2582,7 +2583,7 @@ export const initSocket = (server) => {
             });
           }
 
-          const chat = await findChatRoomByRideId(rideId);
+          const chat = await findChatRoomByRideId(ride._id);
           if (!chat) {
             return socket.emit('error', {
               success: false,
@@ -2591,7 +2592,7 @@ export const initSocket = (server) => {
           }
 
           const newMsg = await createMessage({
-            rideId,
+            rideId: ride._id,
             senderId: sender.userId,
             chatRoomId: chat._id,
             text,

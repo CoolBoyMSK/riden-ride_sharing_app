@@ -680,9 +680,9 @@ export const otpVerification = async (
       }
 
       user = await findUserByPhone(phoneNumber);
-      if (!user) {
+      if (!user || !user.roles.includes('passenger')) {
         resp.error = true;
-        resp.error_message = 'User not found';
+        resp.error_message = 'Passenger not found';
         return resp;
       } else if (!user.isPhoneVerified) {
         user = await updateUserById(user._id, {
@@ -705,35 +705,13 @@ export const otpVerification = async (
         phonePendingKey(phoneNumber),
       );
 
-      if (user.roles.includes('driver')) {
-        let driver = await findDriverByUserId(user._id);
-        if (!driver) {
-          const uniqueId = generateUniqueId(user.roles[0], user._id);
-          driver = await createDriverProfile(user._id, uniqueId);
-          await updateDriverByUserId(user._id, {
-            status: driver.status === 'offline' ? 'online' : driver.status,
-            isActive: true,
-          });
-        } else {
-          console.log('Available');
-          driver = await updateDriverByUserId(user._id, {
-            status: driver.status === 'offline' ? 'online' : driver.status,
-            isActive: true,
-          });
-        }
-      } else if (user.roles.includes('passenger')) {
-        const passenger = await updatePassenger(
-          { userId: user._id },
-          { isActive: true },
-        );
-        if (!passenger) {
-          resp.error = true;
-          resp.error_message = 'Failed to activate passenger';
-          return resp;
-        }
-      } else {
+      const passenger = await updatePassenger(
+        { userId: user._id },
+        { isActive: true },
+      );
+      if (!passenger) {
         resp.error = true;
-        resp.error_message = 'Invalid user role';
+        resp.error_message = 'Failed to activate passenger';
         return resp;
       }
 
@@ -785,9 +763,9 @@ export const otpVerification = async (
       }
 
       user = await findUserByPhone(phoneNumber);
-      if (!user) {
+      if (!user || !user.roles.includes('passenger')) {
         resp.error = true;
-        resp.error_message = 'User not found';
+        resp.error_message = 'Passenger not found';
         return resp;
       }
 
@@ -871,9 +849,9 @@ export const otpVerification = async (
       }
 
       user = await findUserByEmail(email);
-      if (!user) {
+      if (!user || !user.roles.includes('passenger')) {
         resp.error = true;
-        resp.error_message = 'User not found';
+        resp.error_message = 'Passenger not found';
         return resp;
       }
 
@@ -1309,7 +1287,7 @@ export const refreshAuthToken = async ({ refreshToken }, resp) => {
 export const updateFCMToken = async (user, { userDeviceToken }, resp) => {
   try {
     if (user.roles.includes('passenger')) {
-      const success = await updateUserById(user.id, {
+      const success = await updateUserById(user._id, {
         userDeviceToken,
       });
       if (!success) {
