@@ -44,6 +44,7 @@ const env = {
     process.env.FIREBASE_PRIVATE_KEY,
     'FIREBASE_PRIVATE_KEY',
   ),
+  GOOGLE_CLIENT_ID: required(process.env.GOOGLE_CLIENT_ID, 'GOOGLE_CLIENT_ID'),
   AWS_REGION: process.env.AWS_REGION,
   AWS_ACCESS_KEY_ID: required(
     process.env.AWS_ACCESS_KEY_ID,

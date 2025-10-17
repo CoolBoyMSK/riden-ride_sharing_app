@@ -121,6 +121,10 @@ const userSchema = new mongoose.Schema(
     userSocialToken: {
       type: String,
     },
+    socialProvider: {
+      type: String,
+      enum: ['google', 'apple'],
+    },
   },
   {
     timestamps: true,

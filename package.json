@@ -69,6 +69,7 @@
     "fast-glob": "^3.3.3",
     "firebase-admin": "^13.4.0",
     "geoip-lite": "^1.4.10",
+    "google-auth-library": "^10.4.1",
     "handlebars": "^4.7.8",
     "helmet": "^8.1.0",
     "ioredis": "^5.8.1",

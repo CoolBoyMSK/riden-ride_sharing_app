@@ -2,6 +2,48 @@ import Joi from 'joi';
 import { GENDER_TYPES } from '../../enums/genderEnums.js';
 
 // --- Signup ---
+export const validatePassengerSignup = (data) => {
+  const schema = Joi.object({
+    name: Joi.string().trim().min(3).max(50).required().messages({
+      'string.empty': 'Name is required',
+      'string.min': 'Name must be at least 3 characters long',
+      'any.required': 'Name is required',
+    }),
+
+    email: Joi.string().trim().email().required().messages({
+      'string.empty': 'Email is required',
+      'string.email': 'Email must be a valid email address',
+    }),
+
+    gender: Joi.string()
+      .valid(...GENDER_TYPES)
+      .required()
+      .messages({
+        'any.only': 'Gender must be male, female, or other',
+        'any.required': 'Gender is required',
+      }),
+
+    password: Joi.string()
+      .min(8)
+      .max(128)
+      .pattern(/^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).*$/)
+      .required()
+      .messages({
+        'string.empty': 'Password is required',
+        'string.min': 'Password must be at least 8 characters long',
+        'string.pattern.base':
+          'Password must include uppercase, lowercase, and a number',
+      }),
+
+    confirmPassword: Joi.any().valid(Joi.ref('password')).required().messages({
+      'any.only': 'Passwords must match',
+      'any.required': 'Confirm Password is required',
+    }),
+  });
+
+  return schema.validate(data, { abortEarly: false });
+};
+
 export const validateSignup = (body) => {
   const schema = Joi.object({
     name: Joi.string().trim().min(2).max(100).required(),
@@ -10,7 +52,8 @@ export const validateSignup = (body) => {
       .pattern(/^\+?[0-9]{7,15}$/)
       .when('type', {
         is: Joi.array()
-          .items(Joi.string().valid('driver')),
+          .items(Joi.string().valid('passenger', 'driver'))
+          .has('passenger'),
         then: Joi.required(),
         otherwise: Joi.optional(),
       }),
