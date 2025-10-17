@@ -17,9 +17,11 @@ import {
   updatePassenger,
 } from '../../../../dal/passenger.js';
 import {
-  createPassengerStripeCustomer,
-  createPassengerWallet,
-} from '../../../../dal/stripe.js';
+  createDriverProfile,
+  findDriverByUserId,
+  updateDriverByUserId,
+} from '../../../../dal/driver.js';
+import { createPassengerStripeCustomer } from '../../../../dal/stripe.js';
 import { createAdminNotification } from '../../../../dal/notification.js';
 import { createDeviceInfo } from '../../../../dal/user/index.js';
 import { extractDeviceInfo } from '../../../../utils/deviceInfo.js';
@@ -229,7 +231,7 @@ export const socialLoginUser = async (
     let user = await findUserByEmail(email?.trim());
 
     if (!user) {
-      const isVerified = await verifyGoogleToken(userSocialToken, email);
+      const isVerified = await verifyGoogleToken(userSocialToken, user.email);
       if (!isVerified) {
         resp.error = true;
         resp.error_message = 'Invalid social token';
@@ -248,7 +250,6 @@ export const socialLoginUser = async (
         name: isVerified.name,
         email: isVerified.email,
         roles: ['passenger'],
-        isEmailVerified: true,
         userSocialToken,
         userSocialProvider,
       });
@@ -330,15 +331,6 @@ export const socialLoginUser = async (
       } else if (isVerified.email.toLowerCase() !== user.email.toLowerCase()) {
         resp.error = true;
         resp.error_message = 'Email not verified by google';
-        return resp;
-      }
-
-      if (!user.phoneNumber || !user.isPhoneVerified) {
-        resp.data = {
-          verifyPhone: true,
-          message: `Phone Number verification is required. Please verify your phone number to complete the login process.`,
-          email: user.email,
-        };
         return resp;
       }
 
