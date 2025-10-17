@@ -11,32 +11,19 @@ import {
   findUserByPhone,
   createUser,
   updateUserById,
-  findUserById,
-  findUser,
 } from '../../../../dal/user/index.js';
 import {
   createPassengerProfile,
-  findPassengerByUserId,
   updatePassenger,
 } from '../../../../dal/passenger.js';
 import {
   createDriverProfile,
   findDriverByUserId,
   updateDriverByUserId,
-  createDriverWallet,
 } from '../../../../dal/driver.js';
-import {
-  createPassengerStripeCustomer,
-  createDriverStripeAccount,
-  createPassengerWallet,
-  createPayout,
-} from '../../../../dal/stripe.js';
+import { createPassengerStripeCustomer } from '../../../../dal/stripe.js';
 import { createAdminNotification } from '../../../../dal/notification.js';
 import { createDeviceInfo } from '../../../../dal/user/index.js';
-import {
-  getPasskeyLoginOptions,
-  verifyPasskeyLogin,
-} from '../../../../utils/auth.js';
 import { extractDeviceInfo } from '../../../../utils/deviceInfo.js';
 import env from '../../../../config/envConfig.js';
 import {
@@ -54,15 +41,14 @@ import {
   phonePendingKey,
 } from '../../../../utils/otpUtils.js';
 import redisConfig from '../../../../config/redisConfig.js';
-import { notifyUser } from '../../../../dal/notification.js';
 import crypto from 'crypto';
 import {
   sendPhoneOtpEmail,
   sendWelcomePassengerEmail,
   sendPassengerResetPasswordEmail,
-  sendWelcomeDriverEmail,
 } from '../../../../templates/emails/user/index.js';
 import { validatePassengerSignup } from '../../../../validations/user/authValidations.js';
+import { verifyGoogleToken } from '../../../../utils/verifySocials.js';
 
 export const signUpPassenger = async (
   { name, email, gender, password, confirmPassword },
@@ -213,73 +199,199 @@ export const loginUser = async ({ email, phoneNumber, password }, resp) => {
       resp.error_message = 'Unable to process login';
       return resp;
     }
-
-    // const userId = user._id.toString();
-
-    // // Ensure passenger profile exists
-    // let passenger = await findPassengerByUserId(userId);
-    // if (!passenger) {
-    //   passenger = await createPassengerProfile(userId);
-    // }
-
-    // // ✅ If phone already verified → issue tokens
-    // if (email && !user.isEmailVerified) {
-    //   resp.data = {
-    //     emailOtp: true,
-    //     message: `OTP has been sent to ${user.email}`,
-    //     email: user.email,
-    //   };
-    // } else if (phoneNumber && !user.isPhoneVerified) {
-    //   resp.data = {
-    //     phoneOtp: true,
-    //     message: `OTP has been sent to ${user.phoneNumber}`,
-    //     phoneNumber: user.phoneNumber,
-    //   };
-    // } else {
-    //   const passenger = await updatePassenger({ userId }, { isActive: true });
-    //   if (!passenger) {
-    //     resp.error = true;
-    //     resp.error_message = 'Failed to activate passenger';
-    //     return resp;
-    //   }
-
-    //   user = await updateUserById(user._id, {
-    //     userDeviceType,
-    //   });
-    //   if (!user) {
-    //     resp.error = true;
-    //     resp.error_message = 'Failed to update Device Type';
-    //     return resp;
-    //   }
-
-    //   // Notification Logic Start
-    //   const notify = await notifyUser({
-    //     userId: user._id,
-    //     title: 'Passenger Login successful 😎',
-    //     message: `${user.name} has logged in successfully with ${user.email}`,
-    //     module: 'support',
-    //     metadata: user,
-    //     type: 'ALERT',
-    //     actionLink: `${env.BASE_URL}/api/user/profile/me`,
-    //   });
-    //   if (!notify) {
-    //     console.error('Failed to send notification');
-    //   }
-    //   // Notification Logic End
-
-    //   const payload = { id: userId, roles: user.roles };
-    //   resp.data = {
-    //     user: user,
-    //     accessToken: generateAccessToken(payload),
-    //     refreshToken: generateRefreshToken(payload),
-    //     flow: 'login',
-    //   };
-    // }
-    // return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
     resp.error_message = error.message || 'something went wrong';
+    return resp;
+  }
+};
+
+export const socialLoginUser = async (
+  {
+    email,
+    userSocialToken,
+    userSocialProvider,
+    userDeviceType,
+    deviceId,
+    deviceModel,
+    deviceVendor,
+    os,
+  },
+  headers,
+  resp,
+) => {
+  try {
+    if (userSocialProvider !== 'google' && userSocialProvider !== 'apple') {
+      resp.error = true;
+      resp.error_message = 'Unsupported social provider';
+      return resp;
+    }
+
+    let user = await findUserByEmail(email?.trim());
+
+    if (!user) {
+      const isVerified = await verifyGoogleToken(userSocialToken, user.email);
+      if (!isVerified) {
+        resp.error = true;
+        resp.error_message = 'Invalid social token';
+        return resp;
+      } else if (!isVerified.email_verified) {
+        resp.error = true;
+        resp.error_message = 'Email not verified by google';
+        return resp;
+      } else if (isVerified.email.toLowerCase() !== email.toLowerCase()) {
+        resp.error = true;
+        resp.error_message = 'Email not verified by google';
+        return resp;
+      }
+
+      user = await createUser({
+        name: isVerified.name,
+        email: isVerified.email,
+        roles: ['passenger'],
+        userSocialToken,
+        userSocialProvider,
+      });
+
+      const uniqueId = generateUniqueId(user.roles[0], user._id);
+
+      let passenger = await createPassengerProfile(user._id, uniqueId);
+      passenger = await updatePassenger(
+        { userId: user._id },
+        { isActive: true },
+      );
+      if (!passenger) {
+        resp.error = true;
+        resp.error_message = 'Failed to activate passenger';
+        return resp;
+      }
+
+      const stripeCustomerId = await createPassengerStripeCustomer(
+        user,
+        passenger,
+      );
+      if (!stripeCustomerId) {
+        resp.error = true;
+        resp.error_message = 'Failed to create stripe customer account';
+        return resp;
+      }
+
+      const wallet = await createPassengerWallet(passenger._id);
+      if (!wallet) {
+        resp.error = true;
+        resp.error_message = 'Failed to create In-App wallet';
+        return resp;
+      }
+
+      const deviceInfo = await extractDeviceInfo(headers);
+      const device = {
+        userId: user._id,
+        deviceId,
+        deviceType: userDeviceType,
+        deviceModel,
+        deviceVendor,
+        os,
+        ...deviceInfo,
+        loginMethod: 'oauth',
+        lastLoginAt: new Date(),
+      };
+      await createDeviceInfo(device);
+
+      const notify = await createAdminNotification({
+        title: 'New Passenger Registered',
+        message: `${user.name} registered as passenger successfully, Their  Email: ${user.email}`,
+        metadata: user,
+        module: 'passenger_management',
+        type: 'ALERT',
+        actionLink: `${env.FRONTEND_URL}/api/admin/passengers/fetch-passenger/${passenger._id}`,
+      });
+      if (!notify) {
+        resp.error = true;
+        resp.error_message = 'Failed to send notification';
+        return resp;
+      }
+
+      resp.data = {
+        verifyPhone: true,
+        message: `Phone Number verification is required. Please verify your phone number to complete the login process.`,
+        email: user.email,
+      };
+      return resp;
+    } else if (user && user.roles.includes('passenger')) {
+      const isVerified = await verifyGoogleToken(userSocialToken, user.email);
+      if (!isVerified) {
+        resp.error = true;
+        resp.error_message = 'Invalid social token';
+        return resp;
+      } else if (!isVerified.email_verified) {
+        resp.error = true;
+        resp.error_message = 'Email not verified by google';
+        return resp;
+      } else if (isVerified.email.toLowerCase() !== user.email.toLowerCase()) {
+        resp.error = true;
+        resp.error_message = 'Email not verified by google';
+        return resp;
+      }
+
+      if (user.userSocialToken !== userSocialToken) {
+        user = await updateUserById(user._id, {
+          userSocialToken,
+          userSocialProvider,
+          userDeviceType,
+        });
+      } else if (user.userSocialToken === userSocialToken) {
+        user = await updateUserById(user._id, {
+          userDeviceType,
+        });
+      }
+
+      let passenger = await updatePassenger(
+        { userId: user._id },
+        { isActive: true },
+      );
+      if (!passenger) {
+        resp.error = true;
+        resp.error_message = 'Passenger profile not found';
+        return resp;
+      } else if (!passenger.isActive) {
+        resp.error = true;
+        resp.error_message = 'Failed to activate passenger';
+        return resp;
+      }
+
+      const deviceInfo = await extractDeviceInfo(headers);
+      const device = {
+        userId: user._id,
+        deviceId,
+        deviceType: userDeviceType,
+        deviceModel,
+        deviceVendor,
+        os,
+        ...deviceInfo,
+        loginMethod: 'oauth',
+        lastLoginAt: new Date(),
+      };
+      await createDeviceInfo(device);
+
+      const payload = { id: user._id, roles: user.roles };
+      resp.data = {
+        success: true,
+        message: 'Social login successful',
+        user,
+        accessToken: generateAccessToken(payload),
+        refreshToken: generateRefreshToken(payload),
+      };
+      return resp;
+    } else {
+      resp.error = true;
+      resp.error_message = 'Unexpected Error occurred';
+      return resp;
+    }
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
     return resp;
   }
 };
@@ -407,7 +519,6 @@ export const otpVerification = async (
         resp.error_message = 'Passenger not found';
         return resp;
       } else if (!user.phoneNumber || !user.isPhoneVerified) {
-        console.log(resp);
         resp.data = {
           verifyPhone: true,
           message: `Phone Number verification is required. Please verify your phone number to complete the login process.`,
@@ -496,7 +607,7 @@ export const otpVerification = async (
         return resp;
       }
 
-      user = await findUserByEmail(pending.email);
+      user = await findUserByEmail(result.pending?.email);
       if (!user && user.roles.includes('passenger')) {
         resp.error = true;
         resp.error_message = 'Passenger not found';
@@ -903,11 +1014,13 @@ export const forgotPassword = async ({ phoneNumber, email }, resp) => {
       const user = await findUserByEmail(email);
       if (!user) {
         resp.error = true;
-        resp.error_message = 'No user found with that phone number';
+        resp.error_message = 'No user found';
         return resp;
-      }
-
-      if (!user.isEmailVerified) {
+      } else if (!user.roles.includes('passenger')) {
+        resp.error = true;
+        resp.error_message = 'No passenger found with this email';
+        return resp;
+      } else if (!user.isEmailVerified) {
         resp.error = true;
         resp.error_message = 'Email is not verified';
         return resp;
@@ -938,11 +1051,13 @@ export const forgotPassword = async ({ phoneNumber, email }, resp) => {
       const user = await findUserByPhone(phoneNumber);
       if (!user) {
         resp.error = true;
-        resp.error_message = 'No user found with that phone number';
+        resp.error_message = 'No user found';
         return resp;
-      }
-
-      if (!user.isPhoneVerified) {
+      } else if (!user.roles.includes('passenger')) {
+        resp.error = true;
+        resp.error_message = 'No passenger found with this phone number';
+        return resp;
+      } else if (!user.isPhoneVerified) {
         resp.error = true;
         resp.error_message = 'Phone number is not verified';
         return resp;
@@ -985,36 +1100,46 @@ export const resetUserPassword = async (
   resp,
 ) => {
   try {
+    if (!resetSessionToken || !newPassword) {
+      resp.error = true;
+      resp.error_message = 'session token, and new password are required';
+      return resp;
+    }
+
     let user;
     if (email) {
-      if (!resetSessionToken || !newPassword) {
-        resp.error = true;
-        resp.error_message = 'session token, and new password are required';
-        return resp;
-      }
-
       user = await findUserByEmail(email);
       if (!user) {
         resp.error = true;
-        resp.error_message = 'No user found for that email';
+        resp.error_message = 'No user found';
+        return resp;
+      } else if (!user.roles.includes('passenger')) {
+        resp.error = true;
+        resp.error_message = 'No passenger found with this email';
+        return resp;
+      } else if (!user.isEmailVerified) {
+        resp.error = true;
+        resp.error_message = 'Email is not verified';
         return resp;
       }
     } else if (phoneNumber) {
-      if (!resetSessionToken || !newPassword) {
-        resp.error = true;
-        resp.error_message = 'session token, and new password are required';
-        return resp;
-      }
-
       user = await findUserByPhone(phoneNumber);
       if (!user) {
         resp.error = true;
         resp.error_message = 'No user found for that phone number';
         return resp;
+      } else if (!user.roles.includes('passenger')) {
+        resp.error = true;
+        resp.error_message = 'No passenger found with this email';
+        return resp;
+      } else if (!user.isPhoneVerified) {
+        resp.error = true;
+        resp.error_message = 'Phone number is not verified';
+        return resp;
       }
     } else {
       resp.error = true;
-      resp.error_message = 'No user found';
+      resp.error_message = 'Unauthorized access';
       return resp;
     }
 
@@ -1092,7 +1217,16 @@ export const resendOtp = async (
         resp.error = true;
         resp.error_message = `User not found`;
         return resp;
+      } else if (!user.roles.includes('passenger')) {
+        resp.error = true;
+        resp.error_message = 'No passenger found with this email';
+        return resp;
+      } else if (!user.isEmailVerified) {
+        resp.error = true;
+        resp.error_message = 'Email is not verified';
+        return resp;
       }
+
       const result = await resendEmailOtp(
         user.email,
         user.name,
@@ -1118,7 +1252,16 @@ export const resendOtp = async (
         resp.error = true;
         resp.error_message = `User not found`;
         return resp;
+      } else if (!user.roles.includes('passenger')) {
+        resp.error = true;
+        resp.error_message = 'No passenger found with this phone number';
+        return resp;
+      } else if (!user.isPhoneVerified) {
+        resp.error = true;
+        resp.error_message = 'Phone number is not verified';
+        return resp;
       }
+
       const result = await resendPhoneOtp(user.phoneNumber, user.name);
       if (!result.ok) {
         resp.error = true;
@@ -1141,13 +1284,18 @@ export const resendOtp = async (
   }
 };
 
-export const refreshTokens = async ({ refreshToken }, resp) => {
+export const refreshAuthToken = async ({ refreshToken }, resp) => {
   const payload = verifyRefreshToken(refreshToken);
   if (!payload) {
     resp.error = true;
     resp.error_message = 'Invalid refresh token';
     return resp;
+  } else if (!payload.roles.includes('passenger')) {
+    resp.error = true;
+    resp.error_message = 'Unauthorized Access';
+    return resp;
   }
+
   resp.data = {
     accessToken: generateAccessToken({ id: payload.id, roles: payload.roles }),
     refreshToken: generateRefreshToken({
@@ -1158,349 +1306,29 @@ export const refreshTokens = async ({ refreshToken }, resp) => {
   return resp;
 };
 
-export const passKeyLogInAuthOptions = async ({ type, provider }, resp) => {
-  try {
-    if (type !== 'driver')
-      throw new Error('Only drivers can access this route');
-
-    const success = await getPasskeyLoginOptions(provider);
-    if (!success) {
-      resp.error = true;
-      resp.error_message = 'Failed to passkey login';
-      return resp;
-    }
-
-    resp.data = success;
-    return resp;
-  } catch (error) {
-    console.error(`API ERROR: ${err}`);
-    resp.error = true;
-    resp.error_message = err.message || 'Something went wrong';
-    return resp;
-  }
-};
-
-export const verifyPasskeyLoginAuth = async (
-  { type, provider, response },
-  resp,
-) => {
-  try {
-    if (type !== 'driver')
-      throw new Error('Only drivers can access this route');
-
-    const success = await verifyPasskeyLogin(provider, response);
-    if (!success) {
-      resp.error = true;
-      resp.error_message = 'Failed to verify passkey Login';
-      return resp;
-    }
-
-    resp.data = { ...success, flow: 'passkey-login' };
-    return resp;
-  } catch (error) {
-    console.error(`API ERROR: ${err}`);
-    resp.error = true;
-    resp.error_message = err.message || 'Something went wrong';
-    return resp;
-  }
-};
-
 export const updateFCMToken = async (user, { userDeviceToken }, resp) => {
   try {
-    const success = await updateUserById(user.id, {
-      userDeviceToken,
-    });
-    if (!success) {
+    if (user.roles.includes('passenger')) {
+      const success = await updateUserById(user.id, {
+        userDeviceToken,
+      });
+      if (!success) {
+        resp.error = true;
+        resp.error_message = 'Failed to update Device Token';
+        return resp;
+      }
+
+      resp.data = success;
+      return resp;
+    } else {
       resp.error = true;
-      resp.error_message = 'Failed to update Device Token';
+      resp.error_message = 'Unauthorized Access';
       return resp;
     }
-
-    resp.data = success;
-    return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;
     resp.error_message = error.message || 'something went wrong';
     return resp;
   }
-};
-
-export const socialLoginUser = async (
-  {
-    name,
-    email,
-    socialProvider,
-    gender,
-    role,
-    userSocialToken,
-    deviceId,
-    userDeviceType,
-    deviceModel,
-    deviceVendor,
-    os,
-  },
-  headers,
-  resp,
-) => {
-  let user = await findUserByEmail(email?.trim());
-
-  if (role === 'driver') {
-    if (user && user.roles.includes('driver')) {
-      if (user.userSocialToken && user.userSocialToken === userSocialToken) {
-        let driver = await findDriverByUserId(user._id);
-        if (!driver) {
-          const uniqueId = generateUniqueId(user.roles[0], user._id);
-          driver = await createDriverProfile(user._id, uniqueId);
-          await updateDriverByUserId(user._id, {
-            status: driver.status === 'offline' ? 'online' : driver.status,
-            isActive: true,
-          });
-        } else {
-          driver = await updateDriverByUserId(user._id, {
-            status: driver.status === 'offline' ? 'online' : driver.status,
-            isActive: true,
-          });
-        }
-
-        const deviceInfo = await extractDeviceInfo(headers);
-        const device = {
-          userId: user._id,
-          deviceId,
-          deviceType: userDeviceType,
-          deviceModel,
-          deviceVendor,
-          os,
-          ...deviceInfo,
-          loginMethod: 'oauth',
-          lastLoginAt: new Date(),
-        };
-        await createDeviceInfo(device);
-
-        const payload = { id: user._id, roles: user.roles };
-        resp.data = {
-          user,
-          accessToken: generateAccessToken(payload),
-          refreshToken: generateRefreshToken(payload),
-        };
-        return resp;
-      } else {
-        resp.error = true;
-        resp.error_message = 'Email already registered';
-        return resp;
-      }
-    } else if (!user) {
-      user = await createUser({
-        name,
-        email,
-        gender,
-        roles: ['driver'],
-        userSocialToken,
-      });
-
-      let driver = await findDriverByUserId(user._id);
-      if (!driver) {
-        const uniqueId = generateUniqueId(user.roles[0], user._id);
-        driver = await createDriverProfile(user._id, uniqueId);
-        await updateDriverByUserId(user._id, {
-          status: driver.status === 'offline' ? 'online' : driver.status,
-          isActive: true,
-        });
-      } else {
-        driver = await updateDriverByUserId(user._id, {
-          status: driver.status === 'offline' ? 'online' : driver.status,
-          isActive: true,
-        });
-      }
-
-      const stripeAccountId = await createDriverStripeAccount(user, driver);
-      if (!stripeAccountId) {
-        resp.error = true;
-        resp.error_message = 'Failed to create stripe Account Id';
-        return resp;
-      }
-
-      const wallet = await createDriverWallet(driver._id);
-      if (!wallet) {
-        resp.error = true;
-        resp.error_message = 'Failed to create driver wallet';
-        return resp;
-      }
-
-      const deviceInfo = await extractDeviceInfo(headers);
-      const device = {
-        userId: user._id,
-        deviceId,
-        deviceType: userDeviceType,
-        deviceModel,
-        deviceVendor,
-        os,
-        ...deviceInfo,
-        loginMethod: 'oauth',
-        lastLoginAt: new Date(),
-      };
-      await createDeviceInfo(device);
-
-      const notify = await createAdminNotification({
-        title: 'New Driver Registered',
-        message: `${user.name} registered as drive successfully, Their Email: ${user.email}`,
-        metadata: user,
-        module: 'passenger_management',
-        type: 'ALERT',
-        actionLink: `${env.FRONTEND_URL}/api/admin/passengers/fetch/${driver._id}`,
-      });
-      if (!notify) {
-        resp.error = true;
-        resp.error_message = 'Failed to send notification';
-        return resp;
-      }
-
-      const payload = { id: user._id, roles: user.roles };
-      resp.data = {
-        user,
-        accessToken: generateAccessToken(payload),
-        refreshToken: generateRefreshToken(payload),
-      };
-      return resp;
-    } else {
-      resp.error = true;
-      resp.error_message = 'Unexpected Error';
-      return resp;
-    }
-  }
-
-  if (role === 'passenger') {
-    if (user && user.roles.includes('passenger')) {
-      if (user.userSocialToken && user.userSocialToken === userSocialToken) {
-        let passenger = await findPassengerByUserId(user._id);
-        if (!passenger) {
-          const uniqueId = generateUniqueId(user.roles[0], user._id);
-          passenger = await createPassengerProfile(user._id, uniqueId);
-          await updatePassenger({ userId: user._id }, { isActive: true });
-        } else {
-          passenger = await updatePassenger(
-            { userId: user._id },
-            { isActive: true },
-          );
-          if (!passenger) {
-            resp.error = true;
-            resp.error_message = 'Failed to activate passenger';
-            return resp;
-          }
-        }
-
-        const deviceInfo = await extractDeviceInfo(headers);
-        const device = {
-          userId: user._id,
-          deviceId,
-          deviceType: userDeviceType,
-          deviceModel,
-          deviceVendor,
-          os,
-          ...deviceInfo,
-          loginMethod: 'oauth',
-          lastLoginAt: new Date(),
-        };
-        await createDeviceInfo(device);
-
-        const payload = { id: user._id, roles: user.roles };
-        resp.data = {
-          user,
-          accessToken: generateAccessToken(payload),
-          refreshToken: generateRefreshToken(payload),
-        };
-        return resp;
-      } else {
-        resp.error = true;
-        resp.error_message = 'Email already registered';
-        return resp;
-      }
-    } else if (!user) {
-      user = await createUser({
-        name,
-        email,
-        gender,
-        roles: ['passenger'],
-        userSocialToken,
-      });
-
-      let passenger = await findPassengerByUserId(user._id);
-      if (!passenger) {
-        const uniqueId = generateUniqueId(user.roles[0], user._id);
-        passenger = await createPassengerProfile(user._id, uniqueId);
-        await updatePassenger({ userId: user._id }, { isActive: true });
-      } else {
-        passenger = await updatePassenger(
-          { userId: user._id },
-          { isActive: true },
-        );
-        if (!passenger) {
-          resp.error = true;
-          resp.error_message = 'Failed to activate passenger';
-          return resp;
-        }
-      }
-
-      const stripeCustomerId = await createPassengerStripeCustomer(
-        user,
-        passenger,
-      );
-      if (!stripeCustomerId) {
-        resp.error = true;
-        resp.error_message = 'Failed to create stripe customer account';
-        return resp;
-      }
-
-      const wallet = await createPassengerWallet(passenger._id);
-      if (!wallet) {
-        resp.error = true;
-        resp.error_message = 'Failed to create In-App wallet';
-        return resp;
-      }
-
-      const deviceInfo = await extractDeviceInfo(headers);
-      const device = {
-        userId: user._id,
-        deviceId,
-        deviceType: userDeviceType,
-        deviceModel,
-        deviceVendor,
-        os,
-        ...deviceInfo,
-        loginMethod: 'oauth',
-        lastLoginAt: new Date(),
-      };
-      await createDeviceInfo(device);
-
-      const notify = await createAdminNotification({
-        title: 'New Passenger Registered',
-        message: `${user.name} registered as passenger successfully, Their  Email: ${user.email}`,
-        metadata: user,
-        module: 'passenger_management',
-        type: 'ALERT',
-        actionLink: `${env.FRONTEND_URL}/api/admin/passengers/fetch-passenger/${passenger._id}`,
-      });
-      if (!notify) {
-        resp.error = true;
-        resp.error_message = 'Failed to send notification';
-        return resp;
-      }
-
-      const payload = { id: user._id, roles: user.roles };
-      resp.data = {
-        user,
-        accessToken: generateAccessToken(payload),
-        refreshToken: generateRefreshToken(payload),
-      };
-      return resp;
-    } else {
-      resp.error = true;
-      resp.error_message = 'Unexpected Error';
-      return resp;
-    }
-  }
-
-  resp.error = true;
-  resp.error_message = 'Invalid User role';
-  return resp;
 };

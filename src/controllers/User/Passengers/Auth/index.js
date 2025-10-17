@@ -2,8 +2,14 @@ import { handleResponse } from '../../../../utils/handleRespone.js';
 import {
   signUpPassenger,
   loginUser,
+  socialLoginUser,
   otpVerification,
   sendPassengerPhoneOtp,
+  forgotPassword,
+  resetUserPassword,
+  resendOtp,
+  refreshAuthToken,
+  updateFCMToken,
 } from '../../../../services/User/passenger/Auth/index.js';
 
 export const signUpPassengerController = (req, res) =>
@@ -30,6 +36,18 @@ export const loginUserController = (req, res) =>
     res,
   );
 
+export const socialLoginUserController = (req, res) =>
+  handleResponse(
+    {
+      handler: socialLoginUser,
+      validationFn: null,
+      handlerParams: [req.body, req],
+      successMessage: 'Login successful',
+    },
+    req,
+    res,
+  );
+
 export const otpVerificationController = (req, res) =>
   handleResponse(
     {
@@ -49,6 +67,66 @@ export const sendPassengerPhoneOtpController = (req, res) =>
       validationFn: null,
       handlerParams: [req.body],
       successMessage: 'OTP sent to your phone number successfully',
+    },
+    req,
+    res,
+  );
+
+export const forgotPasswordController = (req, res) =>
+  handleResponse(
+    {
+      handler: forgotPassword,
+      validationFn: null,
+      handlerParams: [req.body],
+      successMessage: 'Forgot password OTP sent successfully',
+    },
+    req,
+    res,
+  );
+
+export const resetUserPasswordController = (req, res) =>
+  handleResponse(
+    {
+      handler: resetUserPassword,
+      validationFn: null,
+      handlerParams: [req.body],
+      successMessage: 'Password reset successfully',
+    },
+    req,
+    res,
+  );
+
+export const resendOtpController = (req, res) =>
+  handleResponse(
+    {
+      handler: resendOtp,
+      validationFn: null,
+      handlerParams: [req.body],
+      successMessage: 'OTP resent successfully',
+    },
+    req,
+    res,
+  );
+
+export const refreshAuthTokenController = (req, res) =>
+  handleResponse(
+    {
+      handler: refreshAuthToken,
+      validationFn: null,
+      handlerParams: [req.body],
+      successMessage: 'Token refreshed successfully',
+    },
+    req,
+    res,
+  );
+
+export const updateFCMTokenController = (req, res) =>
+  handleResponse(
+    {
+      handler: updateFCMToken,
+      validationFn: null,
+      handlerParams: [req.user, req.body],
+      successMessage: 'FCM token updated successfully',
     },
     req,
     res,
