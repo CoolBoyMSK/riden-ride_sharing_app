@@ -207,7 +207,7 @@ export const upsertDriverLocation = async (
     { driverId },
     {
       ...locationData,
-      status: 'ONLINE',
+      status: 'online',
       isAvailable: true,
       lastUpdated: new Date(),
     },
