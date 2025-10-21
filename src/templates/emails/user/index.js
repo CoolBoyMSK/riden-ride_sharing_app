@@ -442,3 +442,28 @@ export const sendDriverRideCancellationEmail = async (toEmail, username) => {
     html,
   });
 };
+
+export const sendDriverResetPasswordEmail = async (
+  toEmail,
+  username,
+  lastDigits,
+) => {
+  const resetPasswordTplPath = path.join(
+    process.cwd(),
+    'src',
+    'templates',
+    'emails',
+    'user',
+    'html',
+    'driverResetPasswordEmail.html',
+  );
+
+  const resetPasswordTplSource = fs.readFileSync(resetPasswordTplPath, 'utf-8');
+  const resetPasswordTpl = handlebars.compile(resetPasswordTplSource);
+  const html = resetPasswordTpl({ username, lastDigits });
+  await sendEmail({
+    to: toEmail,
+    subject: 'Reset Your RIDEN Password – OTP Sent',
+    html,
+  });
+};

@@ -158,6 +158,10 @@ export const loginUser = async ({ email, phoneNumber, password }, resp) => {
           };
           return resp;
         }
+      } else {
+        resp.error = true;
+        resp.error_message = 'Unexpected error occured';
+        return resp;
       }
     } else if (phoneNumber) {
       user = await findUserByPhone(phoneNumber);
@@ -165,7 +169,7 @@ export const loginUser = async ({ email, phoneNumber, password }, resp) => {
         resp.error = true;
         resp.error_message = `User not found`;
         return resp;
-      } else if (!user.roles.includes('passenger') || !user.isEmailVerified) {
+      } else if (!user.roles.includes('passenger') || !user.isPhoneVerified) {
         resp.error = true;
         resp.error_message = `Only verified passengers can login here`;
         return resp;
@@ -178,7 +182,7 @@ export const loginUser = async ({ email, phoneNumber, password }, resp) => {
         return resp;
       }
 
-      if (user && !user.isPhoneVerified) {
+      if (user) {
         const result = await requestPhoneOtp(user.phoneNumber, user.name);
         if (!result.ok) {
           resp.error = true;
@@ -191,6 +195,10 @@ export const loginUser = async ({ email, phoneNumber, password }, resp) => {
             user.phoneNumber.slice(-4),
           );
         }
+      } else {
+        resp.error = true;
+        resp.error_message = 'Unexpected error occured';
+        return resp;
       }
     } else {
       resp.error = true;
@@ -480,7 +488,7 @@ export const otpVerification = async (
 
       const notify = await createAdminNotification({
         title: 'New Passenger Registered',
-        message: `${user.name} registered as passenger successfully, Their Phone No: ${user.phoneNumber} and Email: ${user.email}`,
+        message: `${user.name} registered as passenger successfully with email: ${user.email}`,
         metadata: user,
         module: 'passenger_management',
         type: 'ALERT',
@@ -500,8 +508,9 @@ export const otpVerification = async (
       );
 
       resp.data = {
-        success: true,
-        user,
+        verifyPhone: true,
+        message: `Phone Number verification is required. Please verify your phone number to complete the login process.`,
+        email: user.email,
       };
       return resp;
     } else if (emailOtp) {
@@ -573,7 +582,10 @@ export const otpVerification = async (
         loginMethod: 'email',
         lastLoginAt: new Date(),
       };
-      await createDeviceInfo(device);
+      const userDevice = await createDeviceInfo(device);
+      if (!userDevice) {
+        console.error('Failed to create user device');
+      }
 
       const payload = { id: user._id, roles: user.roles };
       resp.data = {
@@ -616,7 +628,7 @@ export const otpVerification = async (
       }
 
       user = await findUserByEmail(result.pending?.email);
-      if (!user && user.roles.includes('passenger')) {
+      if (!user || !user.roles.includes('passenger')) {
         resp.error = true;
         resp.error_message = 'Passenger not found';
         return resp;
@@ -652,7 +664,10 @@ export const otpVerification = async (
         loginMethod: 'phone',
         lastLoginAt: new Date(),
       };
-      await createDeviceInfo(device);
+      const userDevice = await createDeviceInfo(device);
+      if (!userDevice) {
+        console.error('Failed to create user device');
+      }
 
       const payload = { id: user._id, roles: user.roles };
       resp.data = {
@@ -735,7 +750,10 @@ export const otpVerification = async (
         loginMethod: 'phone',
         lastLoginAt: new Date(),
       };
-      await createDeviceInfo(device);
+      const userDevice = await createDeviceInfo(device);
+      if (!userDevice) {
+        console.error('Failed to create user device');
+      }
 
       const payload = { id: user._id, roles: user.roles };
       resp.data = {
@@ -946,9 +964,10 @@ export const sendPassengerPhoneOtp = async (
     if (verifyPhone) {
       if (!phoneNumber || !email) {
         resp.error = true;
-        resp.error_message = 'Phone number and email is required is required';
+        resp.error_message = 'Phone number and email is required';
         return resp;
       }
+
       const user = await findUserByEmail(email);
       if (!user || !user.roles.includes('passenger')) {
         resp.error = true;

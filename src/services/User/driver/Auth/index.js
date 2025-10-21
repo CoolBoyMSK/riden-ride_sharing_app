@@ -42,7 +42,7 @@ import redisConfig from '../../../../config/redisConfig.js';
 import crypto from 'crypto';
 import {
   sendPhoneOtpEmail,
-  sendDriverPasswordResetOtpEmail,
+  sendDriverResetPasswordEmail,
   sendWelcomeDriverEmail,
 } from '../../../../templates/emails/user/index.js';
 import { validateDriverSignup } from '../../../../validations/user/authValidations.js';
@@ -158,6 +158,10 @@ export const loginUser = async ({ email, phoneNumber, password }, resp) => {
           };
           return resp;
         }
+      } else {
+        resp.error = true;
+        resp.error_message = 'Unexpected error occured';
+        return resp;
       }
     } else if (phoneNumber) {
       user = await findUserByPhone(phoneNumber);
@@ -165,7 +169,7 @@ export const loginUser = async ({ email, phoneNumber, password }, resp) => {
         resp.error = true;
         resp.error_message = `User not found`;
         return resp;
-      } else if (!user.roles.includes('driver') || !user.isEmailVerified) {
+      } else if (!user.roles.includes('driver') || !user.isPhoneVerified) {
         resp.error = true;
         resp.error_message = `Only verified drivers can login here`;
         return resp;
@@ -178,7 +182,7 @@ export const loginUser = async ({ email, phoneNumber, password }, resp) => {
         return resp;
       }
 
-      if (user && !user.isPhoneVerified) {
+      if (user) {
         const result = await requestPhoneOtp(user.phoneNumber, user.name);
         if (!result.ok) {
           resp.error = true;
@@ -191,6 +195,10 @@ export const loginUser = async ({ email, phoneNumber, password }, resp) => {
             user.phoneNumber.slice(-4),
           );
         }
+      } else {
+        resp.error = true;
+        resp.error_message = 'Unexpected error occured';
+        return resp;
       }
     } else {
       resp.error = true;
@@ -470,7 +478,7 @@ export const otpVerification = async (
 
       const notify = await createAdminNotification({
         title: 'New Driver Registered',
-        message: `${user.name} registered as driver successfully, Their Email: ${user.email}`,
+        message: `${user.name} registered as driver successfully with email: ${user.email}`,
         metadata: user,
         module: 'driver_management',
         type: 'ALERT',
@@ -489,14 +497,10 @@ export const otpVerification = async (
         emailPendingKey(email),
       );
 
-      const payload = { id: user._id, roles: user.roles };
       resp.data = {
         verifyPhone: true,
         message: `Phone Number verification is required. Please verify your phone number to complete the login process.`,
         email: user.email,
-        user: user,
-        accessToken: generateAccessToken(payload),
-        refreshToken: generateRefreshToken(payload),
       };
       return resp;
     } else if (emailOtp) {
@@ -568,7 +572,10 @@ export const otpVerification = async (
         loginMethod: 'email',
         lastLoginAt: new Date(),
       };
-      await createDeviceInfo(device);
+      const userDevice = await createDeviceInfo(device);
+      if (!userDevice) {
+        console.error('Failed to create user device');
+      }
 
       const payload = { id: user._id, roles: user.roles };
       resp.data = {
@@ -647,7 +654,10 @@ export const otpVerification = async (
         loginMethod: 'phone',
         lastLoginAt: new Date(),
       };
-      await createDeviceInfo(device);
+      const userDevice = await createDeviceInfo(device);
+      if (!userDevice) {
+        console.error('Failed to create user device');
+      }
 
       const payload = { id: user._id, roles: user.roles };
       resp.data = {
@@ -730,7 +740,10 @@ export const otpVerification = async (
         loginMethod: 'phone',
         lastLoginAt: new Date(),
       };
-      await createDeviceInfo(device);
+      const userDevice = await createDeviceInfo(device);
+      if (!userDevice) {
+        console.error('Failed to create user device');
+      }
 
       const payload = { id: user._id, roles: user.roles };
       resp.data = {
@@ -1051,7 +1064,7 @@ export const forgotPassword = async ({ phoneNumber, email }, resp) => {
         return resp;
       }
 
-      await sendDriverPasswordResetOtpEmail(
+      await sendDriverResetPasswordEmail(
         user.email,
         user.name,
         user.phoneNumber.slice(-4),
