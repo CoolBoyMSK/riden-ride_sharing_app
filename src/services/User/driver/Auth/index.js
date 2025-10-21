@@ -13,15 +13,13 @@ import {
   updateUserById,
 } from '../../../../dal/user/index.js';
 import {
-  createPassengerProfile,
-  updatePassenger,
-} from '../../../../dal/passenger.js';
-import {
   createDriverProfile,
-  findDriverByUserId,
   updateDriverByUserId,
 } from '../../../../dal/driver.js';
-import { createPassengerStripeCustomer } from '../../../../dal/stripe.js';
+import {
+  createDriverStripeAccount,
+  createDriverWallet,
+} from '../../../../dal/stripe.js';
 import { createAdminNotification } from '../../../../dal/notification.js';
 import { createDeviceInfo } from '../../../../dal/user/index.js';
 import { extractDeviceInfo } from '../../../../utils/deviceInfo.js';
@@ -44,18 +42,18 @@ import redisConfig from '../../../../config/redisConfig.js';
 import crypto from 'crypto';
 import {
   sendPhoneOtpEmail,
-  sendWelcomePassengerEmail,
-  sendPassengerResetPasswordEmail,
+  sendDriverPasswordResetOtpEmail,
+  sendWelcomeDriverEmail,
 } from '../../../../templates/emails/user/index.js';
-import { validatePassengerSignup } from '../../../../validations/user/authValidations.js';
+import { validateDriverSignup } from '../../../../validations/user/authValidations.js';
 import { verifyGoogleToken } from '../../../../utils/verifySocials.js';
 
-export const signUpPassenger = async (
+export const signUpDriver = async (
   { name, email, gender, password, confirmPassword },
   resp,
 ) => {
   try {
-    const validation = validatePassengerSignup({
+    const validation = validateDriverSignup({
       name,
       email,
       gender,
@@ -76,7 +74,7 @@ export const signUpPassenger = async (
     }
 
     let user = await findUserByEmail(email);
-    if (user && user.roles.includes('passenger')) {
+    if (user && user.roles.includes('driver')) {
       resp.error = true;
       resp.error_message = 'Email already in use';
       return resp;
@@ -86,7 +84,7 @@ export const signUpPassenger = async (
       name,
       email,
       gender,
-      roles: ['passenger'],
+      roles: ['driver'],
       password: hashed,
     };
 
@@ -95,7 +93,7 @@ export const signUpPassenger = async (
       name,
       userData,
       'signup',
-      'passenger',
+      'driver',
     );
     if (!result.ok) {
       resp.error = true;
@@ -105,7 +103,7 @@ export const signUpPassenger = async (
 
     resp.data = {
       signupOtp: true,
-      message: `Email verification OTP to register passenger has been sent to ${email}`,
+      message: `Email verification OTP to register driver has been sent to ${email}`,
       email: email,
     };
     return resp;
@@ -127,9 +125,9 @@ export const loginUser = async ({ email, phoneNumber, password }, resp) => {
         resp.error = true;
         resp.error_message = `User not found`;
         return resp;
-      } else if (!user.roles.includes('passenger') || !user.isEmailVerified) {
+      } else if (!user.roles.includes('driver') || !user.isEmailVerified) {
         resp.error = true;
-        resp.error_message = `Only verified passengers can login here`;
+        resp.error_message = `Only verified drivers can login here`;
         return resp;
       }
 
@@ -145,8 +143,8 @@ export const loginUser = async ({ email, phoneNumber, password }, resp) => {
           user.email,
           user.name,
           {},
-          '',
-          'passenger',
+          'login',
+          'driver',
         );
         if (!result.ok) {
           resp.error = true;
@@ -167,9 +165,9 @@ export const loginUser = async ({ email, phoneNumber, password }, resp) => {
         resp.error = true;
         resp.error_message = `User not found`;
         return resp;
-      } else if (!user.roles.includes('passenger') || !user.isEmailVerified) {
+      } else if (!user.roles.includes('driver') || !user.isEmailVerified) {
         resp.error = true;
-        resp.error_message = `Only verified passengers can login here`;
+        resp.error_message = `Only verified drivers can login here`;
         return resp;
       }
 
@@ -249,35 +247,38 @@ export const socialLoginUser = async (
       user = await createUser({
         name: isVerified.name,
         email: isVerified.email,
-        roles: ['passenger'],
+        roles: ['driver'],
         userSocialToken,
         userSocialProvider,
       });
 
       const uniqueId = generateUniqueId(user.roles[0], user._id);
 
-      let passenger = await createPassengerProfile(user._id, uniqueId);
-      passenger = await updatePassenger(
-        { userId: user._id },
-        { isActive: true },
-      );
-      if (!passenger) {
+      let driver = await createDriverProfile(user._id, uniqueId);
+      if (!driver) {
         resp.error = true;
-        resp.error_message = 'Failed to activate passenger';
+        resp.error_message = 'Failed to create driver';
         return resp;
       }
 
-      const stripeCustomerId = await createPassengerStripeCustomer(
-        user,
-        passenger,
-      );
+      driver = await updateDriverByUserId(user._id, {
+        status: driver.status === 'offline' ? 'online' : driver.status,
+        isActive: true,
+      });
+      if (!driver) {
+        resp.error = true;
+        resp.error_message = 'Failed to activate driver';
+        return resp;
+      }
+
+      const stripeCustomerId = await createDriverStripeAccount(user, driver);
       if (!stripeCustomerId) {
         resp.error = true;
-        resp.error_message = 'Failed to create stripe customer account';
+        resp.error_message = 'Failed to create stripe account';
         return resp;
       }
 
-      const wallet = await createPassengerWallet(passenger._id);
+      const wallet = await createDriverWallet(driver._id);
       if (!wallet) {
         resp.error = true;
         resp.error_message = 'Failed to create In-App wallet';
@@ -299,12 +300,12 @@ export const socialLoginUser = async (
       await createDeviceInfo(device);
 
       const notify = await createAdminNotification({
-        title: 'New Passenger Registered',
-        message: `${user.name} registered as passenger successfully, Their  Email: ${user.email}`,
+        title: 'New Driver Registered',
+        message: `${user.name} registered as driver successfully, Their  Email: ${user.email}`,
         metadata: user,
-        module: 'passenger_management',
+        module: 'driver_management',
         type: 'ALERT',
-        actionLink: `${env.FRONTEND_URL}/api/admin/passengers/fetch-passenger/${passenger._id}`,
+        actionLink: `${env.FRONTEND_URL}/api/admin/drivers/fetch/${driver._id}`,
       });
       if (!notify) {
         resp.error = true;
@@ -318,7 +319,7 @@ export const socialLoginUser = async (
         email: user.email,
       };
       return resp;
-    } else if (user && user.roles.includes('passenger')) {
+    } else if (user && user.roles.includes('driver')) {
       const isVerified = await verifyGoogleToken(userSocialToken, user.email);
       if (!isVerified) {
         resp.error = true;
@@ -346,17 +347,17 @@ export const socialLoginUser = async (
         });
       }
 
-      let passenger = await updatePassenger(
-        { userId: user._id },
-        { isActive: true },
-      );
-      if (!passenger) {
+      let driver = await updateDriverByUserId(user._id, {
+        status: driver.status === 'offline' ? 'online' : driver.status,
+        isActive: true,
+      });
+      if (!driver) {
         resp.error = true;
-        resp.error_message = 'Passenger profile not found';
+        resp.error_message = 'Driver profile not found';
         return resp;
-      } else if (!passenger.isActive) {
+      } else if (!driver.isActive) {
         resp.error = true;
-        resp.error_message = 'Failed to activate passenger';
+        resp.error_message = 'Failed to activate driver';
         return resp;
       }
 
@@ -441,29 +442,26 @@ export const otpVerification = async (
       });
       if (!user) {
         resp.error = true;
-        resp.error_message = 'Failed to register passenger';
+        resp.error_message = 'Failed to register driver';
         return resp;
       }
 
       const uniqueId = generateUniqueId(user.roles[0], user._id);
-      const passenger = await createPassengerProfile(user._id, uniqueId);
-      if (!passenger) {
+      const driver = await createDriverProfile(user._id, uniqueId);
+      if (!driver) {
         resp.error = true;
-        resp.error_message = 'Failed to create passenger profile';
+        resp.error_message = 'Failed to create driver profile';
         return resp;
       }
 
-      const stripeCustomerId = await createPassengerStripeCustomer(
-        user,
-        passenger,
-      );
+      const stripeCustomerId = await createDriverStripeAccount(user, driver);
       if (!stripeCustomerId) {
         resp.error = true;
-        resp.error_message = 'Failed to create stripe customer account';
+        resp.error_message = 'Failed to create stripe account';
         return resp;
       }
 
-      const wallet = await createPassengerWallet(passenger._id);
+      const wallet = await createDriverWallet(driver._id);
       if (!wallet) {
         resp.error = true;
         resp.error_message = 'Failed to create In-App wallet';
@@ -471,18 +469,18 @@ export const otpVerification = async (
       }
 
       const notify = await createAdminNotification({
-        title: 'New Passenger Registered',
-        message: `${user.name} registered as passenger successfully, Their Phone No: ${user.phoneNumber} and Email: ${user.email}`,
+        title: 'New Driver Registered',
+        message: `${user.name} registered as driver successfully, Their Email: ${user.email}`,
         metadata: user,
-        module: 'passenger_management',
+        module: 'driver_management',
         type: 'ALERT',
-        actionLink: `${env.FRONTEND_URL}/api/admin/passengers/fetch-passenger/${passenger._id}`,
+        actionLink: `${env.FRONTEND_URL}/api/admin/drivers/fetch/${driver._id}`,
       });
       if (!notify) {
         console.error('Failed to send notification');
       }
 
-      await sendWelcomePassengerEmail(user.email, user.name);
+      await sendWelcomeDriverEmail(user.email, user.name);
 
       // Final cleanup
       await redisConfig.del(
@@ -491,9 +489,14 @@ export const otpVerification = async (
         emailPendingKey(email),
       );
 
+      const payload = { id: user._id, roles: user.roles };
       resp.data = {
-        success: true,
-        user,
+        verifyPhone: true,
+        message: `Phone Number verification is required. Please verify your phone number to complete the login process.`,
+        email: user.email,
+        user: user,
+        accessToken: generateAccessToken(payload),
+        refreshToken: generateRefreshToken(payload),
       };
       return resp;
     } else if (emailOtp) {
@@ -514,9 +517,9 @@ export const otpVerification = async (
       }
 
       user = await findUserByEmail(email);
-      if (!user || !user.roles.includes('passenger')) {
+      if (!user || !user.roles.includes('driver')) {
         resp.error = true;
-        resp.error_message = 'Passenger not found';
+        resp.error_message = 'Driver not found';
         return resp;
       } else if (!user.phoneNumber || !user.isPhoneVerified) {
         resp.data = {
@@ -543,13 +546,13 @@ export const otpVerification = async (
         emailPendingKey(email),
       );
 
-      const passenger = await updatePassenger(
-        { userId: user._id },
-        { isActive: true },
-      );
-      if (!passenger) {
+      const driver = await updateDriverByUserId(user._id, {
+        status: driver.status === 'offline' ? 'online' : driver.status,
+        isActive: true,
+      });
+      if (!driver) {
         resp.error = true;
-        resp.error_message = 'Failed to activate passenger';
+        resp.error_message = 'Failed to activate driver';
         return resp;
       }
 
@@ -601,16 +604,16 @@ export const otpVerification = async (
       }
 
       user = await findUserByPhone(phoneNumber);
-      if (user && user.roles.includes('passenger') && user.isPhoneVerified) {
+      if (user && user.roles.includes('driver') && user.isPhoneVerified) {
         resp.error = true;
         resp.error_message = 'Phone Number already exists';
         return resp;
       }
 
       user = await findUserByEmail(result.pending?.email);
-      if (!user && user.roles.includes('passenger')) {
+      if (!user && user.roles.includes('driver')) {
         resp.error = true;
-        resp.error_message = 'Passenger not found';
+        resp.error_message = 'Driver not found';
         return resp;
       }
 
@@ -680,9 +683,9 @@ export const otpVerification = async (
       }
 
       user = await findUserByPhone(phoneNumber);
-      if (!user || !user.roles.includes('passenger')) {
+      if (!user || !user.roles.includes('driver')) {
         resp.error = true;
-        resp.error_message = 'Passenger not found';
+        resp.error_message = 'Driver not found';
         return resp;
       } else if (!user.isPhoneVerified) {
         user = await updateUserById(user._id, {
@@ -705,13 +708,13 @@ export const otpVerification = async (
         phonePendingKey(phoneNumber),
       );
 
-      const passenger = await updatePassenger(
-        { userId: user._id },
-        { isActive: true },
-      );
-      if (!passenger) {
+      const driver = await updateDriverByUserId(user._id, {
+        status: driver.status === 'offline' ? 'online' : driver.status,
+        isActive: true,
+      });
+      if (!driver) {
         resp.error = true;
-        resp.error_message = 'Failed to activate passenger';
+        resp.error_message = 'Failed to activate driver';
         return resp;
       }
 
@@ -763,9 +766,9 @@ export const otpVerification = async (
       }
 
       user = await findUserByPhone(phoneNumber);
-      if (!user || !user.roles.includes('passenger')) {
+      if (!user || !user.roles.includes('driver')) {
         resp.error = true;
-        resp.error_message = 'Passenger not found';
+        resp.error_message = 'Driver not found';
         return resp;
       }
 
@@ -849,9 +852,9 @@ export const otpVerification = async (
       }
 
       user = await findUserByEmail(email);
-      if (!user || !user.roles.includes('passenger')) {
+      if (!user || !user.roles.includes('driver')) {
         resp.error = true;
-        resp.error_message = 'Passenger not found';
+        resp.error_message = 'Driver not found';
         return resp;
       }
 
@@ -930,7 +933,7 @@ export const otpVerification = async (
   }
 };
 
-export const sendPassengerPhoneOtp = async (
+export const sendDriverPhoneOtp = async (
   { verifyPhone, email, phoneNumber },
   resp,
 ) => {
@@ -938,11 +941,11 @@ export const sendPassengerPhoneOtp = async (
     if (verifyPhone) {
       if (!phoneNumber || !email) {
         resp.error = true;
-        resp.error_message = 'Phone number and email is required is required';
+        resp.error_message = 'Phone number and email is required';
         return resp;
       }
       const user = await findUserByEmail(email);
-      if (!user || !user.roles.includes('passenger')) {
+      if (!user || !user.roles.includes('driver')) {
         resp.error = true;
         resp.error_message = 'User not found';
         return resp;
@@ -994,9 +997,9 @@ export const forgotPassword = async ({ phoneNumber, email }, resp) => {
         resp.error = true;
         resp.error_message = 'No user found';
         return resp;
-      } else if (!user.roles.includes('passenger')) {
+      } else if (!user.roles.includes('driver')) {
         resp.error = true;
-        resp.error_message = 'No passenger found with this email';
+        resp.error_message = 'No driver found with this email';
         return resp;
       } else if (!user.isEmailVerified) {
         resp.error = true;
@@ -1031,9 +1034,9 @@ export const forgotPassword = async ({ phoneNumber, email }, resp) => {
         resp.error = true;
         resp.error_message = 'No user found';
         return resp;
-      } else if (!user.roles.includes('passenger')) {
+      } else if (!user.roles.includes('driver')) {
         resp.error = true;
-        resp.error_message = 'No passenger found with this phone number';
+        resp.error_message = 'No driver found with this phone number';
         return resp;
       } else if (!user.isPhoneVerified) {
         resp.error = true;
@@ -1048,7 +1051,7 @@ export const forgotPassword = async ({ phoneNumber, email }, resp) => {
         return resp;
       }
 
-      await sendPassengerResetPasswordEmail(
+      await sendDriverPasswordResetOtpEmail(
         user.email,
         user.name,
         user.phoneNumber.slice(-4),
@@ -1091,9 +1094,9 @@ export const resetUserPassword = async (
         resp.error = true;
         resp.error_message = 'No user found';
         return resp;
-      } else if (!user.roles.includes('passenger')) {
+      } else if (!user.roles.includes('driver')) {
         resp.error = true;
-        resp.error_message = 'No passenger found with this email';
+        resp.error_message = 'No driver found with this email';
         return resp;
       } else if (!user.isEmailVerified) {
         resp.error = true;
@@ -1106,9 +1109,9 @@ export const resetUserPassword = async (
         resp.error = true;
         resp.error_message = 'No user found for that phone number';
         return resp;
-      } else if (!user.roles.includes('passenger')) {
+      } else if (!user.roles.includes('driver')) {
         resp.error = true;
-        resp.error_message = 'No passenger found with this email';
+        resp.error_message = 'No driver found with this email';
         return resp;
       } else if (!user.isPhoneVerified) {
         resp.error = true;
@@ -1195,9 +1198,9 @@ export const resendOtp = async (
         resp.error = true;
         resp.error_message = `User not found`;
         return resp;
-      } else if (!user.roles.includes('passenger')) {
+      } else if (!user.roles.includes('driver')) {
         resp.error = true;
-        resp.error_message = 'No passenger found with this email';
+        resp.error_message = 'No driver found with this email';
         return resp;
       } else if (!user.isEmailVerified) {
         resp.error = true;
@@ -1230,9 +1233,9 @@ export const resendOtp = async (
         resp.error = true;
         resp.error_message = `User not found`;
         return resp;
-      } else if (!user.roles.includes('passenger')) {
+      } else if (!user.roles.includes('driver')) {
         resp.error = true;
-        resp.error_message = 'No passenger found with this phone number';
+        resp.error_message = 'No driver found with this phone number';
         return resp;
       } else if (!user.isPhoneVerified) {
         resp.error = true;
@@ -1253,6 +1256,10 @@ export const resendOtp = async (
         phoneNumber: user.phoneNumber,
       };
       return resp;
+    } else {
+      resp.error = true;
+      resp.error_message = 'Invalid method';
+      return resp;
     }
   } catch (error) {
     console.error(`API ERROR: ${error}`);
@@ -1268,7 +1275,7 @@ export const refreshAuthToken = async ({ refreshToken }, resp) => {
     resp.error = true;
     resp.error_message = 'Invalid refresh token';
     return resp;
-  } else if (!payload.roles.includes('passenger')) {
+  } else if (!payload.roles.includes('driver')) {
     resp.error = true;
     resp.error_message = 'Unauthorized Access';
     return resp;
@@ -1286,7 +1293,7 @@ export const refreshAuthToken = async ({ refreshToken }, resp) => {
 
 export const updateFCMToken = async (user, { userDeviceToken }, resp) => {
   try {
-    if (user.roles.includes('passenger')) {
+    if (user.roles.includes('driver')) {
       const success = await updateUserById(user._id, {
         userDeviceToken,
       });

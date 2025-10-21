@@ -64,7 +64,6 @@ const passengerSchema = new mongoose.Schema(
     paymentMethodIds: [
       {
         type: String,
-        unique: true,
       },
     ],
     addresses: [addressSchema],

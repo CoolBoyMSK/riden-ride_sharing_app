@@ -1,21 +1,21 @@
 import { handleResponse } from '../../../../utils/handleRespone.js';
 import {
-  signUpPassenger,
+  signUpDriver,
   loginUser,
   socialLoginUser,
   otpVerification,
-  sendPassengerPhoneOtp,
+  sendDriverPhoneOtp,
   forgotPassword,
   resetUserPassword,
   resendOtp,
   refreshAuthToken,
   updateFCMToken,
-} from '../../../../services/User/passenger/Auth/index.js';
+} from '../../../../services/User/driver/Auth/index.js';
 
-export const signUpPassengerController = (req, res) =>
+export const signUpDriverController = (req, res) =>
   handleResponse(
     {
-      handler: signUpPassenger,
+      handler: signUpDriver,
       validationFn: null,
       handlerParams: [req.body],
       successMessage: 'Verify your email to complete registration',
@@ -60,10 +60,10 @@ export const otpVerificationController = (req, res) =>
     res,
   );
 
-export const sendPassengerPhoneOtpController = (req, res) =>
+export const sendDriverPhoneOtpController = (req, res) =>
   handleResponse(
     {
-      handler: sendPassengerPhoneOtp,
+      handler: sendDriverPhoneOtp,
       validationFn: null,
       handlerParams: [req.body],
       successMessage: 'OTP sent to your phone number successfully',

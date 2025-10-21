@@ -57,13 +57,10 @@ const userSchema = new mongoose.Schema(
     email: {
       type: String,
       lowercase: true,
-      unique: true,
-      sparse: true,
+      nullable: false,
     },
     phoneNumber: {
       type: String,
-      unique: true,
-      sparse: true,
     },
     recoveryPhoneNumbers: {
       type: [recoveryPhoneSchema],
@@ -108,7 +105,17 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-    notifications: notificationSchema,
+    notifications: {
+      type: notificationSchema,
+      default: () => ({
+        payment: true,
+        tip: true,
+        ride: true,
+        call: true,
+        chat: true,
+        support: true,
+      }),
+    },
     userDeviceToken: {
       type: String,
       trim: true,

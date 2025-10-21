@@ -1,24 +1,24 @@
 import express from 'express';
 import { registerRoute } from '../../../../utils/registerRoute.js';
 import {
-  signUpPassengerController,
+  signUpDriverController,
   loginUserController,
   otpVerificationController,
-  sendPassengerPhoneOtpController,
+  sendDriverPhoneOtpController,
   socialLoginUserController,
   forgotPasswordController,
   resetUserPasswordController,
   resendOtpController,
   refreshAuthTokenController,
   updateFCMTokenController,
-} from '../../../../controllers/User/Passengers/Auth/index.js';
+} from '../../../../controllers/User/Drivers/Auth/index.js';
 
 const router = express.Router();
 
 registerRoute({
   router,
   route: '/signup',
-  post_method: signUpPassengerController,
+  post_method: signUpDriverController,
 });
 
 registerRoute({
@@ -42,7 +42,7 @@ registerRoute({
 registerRoute({
   router,
   route: '/phone',
-  post_method: sendPassengerPhoneOtpController,
+  post_method: sendDriverPhoneOtpController,
 });
 
 registerRoute({
@@ -72,7 +72,7 @@ registerRoute({
 registerRoute({
   router,
   route: '/fcm',
-  passenger_auth_enable: true,
+  driver_auth_enable: true,
   put_method: updateFCMTokenController,
 });
 
