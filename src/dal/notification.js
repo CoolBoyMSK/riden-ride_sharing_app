@@ -5,6 +5,7 @@ import AdminAccess from '../models/AdminAccess.js';
 import Notification from '../models/Notification.js';
 import { ALLOWED_SETTINGS } from '../enums/userSettings.js';
 import firebaseAdmin from '../config/firebaseAdmin.js';
+import { emitToUser } from '../realtime/socket.js';
 
 export const findNotificationSettings = (id) =>
   User.findById(id).select('notifications').lean();
@@ -14,24 +15,78 @@ export const updateNotificaition = (id, payload) =>
     .select('notifications')
     .lean();
 
-export const findAdminNotifications = async (adminId) => {
+// export const findAdminNotifications = async (adminId) => {
+//   const access = await AdminAccess.findOne({ admin: adminId })
+//     .select('modules')
+//     .lean();
+
+//   if (!access || !access.modules?.length) {
+//     return [];
+//   }
+
+//   const notifications = await AdminNotification.find({
+//     module: { $in: access.modules },
+//     'recipients.adminId': adminId,
+//     'recipients.isDeleted': false,
+//   })
+//     .sort({ createdAt: -1 })
+//     .lean();
+
+//   return notifications;
+// };
+
+export const findAdminNotifications = async (adminId, page = 1, limit = 10) => {
   const access = await AdminAccess.findOne({ admin: adminId })
     .select('modules')
     .lean();
 
   if (!access || !access.modules?.length) {
-    return [];
+    return {
+      notifications: [],
+      pagination: {
+        total: 0,
+        page,
+        limit,
+        totalPages: 0,
+        hasNext: false,
+        hasPrev: false,
+      },
+    };
   }
 
+  // Calculate skip value for pagination
+  const skip = (page - 1) * limit;
+
+  // Get total count for pagination info
+  const totalCount = await AdminNotification.countDocuments({
+    module: { $in: access.modules },
+    'recipients.adminId': adminId,
+    'recipients.isDeleted': false,
+  });
+
+  // Calculate total pages
+  const totalPages = Math.ceil(totalCount / limit);
+
+  // Get paginated notifications
   const notifications = await AdminNotification.find({
     module: { $in: access.modules },
     'recipients.adminId': adminId,
     'recipients.isDeleted': false,
   })
     .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
     .lean();
 
-  return notifications;
+  return {
+    notifications,
+    pagination: {
+      total: totalCount,
+      page,
+      limit,
+      totalPages,
+    },
+  };
 };
 
 export const toggleNotificationReadStatus = async (adminId, notificationId) => {
@@ -96,6 +151,59 @@ export const toggleNotificationReadStatus = async (adminId, notificationId) => {
     return {
       success: false,
       message: 'An error occurred while updating the notification.',
+      error: error.message,
+    };
+  }
+};
+
+export const markAllNotificationsAsRead = async (adminId) => {
+  try {
+    if (!adminId) {
+      return {
+        success: false,
+        message: 'Admin ID is required.',
+      };
+    }
+
+    // --- Get current timestamp for readAt ---
+    const readTimestamp = new Date();
+
+    // --- Update all notifications where the admin is a recipient ---
+    const result = await AdminNotification.updateMany(
+      {
+        'recipients.adminId': adminId,
+        'recipients.isDeleted': false,
+        'recipients.isRead': false, // Only update unread notifications
+      },
+      {
+        $set: {
+          'recipients.$[r].isRead': true,
+          'recipients.$[r].readAt': readTimestamp,
+        },
+      },
+      {
+        arrayFilters: [
+          {
+            'r.adminId': adminId,
+            'r.isDeleted': false,
+            'r.isRead': false,
+          },
+        ],
+      },
+    );
+
+    return {
+      success: true,
+      modifiedCount: result.modifiedCount,
+      matchedCount: result.matchedCount,
+      message: `Successfully marked ${result.modifiedCount} notifications as read for admin ${adminId}.`,
+      readAt: readTimestamp,
+    };
+  } catch (error) {
+    console.error('Error marking all notifications as read:', error);
+    return {
+      success: false,
+      message: 'An error occurred while marking notifications as read.',
       error: error.message,
     };
   }
@@ -204,7 +312,7 @@ export const createAdminNotification = async ({
 
     // --- Fetch all admins who have access to this module ---
     const adminsWithAccess = await AdminAccess.find({
-      modules: module,
+      modules: { $in: [module] },
     })
       .select('admin')
       .lean();
@@ -222,6 +330,17 @@ export const createAdminNotification = async ({
       isRead: false,
       isDeleted: false,
     }));
+
+    adminsWithAccess.forEach((a) => {
+      emitToUser(a.admin, 'admin:new_notification', {
+        title,
+        message,
+        metadata,
+        module,
+        type,
+        actionLink,
+      });
+    });
 
     // --- Create notification ---
     const notification = await AdminNotification.create({
@@ -460,7 +579,7 @@ export const notifyUser = async ({
   isPush = true,
 }) => {
   try {
-    if (!userId || !title || !message || !module) {
+    if (!title?.trim() || !message?.trim() || !module?.trim()) {
       return {
         success: false,
         message: 'userId, title, message, and module are required.',

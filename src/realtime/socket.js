@@ -55,7 +55,12 @@ import { passengerPaysDriver, payDriverFromWallet } from '../dal/stripe.js';
 import { createCallLog, findCallById, updateCallLogById } from '../dal/call.js';
 import { findDashboardData } from '../dal/admin/index.js';
 import { findUserById } from '../dal/user/index.js';
-import { notifyUser } from '../dal/notification.js';
+import {
+  notifyUser,
+  findAdminNotifications,
+  toggleNotificationReadStatus,
+  markAllNotificationsAsRead,
+} from '../dal/notification.js';
 import { generateAgoraToken } from '../utils/agoraTokenGenerator.js';
 import { generateRideReceipt } from '../utils/receiptGenerator.js';
 import {
@@ -103,6 +108,7 @@ export const initSocket = (server) => {
 
   io.on('connection', (socket) => {
     const userId = socket.user.id;
+    const userRole = socket.user.roles[0];
     console.log(`🔌 User ${userId} connected to socket`);
 
     // add to online registry
@@ -110,6 +116,143 @@ export const initSocket = (server) => {
 
     // Join user's personal room for direct notifications
     socket.join(`user:${userId}`);
+
+    if (userRole === 'driver') {
+      socket.on('driver:update_status', async () => {
+        const objectType = 'driver-update-status';
+        try {
+          const driver = await findDriverByUserId(userId);
+          if (!driver) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'NOT_FOUND',
+              message: 'Driver not found',
+            });
+          } else if (driver.isBlocked || driver.isSuspended) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Driver not eligible',
+            });
+          } else if (!driver.legalAgreemant) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Legal Agreement not approved',
+            });
+          } else if (
+            !driver.stripeAccountId ||
+            driver.stripeAccountId.trim() === ''
+          ) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Connected account not found',
+            });
+          } else if (driver.isRestricted) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Driver is restricted',
+            });
+          } else if (driver.backgroundCheckStatus !== 'approved') {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Driver backgound not approved',
+            });
+          } else if (
+            !driver.wayBill ||
+            !driver.documents ||
+            driver.vehicle.length < 5
+          ) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Incomplete driver profile',
+            });
+          }
+
+          const vehicle = driver.vehicle;
+          if (
+            (!vehicle?.type || vehicle.type.trim() === '') &&
+            (!vehicle?.model || vehicle.model.trim() === '') &&
+            (!vehicle?.plateNumber || vehicle.plateNumber.trim() === '') &&
+            (!vehicle?.color || vehicle.color.trim() === '') &&
+            (!vehicle?.imageUrl || vehicle.imageUrl.trim() === '')
+          ) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Vehicle not registered',
+            });
+          }
+
+          const wayBillDocs = Object.values(driver.wayBill || {});
+          if (
+            wayBillDocs.length === 0 ||
+            wayBillDocs.some((doc) => !doc.status || doc.status !== 'issued')
+          ) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Way Bill not issued',
+            });
+          }
+
+          const documentList = Object.values(driver.documents || {});
+          if (
+            documentList.length === 0 ||
+            documentList.some((doc) => !doc.status || doc.status !== 'verified')
+          ) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Documents not verified',
+            });
+          }
+
+          let updatedDriver;
+          if (driver.isActive && driver.status === 'online') {
+            updatedDriver = await updateDriverByUserId(userId, {
+              isActive: false,
+              status: 'offline',
+            });
+          } else if (!driver.isActive && driver.status === 'offline') {
+            updatedDriver = await updateDriverByUserId(userId, {
+              isActive: true,
+              status: 'online',
+            });
+          } else {
+            updatedDriver = driver;
+          }
+          socket.emit('driver:update_status', {
+            success: true,
+            objectType,
+            data: updatedDriver,
+            message: `Driver status set to ${updatedDriver.status} successfully`,
+          });
+        } catch (error) {
+          console.error(`SOCKET ERROR: ${error}`);
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: `${error.code || 'SOCKET_ERROR'}`,
+            message: `SOCKET ERROR: ${error.message}`,
+          });
+        }
+      });
+    }
 
     socket.on('ride:active', async () => {
       const objectType = 'active-ride';
@@ -173,6 +316,7 @@ export const initSocket = (server) => {
         const driver = await findDriverByUserId(userId);
         if (
           !driver ||
+          !driver.isActive ||
           driver.isRestricted ||
           driver.isBlocked ||
           driver.isSuspended ||
@@ -367,6 +511,7 @@ export const initSocket = (server) => {
         const driver = await findDriverByUserId(userId);
         if (
           !driver ||
+          !driver.isActive ||
           driver.isRestricted ||
           driver.isBlocked ||
           driver.isSuspended ||
@@ -3888,6 +4033,102 @@ export const initSocket = (server) => {
           objectType,
           data,
           message: 'Ongoing rides data fetched successfully',
+        });
+      } catch (error) {
+        console.error(`SOCKET ERROR: ${error}`);
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: `${error.code || 'SOCKET_ERROR'}`,
+          message: `SOCKET ERROR: ${error.message}`,
+        });
+      }
+    });
+
+    socket.on('admin:get_notifications', async ({ page = 1, limit = 10 }) => {
+      const objectType = 'get-notifications';
+      try {
+        const data = await findAdminNotifications(userId, page, limit);
+        if (!data) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'NOT_FOUND',
+            message: 'Failed to fetch notifications',
+          });
+        }
+
+        socket.emit('admin:get_notifications', {
+          success: true,
+          objectType,
+          data,
+          message: 'Notifications fetched successfully',
+        });
+      } catch (error) {
+        console.error(`SOCKET ERROR: ${error}`);
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: `${error.code || 'SOCKET_ERROR'}`,
+          message: `SOCKET ERROR: ${error.message}`,
+        });
+      }
+    });
+
+    socket.on(
+      'admin:toggle_notification_status',
+      async ({ notificationId }) => {
+        const objectType = 'toggle-notification-status';
+        try {
+          const data = await toggleNotificationReadStatus(
+            userId,
+            notificationId,
+          );
+          if (!data) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'UPDATE_FAILED',
+              message: 'Failed to update notification status',
+            });
+          }
+
+          socket.emit('admin:toggle_notification_status', {
+            success: true,
+            objectType,
+            data,
+            message: 'Notification status updated successfully',
+          });
+        } catch (error) {
+          console.error(`SOCKET ERROR: ${error}`);
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: `${error.code || 'SOCKET_ERROR'}`,
+            message: `SOCKET ERROR: ${error.message}`,
+          });
+        }
+      },
+    );
+
+    socket.on('admin:read_all_notifications', async () => {
+      const objectType = 'read-all-notifications';
+      try {
+        const data = await markAllNotificationsAsRead(userId);
+        if (!data) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'UPDATE_FAILED',
+            message: 'Failed to real all notifications',
+          });
+        }
+
+        socket.emit('admin:read_all_notifications', {
+          success: true,
+          objectType,
+          data,
+          message: 'All notifications read successfully',
         });
       } catch (error) {
         console.error(`SOCKET ERROR: ${error}`);

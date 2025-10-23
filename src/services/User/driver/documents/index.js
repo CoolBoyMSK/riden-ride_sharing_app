@@ -9,6 +9,8 @@ import {
   findDriverWayBill,
 } from '../../../../dal/driver.js';
 import { uploadDriverDocumentToS3 } from '../../../../utils/s3Uploader.js';
+import { createAdminNotification } from '../../../../dal/notification.js';
+import env from '../../../../config/envConfig.js';
 
 export const getDriverDocuments = async (driverId, resp) => {
   const driver = await findDriverByUserId(driverId);
@@ -35,13 +37,25 @@ export const uploadDriverDocument = async (user, file, docType, resp) => {
     return resp;
   }
 
-  const imageUrl = await uploadDriverDocumentToS3(user.id, docType, file);
+  const imageUrl = await uploadDriverDocumentToS3(user._id, docType, file);
 
-  const updated = await updateDriverDocumentRecord(user.id, docType, imageUrl);
+  const updated = await updateDriverDocumentRecord(user._id, docType, imageUrl);
   if (!updated) {
     resp.error = true;
     resp.error_message = 'Driver record not found';
     return resp;
+  }
+
+  const notify = await createAdminNotification({
+    title: 'Document Submission',
+    message: `A Driver has uploaded new documents for verification.`,
+    metadata: updated,
+    module: 'driver_management',
+    type: 'ALERT',
+    actionLink: `${env.FRONTEND_URL}/api/admin/drivers/fetch/${updated._id}`,
+  });
+  if (!notify) {
+    console.error('Failed to send notification');
   }
 
   resp.data = updated.documents[docType];
@@ -52,7 +66,7 @@ export const updateDriverDocument = async (user, file, docType, resp) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const driver = await findDriverByUserId(user.id);
+    const driver = await findDriverByUserId(user._id);
     if (!driver) {
       await session.abortTransaction();
       session.endSession();
@@ -85,7 +99,7 @@ export const updateDriverDocument = async (user, file, docType, resp) => {
     }
 
     const request = await createDriverUpdateRequest(
-      user.id,
+      user._id,
       docType,
       oldValue,
       newValue,
@@ -102,6 +116,18 @@ export const updateDriverDocument = async (user, file, docType, resp) => {
 
     await session.commitTransaction();
     session.endSession();
+
+    const notify = await createAdminNotification({
+      title: 'Document Update Request',
+      message: `A Driver has submitted document update request for verification.`,
+      metadata: { driver, request },
+      module: 'driver_management',
+      type: 'ALERT',
+      actionLink: `${env.FRONTEND_URL}/api/admin/drivers/update-requests?page=1&limit=10&search=${user.email}`,
+    });
+    if (!notify) {
+      console.error('Failed to send notification');
+    }
 
     resp.data = request;
     return resp;

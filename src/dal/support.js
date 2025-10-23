@@ -18,7 +18,7 @@ export const createComplain = async (payload) => {
   if (!ride) return false;
   let complain = null;
 
-  if (payload.user.roles.includes('driver')) {
+  if (payload.user?.roles.includes('driver')) {
     const driver = await Driver.findById(ride.driverId);
     if (!driver) return false;
 
@@ -34,7 +34,7 @@ export const createComplain = async (payload) => {
     complain.uniqueId = generateUniqueId('complain', complain._id);
     await complain.save();
   }
-  if (payload.user.roles.includes('passenger')) {
+  if (payload.user?.roles.includes('passenger')) {
     const passenger = await Passenger.findById(ride.passengerId);
     if (!passenger) return false;
 

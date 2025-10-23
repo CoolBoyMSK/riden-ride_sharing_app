@@ -6,6 +6,7 @@ import {
 } from '../../../../dal/booking.js';
 import { findPassengerByUserId } from '../../../../dal/passenger.js';
 import { generateRideReceipt } from '../../../../utils/receiptGenerator.js';
+import { createAdminNotification } from '../../../../dal/notification.js';
 
 export const getAllBookings = async (user, { page, limit }, resp) => {
   try {
@@ -81,6 +82,18 @@ export const addBookingReport = async (user, { id }, { reason }, resp) => {
       resp.error = true;
       resp.error_message = 'Failed to report booking';
       return resp;
+    }
+
+    const notify = await createAdminNotification({
+      title: 'Issue Reported',
+      message: `A passenger has reported an issue that needs your attention.`,
+      metadata: success,
+      module: 'report_management',
+      type: 'ALERT',
+      actionLink: `${env.FRONTEND_URL}/api/admin/support/report?id=${success._id}`,
+    });
+    if (!notify) {
+      console.error('Failed to send notification');
     }
 
     resp.data = success;

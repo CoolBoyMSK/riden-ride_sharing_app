@@ -14,7 +14,7 @@ import {
 } from '../../../../dal/user/index.js';
 import {
   createDriverProfile,
-  updateDriverByUserId,
+  findDriverByUserId,
 } from '../../../../dal/driver.js';
 import {
   createDriverStripeAccount,
@@ -269,13 +269,10 @@ export const socialLoginUser = async (
         return resp;
       }
 
-      driver = await updateDriverByUserId(user._id, {
-        status: driver.status === 'offline' ? 'online' : driver.status,
-        isActive: true,
-      });
+      driver = await findDriverByUserId(user._id);
       if (!driver) {
         resp.error = true;
-        resp.error_message = 'Failed to activate driver';
+        resp.error_message = 'Driver not found';
         return resp;
       }
 
@@ -355,17 +352,10 @@ export const socialLoginUser = async (
         });
       }
 
-      let driver = await updateDriverByUserId(user._id, {
-        status: driver.status === 'offline' ? 'online' : driver.status,
-        isActive: true,
-      });
+      let driver = await findDriverByUserId(user._id);
       if (!driver) {
         resp.error = true;
-        resp.error_message = 'Driver profile not found';
-        return resp;
-      } else if (!driver.isActive) {
-        resp.error = true;
-        resp.error_message = 'Failed to activate driver';
+        resp.error_message = 'Driver not found';
         return resp;
       }
 
@@ -550,13 +540,10 @@ export const otpVerification = async (
         emailPendingKey(email),
       );
 
-      const driver = await updateDriverByUserId(user._id, {
-        status: driver.status === 'offline' ? 'online' : driver.status,
-        isActive: true,
-      });
+      const driver = await findDriverByUserId(user._id);
       if (!driver) {
         resp.error = true;
-        resp.error_message = 'Failed to activate driver';
+        resp.error_message = 'Driver not found';
         return resp;
       }
 
@@ -718,13 +705,10 @@ export const otpVerification = async (
         phonePendingKey(phoneNumber),
       );
 
-      const driver = await updateDriverByUserId(user._id, {
-        status: driver.status === 'offline' ? 'online' : driver.status,
-        isActive: true,
-      });
+      const driver = await findDriverByUserId(user._id);
       if (!driver) {
         resp.error = true;
-        resp.error_message = 'Failed to activate driver';
+        resp.error_message = 'Driver not found';
         return resp;
       }
 

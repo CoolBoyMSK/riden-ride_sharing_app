@@ -118,7 +118,7 @@ const driverSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: DRIVER_STATUS,
-      default: 'online',
+      default: 'offline',
       index: true,
     },
     vehicle: {

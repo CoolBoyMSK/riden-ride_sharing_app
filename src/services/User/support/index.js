@@ -10,6 +10,7 @@ import {
   uploadPassengerImage,
   uploadDriverImage,
 } from '../../../utils/s3Uploader.js';
+import { createAdminNotification } from '../../../dal/notification.js';
 
 export const getComplainTypes = async (user, resp) => {
   try {
@@ -77,6 +78,18 @@ export const createComplainTicket = async (
       resp.error = true;
       resp.error_message = 'Failed to create complaint';
       return resp;
+    }
+
+    const notify = await createAdminNotification({
+      title: 'Ticket Submitted',
+      message: `A ${user.roles[0]} has submitted a support ticket.`,
+      metadata: success,
+      module: 'support_ticket',
+      type: 'ALERT',
+      actionLink: `${env.FRONTEND_URL}/api/admin/support/get?id=${success._id}`,
+    });
+    if (!notify) {
+      console.error('Failed to send notification');
     }
 
     resp.data = success;
@@ -162,6 +175,18 @@ export const replySupportChat = async (user, { id }, { text }, files, resp) => {
       resp.error = true;
       resp.error_message = 'Failed to reply support';
       return resp;
+    }
+
+    const notify = await createAdminNotification({
+      title: 'Support Ticket Reply',
+      message: `A ${user.roles[0]} has replied to a support ticket.`,
+      metadata: success,
+      module: 'support_ticket',
+      type: 'ALERT',
+      actionLink: `${env.FRONTEND_URL}/api/admin/support/get?id=${success._id}`,
+    });
+    if (!notify) {
+      console.error('Failed to send notification');
     }
 
     resp.data = success;

@@ -16,6 +16,7 @@ import User from '../models/User.js';
 import env from '../config/envConfig.js';
 import { notifyUser } from '../dal/notification.js';
 import { sendDriverPaymentProcessedEmail } from '../templates/emails/user/index.js';
+import { createAdminNotification } from './notification.js';
 
 const stripe = new Stripe(env.STRIPE_SECRET_KEY);
 
@@ -1886,6 +1887,20 @@ export const transferToDriverAccount = async (driver, requestId) => {
     destination: driver.stripeAccountId,
     description: `Driver payout transfer`,
   });
+
+  if (!transfer || !transfer.id) {
+    const notify = await createAdminNotification({
+      title: 'Payment Failure',
+      message: `A payment for driver has failed. Action required.`,
+      metadata: { requestId, transfer },
+      module: 'payment_management',
+      type: 'ALERT',
+      actionLink: `${env.FRONTEND_URL}/api/admin/payout/previous?page=1&limit=10`,
+    });
+    if (!notify) {
+      console.error('Failed to send notification');
+    }
+  }
 
   if (transfer.id) {
     await increaseDriverAvailableBalance(driver._id, wallet.pendingBalance);

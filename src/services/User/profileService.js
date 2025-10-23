@@ -27,6 +27,7 @@ import {
 import redisConfig from '../../config/redisConfig.js';
 import bcrypt from 'bcrypt';
 import { sendPassengerProfileEditRequestEmail } from '../../templates/emails/user/index.js';
+import { createAdminNotification } from '../../dal/notification.js';
 
 export const getUserProfile = async (user, resp) => {
   const profile = await findUserById(user.id);
@@ -259,7 +260,7 @@ export const updateUserProfile = async (user, body, file, resp) => {
       ) {
         const newEmail = update.email.trim();
         const isRegistered = await findUserByEmail(newEmail);
-        if (isRegistered) {
+        if (isRegistered && isRegistered.roles[0] === user.roles[0]) {
           messages.emailMessage = `Email ${newEmail} is already registered`;
         } else {
           messages.emailMessage = 'Password is required to change email';
@@ -274,7 +275,7 @@ export const updateUserProfile = async (user, body, file, resp) => {
       ) {
         const newPhone = update.phoneNumber.trim();
         const isRegistered = await findUserByPhone(newPhone);
-        if (isRegistered) {
+        if (isRegistered && isRegistered.roles[0] === user.roles[0]) {
           messages.phoneNumberMessage = `Phone Number ${newPhone} is already registered`;
         } else {
           messages.phoneNumberMessage =
@@ -310,7 +311,25 @@ export const updateUserProfile = async (user, body, file, resp) => {
     session.endSession();
 
     if (messages.length > 0) {
-      await sendPassengerProfileEditRequestEmail(myUser.userId?.email, myUser.userId?.name);
+      await sendPassengerProfileEditRequestEmail(
+        myUser.userId?.email,
+        myUser.userId?.name,
+      );
+
+      const notify = await createAdminNotification({
+        title: 'Profile Edit Request',
+        message: `A ${user.roles[0]} has submitted a profile edit request.`,
+        metadata: updated,
+        module: `${user.roles[0]}_management`,
+        type: 'ALERT',
+        actionLink:
+          user.roles[0] === 'driver'
+            ? `${env.FRONTEND_URL}/api/admin/drivers/update-requests?page=1&limit=10`
+            : `${env.FRONTEND_URL}/api/admin/passengers/update-requests/?page=1&limit=10`,
+      });
+      if (!notify) {
+        console.error('Failed to send notification');
+      }
     }
 
     resp.data = {
