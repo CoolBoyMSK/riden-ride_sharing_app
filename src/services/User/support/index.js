@@ -1,6 +1,7 @@
 import { findRideByRideId } from '../../../dal/ride.js';
 import {
   findComplainTypes,
+  findBookingIds,
   createComplain,
   findComplains,
   findComplainById,
@@ -18,6 +19,25 @@ export const getComplainTypes = async (user, resp) => {
     if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to fetch complain types';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
+    return resp;
+  }
+};
+
+export const getBookingIds = async (user, resp) => {
+  try {
+    const success = await findBookingIds(user);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch booking ids';
       return resp;
     }
 

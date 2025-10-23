@@ -15,26 +15,6 @@ export const updateNotificaition = (id, payload) =>
     .select('notifications')
     .lean();
 
-// export const findAdminNotifications = async (adminId) => {
-//   const access = await AdminAccess.findOne({ admin: adminId })
-//     .select('modules')
-//     .lean();
-
-//   if (!access || !access.modules?.length) {
-//     return [];
-//   }
-
-//   const notifications = await AdminNotification.find({
-//     module: { $in: access.modules },
-//     'recipients.adminId': adminId,
-//     'recipients.isDeleted': false,
-//   })
-//     .sort({ createdAt: -1 })
-//     .lean();
-
-//   return notifications;
-// };
-
 export const findAdminNotifications = async (adminId, page = 1, limit = 10) => {
   const access = await AdminAccess.findOne({ admin: adminId })
     .select('modules')

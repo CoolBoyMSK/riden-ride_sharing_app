@@ -13,6 +13,22 @@ export const findComplainTypes = () => {
   return COMPLAIN_TYPES;
 };
 
+export const findBookingIds = async ({ id, roles }) => {
+  let inRide;
+  let rideIds;
+  if (roles[0] === 'passenger') {
+    inRide = await Passenger.findOne({ userId: id });
+    rideIds = await Ride.find({ passengerId: inRide._id }).select('rideId');
+    return rideIds;
+  } else if (roles[0] === 'driver') {
+    inRide = await Driver.findOne({ userId: id });
+    rideIds = await Ride.find({ driverId: inRide._id }).select('rideId');
+    return rideIds;
+  } else {
+    return false;
+  }
+};
+
 export const createComplain = async (payload) => {
   const ride = await Ride.findOne({ _id: payload.bookingId }).lean();
   if (!ride) return false;

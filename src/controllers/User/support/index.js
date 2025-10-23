@@ -1,6 +1,7 @@
 import { handleResponse } from '../../../utils/handleRespone.js';
 import {
   getComplainTypes,
+  getBookingIds,
   createComplainTicket,
   getAllComplainTickets,
   getComplainTicketById,
@@ -15,6 +16,17 @@ export const getComplainTypesController = async (req, res) =>
       handler: getComplainTypes,
       handlerParams: [req.user],
       successMessage: 'Complain types fetched successfully',
+    },
+    req,
+    res,
+  );
+
+export const getBookingIdsController = async (req, res) =>
+  handleResponse(
+    {
+      handler: getBookingIds,
+      handlerParams: [req.user],
+      successMessage: 'Booking Ids fetched successfully',
     },
     req,
     res,

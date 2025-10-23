@@ -4,6 +4,7 @@ import { authenticateUser } from '../../../middlewares/genericAuth.js';
 import { uploadMany } from '../../../middlewares/upload.js';
 import {
   getComplainTypesController,
+  getBookingIdsController,
   createComplainTicketController,
   getAllComplainTicketsController,
   getComplainTicketByIdController,
@@ -17,6 +18,13 @@ registerRoute({
   route: '/types',
   get_middlewares: [authenticateUser],
   get_method: getComplainTypesController,
+});
+
+registerRoute({
+  router,
+  route: '/ids',
+  get_middlewares: [authenticateUser],
+  get_method: getBookingIdsController,
 });
 
 registerRoute({
