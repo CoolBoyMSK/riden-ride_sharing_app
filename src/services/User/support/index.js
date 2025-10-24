@@ -12,6 +12,7 @@ import {
   uploadDriverImage,
 } from '../../../utils/s3Uploader.js';
 import { createAdminNotification } from '../../../dal/notification.js';
+import env from '../../../config/envConfig.js';
 
 export const getComplainTypes = async (user, resp) => {
   try {
