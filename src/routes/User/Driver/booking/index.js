@@ -6,6 +6,7 @@ import {
   addBookingReportController,
   downloadReceiptController,
   generateReceiptController,
+  updateLocationController,
 } from '../../../../controllers/User/Drivers/booking/index.js';
 
 const router = express.Router();
@@ -43,6 +44,13 @@ registerRoute({
   route: '/download',
   driver_auth_enable: true,
   get_method: downloadReceiptController,
+});
+
+registerRoute({
+  router,
+  route: '/location',
+  driver_auth_enable: true,
+  post_method: updateLocationController,
 });
 
 export default router;

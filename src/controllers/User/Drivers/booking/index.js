@@ -5,6 +5,7 @@ import {
   addBookingReport,
   downloadReceipt,
   generateReceipt,
+  updateLocation,
 } from '../../../../services/User/driver/booking/index.js';
 
 export const getAllBookingsController = (req, res) =>
@@ -62,6 +63,18 @@ export const downloadReceiptController = (req, res) =>
       validationFn: null,
       handlerParams: [req.query, res],
       successMessage: 'Receipt downloaded successfully',
+    },
+    req,
+    res,
+  );
+
+export const updateLocationController = (req, res) =>
+  handleResponse(
+    {
+      handler: updateLocation,
+      validationFn: null,
+      handlerParams: [req.user, req.body],
+      successMessage: 'Location updated successfully',
     },
     req,
     res,

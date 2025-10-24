@@ -5,8 +5,13 @@ import {
   findReceipt,
 } from '../../../../dal/booking.js';
 import { findDriverByUserId } from '../../../../dal/driver.js';
+import {
+  findActiveRideByDriver,
+  upsertDriverLocation,
+} from '../../../../dal/ride.js';
 import { generateRideReceipt } from '../../../../utils/receiptGenerator.js';
 import { createAdminNotification } from '../../../../dal/notification.js';
+import { emitToRide } from '../../../../realtime/socket.js';
 
 export const getAllBookings = async (user, { page, limit }, resp) => {
   try {
@@ -141,6 +146,36 @@ export const downloadReceipt = async ({ id }, res, resp) => {
     res.setHeader('Content-Length', success.pdfData.length);
 
     resp.data = success.pdfData;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'something went wrong';
+    return resp;
+  }
+};
+
+export const updateLocation = async (user, { coordinates }, resp) => {
+  try {
+    const location = { type: 'Point', coordinates };
+    const updatedLocation = await upsertDriverLocation(user._id, { location });
+    if (!updatedLocation) {
+      resp.error = true;
+      resp.error_message = 'Failed to update driver location';
+      return resp;
+    }
+
+    const ride = await findActiveRideByDriver(user._id);
+    if (ride) {
+      emitToRide(ride._id, 'ride:driver_update_location', {
+        success: true,
+        objectType: 'driver-update-location',
+        data: updatedLocation.location,
+        message: 'Location updated successfully',
+      });
+    }
+
+    resp.data = updatedLocation;
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);

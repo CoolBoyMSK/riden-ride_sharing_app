@@ -134,7 +134,14 @@ export const initSocket = (server) => {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Driver not eligible',
+              message: 'Forbidden: Driver is blocked',
+            });
+          } else if (driver.isSuspended) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Forbidden: Driver is suspended',
             });
           } else if (!driver.legalAgreemant) {
             return socket.emit('error', {
