@@ -56,7 +56,7 @@ export const editCMSPageController = (req, res) =>
       handlerParams: [
         req.user,
         req.params,
-        req.query,
+        // req.query,
         req.body,
         req.files?.gallery || [],
         req.files?.icon ? req.files.icon[0] : null,

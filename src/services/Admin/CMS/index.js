@@ -110,8 +110,7 @@ export const getCMSPageById = async (user, { id }, resp) => {
 export const editCMSPage = async (
   user,
   { id },
-  { type },
-  req,
+  { content, faqs, existingImages }, // added existingImages here
   files,
   file,
   resp,
@@ -119,60 +118,99 @@ export const editCMSPage = async (
   try {
     let cmsData = {};
 
+    // --- 1️⃣ Get original page ---
+    const originalPage = await findCMSPageById(id);
+    if (!originalPage) {
+      resp.error = true;
+      resp.error_message = 'Page not found';
+      return resp;
+    }
+
+    // --- 2️⃣ Handle icon upload ---
     if (file) {
       const iconUrl = await uploadAdminImage(user._id, file);
       cmsData.icon = iconUrl;
     }
 
-    if (type === 'faqs') {
-      let faqs = req.faqs || [];
-      if (!faqs.length) {
+    // --- 3️⃣ Handle FAQs or content ---
+    if (originalPage.type === 'faqs') {
+      let newFaqs = faqs || [];
+
+      if (faqs) {
+        try {
+          if (typeof faqs === 'string') {
+            newFaqs = JSON.parse(faqs); // convert string → array
+          }
+        } catch (err) {
+          resp.error = true;
+          resp.error_message = 'Invalid FAQs format, must be JSON array';
+          return resp;
+        }
+      }
+
+      if (!Array.isArray(newFaqs) || newFaqs.length === 0) {
         resp.error = true;
         resp.error_message = 'FAQs cannot be empty';
         return resp;
       }
 
-      if (req.faqs) {
-        try {
-          if (typeof req.faqs === 'string') {
-            faqs = JSON.parse(req.faqs); // convert string → array
-          }
-        } catch (err) {
-          resp.error = true;
-          resp.error_message = 'Invalid faqs format, must be JSON array';
-          return resp;
-        }
-      }
-
-      cmsData.faqs = faqs;
+      cmsData.faqs = newFaqs;
     } else {
-      const content = req.content?.trim();
-      if (!content) {
+      const newContent = content?.trim();
+      if (!newContent) {
         resp.error = true;
         resp.error_message = 'Content cannot be empty';
         return resp;
       }
-      cmsData.content = content;
+      cmsData.content = newContent;
     }
 
-    if (files.length > 0) {
-      const uploadFiles = files || [];
-      const images = await prepareBlocks(uploadFiles, user._id);
-      cmsData.images = images;
+    // --- 4️⃣ Handle images (keep / add / remove) ---
+    let finalImages = [];
+
+    // Step 1: Start with existing images (if sent)
+    if (existingImages) {
+      try {
+        const parsedExisting =
+          typeof existingImages === 'string'
+            ? JSON.parse(existingImages)
+            : existingImages;
+
+        if (Array.isArray(parsedExisting)) {
+          finalImages = parsedExisting.filter(Boolean);
+        } else {
+          resp.error = true;
+          resp.error_message = 'existingImages must be an array';
+          return resp;
+        }
+      } catch (err) {
+        resp.error = true;
+        resp.error_message = 'Invalid existingImages format';
+        return resp;
+      }
     }
 
-    // update page
-    const page = await findCMSPageByIdAndUpdate(id, cmsData);
-    if (!page) {
+    // Step 2: Add newly uploaded images (if any)
+    if (files && files.length > 0) {
+      const uploadedImages = await prepareBlocks(files, user._id);
+      finalImages = [...finalImages, ...uploadedImages];
+    }
+
+    cmsData.images = finalImages;
+
+    // --- 5️⃣ Update CMS Page ---
+    const updatedPage = await findCMSPageByIdAndUpdate(id, cmsData);
+    if (!updatedPage) {
       resp.error = true;
       resp.error_message = 'Failed to update CMS page';
       return resp;
     }
 
-    resp.data = page;
+    // --- ✅ Success ---
+    resp.data = updatedPage;
     return resp;
   } catch (error) {
-    console.error('API ERROR:', error);
+    console.error('API ERROR (editCMSPage):', error);
     resp.error = true;
     resp.error_message = error.message || 'Something went wrong';
     return resp;
