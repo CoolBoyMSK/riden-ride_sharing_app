@@ -119,14 +119,10 @@ export const editCMSPage = async (
   try {
     let cmsData = {};
 
-    if (!file) {
-      resp.error = true;
-      resp.error_message = 'No file provided';
-      return resp;
+    if (file) {
+      const iconUrl = await uploadAdminImage(user._id, file);
+      cmsData.icon = iconUrl;
     }
-
-    const iconUrl = await uploadAdminImage(user._id, file);
-    cmsData.icon = iconUrl;
 
     if (type === 'faqs') {
       let faqs = req.faqs || [];
@@ -159,9 +155,11 @@ export const editCMSPage = async (
       cmsData.content = content;
     }
 
-    const uploadFiles = files || [];
-    const images = await prepareBlocks(uploadFiles, user._id);
-    cmsData.images = images;
+    if (files.length > 0) {
+      const uploadFiles = files || [];
+      const images = await prepareBlocks(uploadFiles, user._id);
+      cmsData.images = images;
+    }
 
     // update page
     const page = await findCMSPageByIdAndUpdate(id, cmsData);

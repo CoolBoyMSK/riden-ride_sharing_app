@@ -194,6 +194,13 @@ export const loginUser = async ({ email, phoneNumber, password }, resp) => {
             user.name,
             user.phoneNumber.slice(-4),
           );
+
+          resp.data = {
+            phoneOtp: true,
+            message: `OTP has been sent to ${user.phoneNumber}`,
+            phoneNumber: user.phoneNumber,
+          };
+          return resp;
         }
       } else {
         resp.error = true;
