@@ -229,13 +229,13 @@ export const initSocket = (server) => {
 
           const stats = await findDrivingHours(driver._id);
           if (stats.remainingHours < 3 && stats.remainingHours > 0) {
-            emitToUser(driver.userId, 'driver:remaining_driving_hours', {
+            socket.emit(driver.userId, 'driver:remaining_driving_hours', {
               success: true,
               objectType: 'remaining-driving-hours',
               data: stats,
               message: `Only ${stats.remainingHours} driving hours left.`,
             });
-          } else if (stats.remainingHours >= 0) {
+          } else if (stats.remainingHours <= 0) {
             return emitToUser(driver.userId, 'driver:remaining_driving_hours', {
               success: true,
               objectType: 'remaining-driving-hours',
@@ -965,6 +965,16 @@ export const initSocket = (server) => {
           mailTo.userId?.name,
         );
 
+        const stats = await findDrivingHours(driver._id);
+        if (stats.remainingHours < 3 && stats.remainingHours > 0) {
+          socket.emit(driver.userId, 'driver:remaining_driving_hours', {
+            success: true,
+            objectType: 'remaining-driving-hours',
+            data: stats,
+            message: `Only ${stats.remainingHours} driving hours left.`,
+          });
+        }
+
         // Notify passenger of ride cancellation
         socket.join(`ride:${updatedRide._id}`);
         io.to(`ride:${updatedRide._id}`).emit('ride:driver_cancel_ride', {
@@ -1396,6 +1406,16 @@ export const initSocket = (server) => {
               objectType,
               code: 'DRIVER_UPDATE_FAILED',
               message: 'Failed to update driver History',
+            });
+          }
+
+          const stats = await findDrivingHours(driver._id);
+          if (stats.remainingHours < 3 && stats.remainingHours > 0) {
+            socket.emit(driver.userId, 'driver:remaining_driving_hours', {
+              success: true,
+              objectType: 'remaining-driving-hours',
+              data: stats,
+              message: `Only ${stats.remainingHours} driving hours left.`,
             });
           }
 

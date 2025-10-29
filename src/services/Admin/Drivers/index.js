@@ -14,6 +14,7 @@ import {
   updateWayBillDocuments,
   findWayBill,
   updateDriverByUserId,
+  findDriverByDriverId,
 } from '../../../dal/driver.js';
 import { getAllExternalAccounts } from '../../../dal/stripe.js';
 import { findUserById } from '../../../dal/user/index.js';
@@ -324,6 +325,58 @@ export const approveRequestedDriver = async ({ id }, resp) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
+    const driver = await findDriverByDriverId(id);
+    if (!driver) {
+      await session.abortTransaction();
+      resp.error = true;
+      resp.error_message = 'Driver not found';
+      return resp;
+    }
+
+    const documents = driver.documents;
+    const isDocsApproved =
+      documents.proofOfWork.status === 'approved' &&
+      documents.profilePicture.status === 'approved' &&
+      documents.driversLicense.status === 'approved' &&
+      documents.commercialDrivingRecord.status === 'approved' &&
+      documents.vehicleOwnerCertificateAndInsurance.status === 'approved' &&
+      documents.vehicleInspection.status === 'approved';
+
+    if (!isDocsApproved) {
+      await session.abortTransaction();
+      resp.error = true;
+      resp.error_message = 'Documents not approved';
+      return resp;
+    }
+
+    const wayBill = driver.wayBill;
+    const isWayBillIssued =
+      wayBill.certificateOfInsurance.status === 'issued' &&
+      wayBill.recordCheckCertificate.status === 'issued';
+
+    if (!isWayBillIssued) {
+      await session.abortTransaction();
+      resp.error = true;
+      resp.error_message = 'Way bill not issued';
+      return resp;
+    }
+
+    const isVehicleAdded =
+      driver.vehicle?.trim() &&
+      driver.vehicle?.type.trim() &&
+      driver.vehicle?.model.trim() &&
+      driver.vehicle?.plateNumber.trim() &&
+      driver.vehicle?.color.trim();
+
+    if (!isVehicleAdded) {
+      await session.abortTransaction();
+      resp.error = true;
+      resp.error_message = 'Vehicle not added';
+      return resp;
+    }
+
+    // const isPaymentMethod
+
     const success = await updateDriverById(
       id,
       { isApproved: true },
@@ -331,26 +384,24 @@ export const approveRequestedDriver = async ({ id }, resp) => {
     );
     if (!success) {
       await session.abortTransaction();
-      session.endSession();
-
       resp.error = true;
       resp.error_message = 'failed to approve driver';
       return resp;
     }
 
     await session.commitTransaction();
-    session.endSession();
 
     resp.data = success;
     return resp;
   } catch (error) {
     await session.abortTransaction();
-    session.endSession();
 
     console.error(`API ERROR: ${error}`);
     resp.error = true;
     resp.error_message = error.message || 'something went wrong';
     return resp;
+  } finally {
+    session.endSession();
   }
 };
 

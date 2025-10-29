@@ -31,7 +31,6 @@ import { createAdminNotification } from '../../dal/notification.js';
 
 export const getUserProfile = async (user, resp) => {
   const profile = await findUserById(user.id);
-  console.log(profile);
   if (!profile) {
     resp.error = true;
     resp.error_message = 'User not found';
