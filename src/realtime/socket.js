@@ -707,10 +707,17 @@ export const initSocket = (server) => {
           isDestinationRide = true;
         }
 
-        const driverDistance = haversineDistance(
-          ride.pickupLocation?.coordinates,
-          availability.location?.coordinates,
-        );
+        const rideCoords = {
+          longitude: ride.pickupLocation?.coordinates[0],
+          latitude: ride.pickupLocation?.coordinates[1],
+        };
+
+        const driverCoords = {
+          longitude: availability.location?.coordinates[0],
+          latitude: availability.location?.coordinates[1],
+        };
+
+        const driverDistance = haversineDistance(rideCoords, driverCoords);
         console.log(driverDistance);
         if (!driverDistance) {
           return socket.emit('error', {
