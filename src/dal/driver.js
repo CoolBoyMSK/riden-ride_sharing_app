@@ -6,9 +6,14 @@ import DestinationModel from '../models/Destination.js';
 import RideModel from '../models/Ride.js';
 import DriverWallet from '../models/DriverWallet.js';
 import DriverLocation from '../models/DriverLocation.js';
+import FareManagement from '../models/fareManagement.js';
 import { DOCUMENT_TYPES } from '../enums/driver.js';
 import { findUserById } from './user/index.js';
 import { sendDocumentEditRequestApprovalEmail } from '../templates/emails/user/index.js';
+import { emitToUser, emitToRide } from '../realtime/socket.js';
+import env from '../config/envConfig.js';
+import Queue from 'bull';
+import Redis from 'ioredis';
 
 export const findDriverByUserId = (userId, { session } = {}) => {
   let query = DriverModel.findOne({ userId });
@@ -27,6 +32,19 @@ export const createDriverProfile = (userId, uniqueId) =>
     uniqueId,
     vehicle: { make: '', model: '', plateNumber: '', color: '' },
   }).save();
+
+export const createDriverLocation = async (driverId) =>
+  DriverLocation.create({
+    driverId,
+    location: { type: 'Point', coordinates: [0, 0] },
+  });
+
+export const toggleDriverLocation = async (driverId, status, isAvailable) =>
+  DriverLocation.findOneAndUpdate(
+    { driverId },
+    { status, isAvailable },
+    { new: true, upsert: true },
+  );
 
 export const updateDriverByUserId = async (id, update, options = {}) => {
   const objectId = mongoose.Types.ObjectId.isValid(id)
@@ -775,10 +793,14 @@ export const findCompletedRide = async (rideId) => {
   return ride;
 };
 
+// Ride Search Logic
+const redis = new Redis(env.REDIS_URL);
+const driverSearchQueue = new Queue('driver search', env.REDIS_URL);
+
 export const findNearbyDriverUserIds = async (
   carType,
   location,
-  radius = 10000,
+  radius = 5000,
   { excludeDriverIds = [], limit = 50, session = null } = {},
 ) => {
   try {
@@ -798,9 +820,6 @@ export const findNearbyDriverUserIds = async (
             status: 'online',
             isAvailable: true,
             currentRideId: { $in: [null, undefined, ''] }, // ✅ No active ride
-            ...(excludeDriverIds.length > 0 && {
-              driverId: { $nin: excludeDriverIds },
-            }),
           },
         },
       },
@@ -826,6 +845,10 @@ export const findNearbyDriverUserIds = async (
           'driver.isActive': true,
           'driver.backgroundCheckStatus': 'approved',
           'driver.status': 'online',
+          // ✅ EXCLUDE BY USER ID HERE (not driverId)
+          ...(excludeDriverIds.length > 0 && {
+            'driver.userId': { $nin: excludeDriverIds },
+          }),
         },
       },
       // Stage 6: Lookup user to ensure user exists and get user details if needed
@@ -849,7 +872,6 @@ export const findNearbyDriverUserIds = async (
         $project: {
           userId: '$driver.userId',
           distance: 1,
-          driverName: '$driver.userId.name', // Optional: if you need driver info
         },
       },
       // Stage 9: Sort by distance (closest first)
@@ -864,10 +886,834 @@ export const findNearbyDriverUserIds = async (
       session || null,
     );
 
-    const userIds = result.map((item) => item.userId);
+    const userIds = result.map((item) => item.userId.toString()); // Ensure string format
     return userIds;
   } catch (error) {
     console.error('Error finding nearby driver user IDs:', error);
     throw error;
+  }
+};
+
+// Main function to handle progressive driver search
+export const startProgressiveDriverSearch = async (ride) => {
+  try {
+    console.log(`Starting progressive driver search for ride ${ride.rideId}`);
+
+    // Store ride in Redis for quick access
+    await redis.setex(`ride:${ride._id}`, 180, JSON.stringify(ride)); // 3 minutes TTL
+
+    // Add to search queue with delay options
+    await driverSearchQueue.add(
+      'search-drivers',
+      { rideId: ride._id, phase: 1 },
+      {
+        delay: 0, // Start immediately
+        jobId: `ride-search-${ride._id}`, // Unique job ID
+        removeOnComplete: true,
+        attempts: 1,
+      },
+    );
+
+    // Set expiration for auto-cancellation
+    await driverSearchQueue.add(
+      'cancel-ride',
+      { rideId: ride._id },
+      {
+        delay: 3 * 60 * 1000, // 3 minutes total
+        jobId: `ride-cancel-${ride._id}`,
+        removeOnComplete: true,
+      },
+    );
+  } catch (error) {
+    console.error('Error starting progressive driver search:', error);
+  }
+};
+
+// Process driver search jobs
+driverSearchQueue.process('search-drivers', 10, async (job) => {
+  // 10 concurrent jobs
+  const { rideId, phase } = job.data;
+
+  try {
+    const rideData = await redis.get(`ride:${rideId}`);
+    if (!rideData) {
+      console.log(`Ride ${rideId} not found or expired`);
+      return;
+    }
+
+    const ride = JSON.parse(rideData);
+    const currentRide = await getRideById(rideId);
+
+    // Check if ride is still active
+    if (!currentRide || currentRide.status !== 'REQUESTED') {
+      console.log(`Ride ${rideId} is no longer active`);
+      return;
+    }
+
+    if (phase === 1) {
+      await handlePhase1Search(rideId, currentRide);
+    } else if (phase === 2) {
+      await handlePhase2Search(rideId, currentRide);
+    }
+  } catch (error) {
+    console.error(`Error processing driver search for ride ${rideId}:`, error);
+  }
+});
+
+// Process ride cancellation
+driverSearchQueue.process('cancel-ride', 5, async (job) => {
+  const { rideId } = job.data;
+
+  try {
+    const currentRide = await getRideById(rideId);
+    if (currentRide && currentRide.status === 'REQUESTED') {
+      console.log(`Auto-cancelling ride ${rideId} after 3 minutes`);
+      await cancelExpiredRide(rideId);
+
+      // Cleanup Redis
+      await redis.del(`ride:${rideId}`);
+    }
+  } catch (error) {
+    console.error(`Error cancelling ride ${rideId}:`, error);
+  }
+});
+
+// Phase 1: 0-5km search for 2 minutes
+const handlePhase1Search = async (rideId, ride) => {
+  // Search for drivers in 0-5km
+  await notifyDriversInRadius(ride, 5, 0);
+
+  // Check if we should continue to next phase
+  const searchCount = await redis.incr(`ride:${rideId}:phase1_searches`);
+
+  if (searchCount >= 12) {
+    // 2 minutes / 10 seconds = 12 searches
+    // Schedule phase 2
+    await driverSearchQueue.add(
+      'search-drivers',
+      { rideId, phase: 2 },
+      { delay: 0, removeOnComplete: true },
+    );
+
+    // Cleanup phase 1 counter
+    await redis.del(`ride:${rideId}:phase1_searches`);
+  } else {
+    // Schedule next phase 1 search in 10 seconds
+    await driverSearchQueue.add(
+      'search-drivers',
+      { rideId, phase: 1 },
+      {
+        delay: 10 * 1000, // 10 seconds
+        removeOnComplete: true,
+      },
+    );
+  }
+};
+
+// Phase 2: 6-10km search for 1 minute
+const handlePhase2Search = async (rideId, ride) => {
+  // Update search radius
+  await updateRideSearchRadius(rideId, 10);
+
+  // Search for drivers in 6-10km
+  await notifyDriversInRadius(ride, 10, 6);
+
+  // Check if we should continue searching
+  const searchCount = await redis.incr(`ride:${rideId}:phase2_searches`);
+
+  if (searchCount < 6) {
+    // 1 minute / 10 seconds = 6 searches
+    // Schedule next phase 2 search in 10 seconds
+    await driverSearchQueue.add(
+      'search-drivers',
+      { rideId, phase: 2 },
+      {
+        delay: 10 * 1000,
+        removeOnComplete: true,
+      },
+    );
+  } else {
+    // Phase 2 completed, cleanup
+    await redis.del(`ride:${rideId}:phase2_searches`);
+  }
+};
+
+// Optimized notifyDriversInRadius function
+export const notifyDriversInRadius = async (ride, maxRadius, minRadius = 0) => {
+  try {
+    const maxRadiusMeters = maxRadius * 1000;
+    const minRadiusMeters = minRadius * 1000;
+
+    // Use Redis cache to avoid duplicate notifications
+    const cacheKey = `ride:${ride._id}:notified_drivers`;
+
+    // Get all currently notified drivers from Redis
+    const notifiedDrivers = await redis.smembers(cacheKey);
+    let availableDrivers;
+
+    if (minRadius === 0) {
+      // 0-5km radius - exclude previously notified drivers
+      availableDrivers = await findNearbyDriverUserIds(
+        ride.carType,
+        ride.pickupLocation.coordinates,
+        maxRadiusMeters,
+        { excludeDriverIds: notifiedDrivers },
+      );
+    } else {
+      // 6-10km radius - exclude previously notified drivers
+      availableDrivers = await findNearbyDriverUserIds(
+        ride.carType,
+        ride.pickupLocation.coordinates,
+        maxRadiusMeters,
+        { excludeDriverIds: notifiedDrivers },
+      );
+
+      // Filter by distance range
+      if (availableDrivers.length > 0) {
+        availableDrivers = await filterDriversByDistanceRange(
+          ride.pickupLocation.coordinates,
+          availableDrivers,
+          minRadiusMeters,
+          maxRadiusMeters,
+        );
+      }
+    }
+
+    if (!availableDrivers || availableDrivers.length === 0) {
+      return false;
+    }
+
+    // Double-check filtering (should be empty if findNearbyDriverUserIds worked correctly)
+    const newDrivers = availableDrivers.filter(
+      (driverId) => !notifiedDrivers.includes(driverId),
+    );
+
+    if (newDrivers.length === 0) {
+      return false;
+    }
+
+    const rideNotificationData = {
+      success: true,
+      objectType: 'new-ride',
+      data: { ride, searchRadius: maxRadius },
+      message: `New ride request from ${ride.pickupLocation.address} to ${ride.dropoffLocation.address} — tap to respond`,
+    };
+
+    // Notify ONLY new drivers
+    newDrivers.forEach((driverId) => {
+      emitToUser(driverId, 'ride:new_request', rideNotificationData);
+    });
+
+    // Store notified drivers in Redis
+    if (newDrivers.length > 0) {
+      await redis.sadd(cacheKey, newDrivers);
+      await redis.expire(cacheKey, 180); // 3 minutes TTL
+    }
+
+    return true;
+  } catch (error) {
+    console.error(
+      `Error notifying drivers in radius ${minRadius}-${maxRadius}km:`,
+      error,
+    );
+    return false;
+  }
+};
+
+// Cleanup when ride is accepted or cancelled
+export const stopDriverSearch = async (rideId) => {
+  try {
+    // Remove from Redis
+    await redis.del(`ride:${rideId}`);
+    await redis.del(`ride:${rideId}:phase1_searches`);
+    await redis.del(`ride:${rideId}:phase2_searches`);
+    await redis.del(`ride:${rideId}:notified_drivers`);
+
+    // Remove pending jobs from queue
+    const jobs = await driverSearchQueue.getJobs(['delayed', 'waiting']);
+    for (const job of jobs) {
+      if (job.data.rideId === rideId) {
+        await job.remove();
+      }
+    }
+
+    console.log(`Stopped driver search for ride ${rideId}`);
+  } catch (error) {
+    console.error(`Error stopping driver search for ride ${rideId}:`, error);
+  }
+};
+
+// Call this when ride is accepted or manually cancelled
+export const onRideAccepted = async (rideId) => {
+  await stopDriverSearch(rideId);
+};
+
+export const onRideCancelled = async (rideId) => {
+  await stopDriverSearch(rideId);
+};
+
+const filterDriversByDistanceRange = async (
+  pickupCoordinates,
+  driverUserIds,
+  minDistance,
+  maxDistance,
+) => {
+  try {
+    if (!driverUserIds || driverUserIds.length === 0) {
+      return [];
+    }
+
+    // Get driver locations with distances using aggregation for better performance
+    const driverLocations = await DriverLocation.aggregate([
+      {
+        $match: {
+          userId: { $in: driverUserIds },
+        },
+      },
+      {
+        $lookup: {
+          from: 'drivers',
+          localField: 'driverId',
+          foreignField: '_id',
+          as: 'driver',
+        },
+      },
+      {
+        $unwind: '$driver',
+      },
+      {
+        $project: {
+          userId: 1,
+          location: 1,
+          distance: {
+            $sqrt: {
+              $add: [
+                {
+                  $pow: [
+                    {
+                      $subtract: [
+                        '$location.coordinates[0]',
+                        pickupCoordinates[0],
+                      ],
+                    },
+                    2,
+                  ],
+                },
+                {
+                  $pow: [
+                    {
+                      $subtract: [
+                        '$location.coordinates[1]',
+                        pickupCoordinates[1],
+                      ],
+                    },
+                    2,
+                  ],
+                },
+              ],
+            },
+          },
+        },
+      },
+      {
+        $match: {
+          distance: { $gte: minDistance / 100000, $lte: maxDistance / 100000 },
+          // Note: Adjust the distance calculation based on your coordinate system
+          // This is a simplified Euclidean distance for demonstration
+        },
+      },
+    ]);
+
+    return driverLocations.map((driverLoc) => driverLoc.userId);
+  } catch (error) {
+    console.error('Error filtering drivers by distance range:', error);
+    return [];
+  }
+};
+
+// Helper function to cancel expired ride
+const cancelExpiredRide = async (rideId) => {
+  try {
+    const cancelledRide = await updateRideStatus(
+      rideId,
+      'CANCELLED_BY_SYSTEM',
+      'No drivers available',
+      'system',
+    );
+
+    if (cancelledRide) {
+      // Notify passenger about cancellation
+      emitToUser(cancelledRide.passengerId?.userId, 'ride:system_cancel_ride', {
+        success: false,
+        objectType: 'system-cancel-ride',
+        data: cancelledRide,
+        message: 'Ride cancelled. No drivers available in your area.',
+      });
+
+      console.log(
+        `Ride ${rideId} automatically cancelled due to no drivers available`,
+      );
+    }
+  } catch (error) {
+    console.error('Error cancelling expired ride:', error);
+  }
+};
+
+// 1. Update ride search radius
+const updateRideSearchRadius = async (rideId, searchRadius) => {
+  return await RideModel.findByIdAndUpdate(
+    rideId,
+    {
+      searchRadius,
+      $push: {
+        searchHistory: {
+          radius: searchRadius,
+          timestamp: new Date(),
+        },
+      },
+    },
+    { new: true },
+  );
+};
+
+// 2. Get ride by ID
+const getRideById = async (rideId) => {
+  return await RideModel.findById(rideId);
+};
+
+// 3. Update ride status
+const updateRideStatus = async (
+  rideId,
+  status,
+  cancellationReason = null,
+  cancelledBy,
+) => {
+  const updateData = { status, cancelledBy, cancelledAt: new Date() };
+  if (cancellationReason) {
+    updateData.cancellationReason = cancellationReason;
+  }
+  return await RideModel.findByIdAndUpdate(rideId, updateData, {
+    new: true,
+  }).populate('passengerId');
+};
+
+export const checkSurgePricing = async (
+  pickupCoordinates,
+  carType,
+  includeCurrentRide = false,
+) => {
+  try {
+    const radiusMeters = 5 * 1000; // 5km in meters
+
+    // Create a circular boundary for geoWithin query
+    const center = {
+      type: 'Point',
+      coordinates: pickupCoordinates,
+    };
+
+    // Get active rides in 5km radius using $geoWithin
+    const activeRidesCount = await RideModel.countDocuments({
+      'pickupLocation.coordinates': {
+        $geoWithin: {
+          $centerSphere: [pickupCoordinates, radiusMeters / 6378100], // Convert meters to radians (Earth radius ~6378100m)
+        },
+      },
+      status: 'REQUESTED',
+      createdAt: {
+        $gte: new Date(Date.now() - 10 * 60 * 1000), // Last 10 minutes
+      },
+    });
+
+    // Calculate effective ride count (include current ride if specified)
+    const effectiveRideCount = includeCurrentRide
+      ? activeRidesCount + 1
+      : activeRidesCount;
+
+    // Get available drivers in 5km radius using $geoWithin
+    const availableDriversCount = await DriverLocation.countDocuments({
+      'location.coordinates': {
+        $geoWithin: {
+          $centerSphere: [pickupCoordinates, radiusMeters / 6378100], // Convert meters to radians
+        },
+      },
+      status: 'online',
+      isAvailable: true,
+      currentRideId: { $in: [null, undefined] },
+    });
+
+    console.log(
+      `📊 Surge Analysis: ${effectiveRideCount} rides (${activeRidesCount} existing + ${includeCurrentRide ? 1 : 0} current), ${availableDriversCount} drivers in 5km radius`,
+    );
+
+    // Calculate ride-to-driver ratio
+    const rideToDriverRatio =
+      availableDriversCount > 0
+        ? effectiveRideCount / availableDriversCount
+        : Infinity;
+
+    console.log(
+      `📐 Calculated ratio: ${rideToDriverRatio.toFixed(2)}:1 (${effectiveRideCount}/${availableDriversCount})`,
+    );
+
+    // Get surge configuration from FareManagement database
+    const fareConfig = await FareManagement.findOne({ carType });
+    if (!fareConfig) {
+      console.log(`❌ No fare configuration found for car type: ${carType}`);
+      return getNoSurgeResponse(
+        effectiveRideCount,
+        availableDriversCount,
+        rideToDriverRatio,
+        'No fare configuration found',
+        includeCurrentRide,
+      );
+    }
+
+    // Get current day for fare calculation
+    const now = new Date();
+    const currentDay = now.toLocaleString('en-US', { weekday: 'long' });
+
+    // Find today's fare configuration
+    const todayFare = fareConfig.dailyFares.find(
+      (fare) => fare.day === currentDay,
+    );
+    if (!todayFare) {
+      console.log(`❌ No fare configuration found for day: ${currentDay}`);
+      return getNoSurgeResponse(
+        effectiveRideCount,
+        availableDriversCount,
+        rideToDriverRatio,
+        'No fare configuration for today',
+        includeCurrentRide,
+      );
+    }
+
+    // Check if surge configuration exists
+    if (!todayFare.surge || todayFare.surge.length === 0) {
+      console.log(
+        `❌ No surge configuration found for ${carType} on ${currentDay}`,
+      );
+      return getNoSurgeResponse(
+        effectiveRidesCount,
+        availableDriversCount,
+        rideToDriverRatio,
+        'No surge configuration available',
+        includeCurrentRide,
+      );
+    }
+
+    console.log(
+      `⚙️ Loaded ${todayFare.surge.length} surge levels from database:`,
+    );
+    todayFare.surge.forEach((level) => {
+      console.log(
+        `   - Level ${level.level}: ${level.ratio} = ${level.multiplier}x`,
+      );
+    });
+
+    // Apply surge logic based on database configuration
+    const surgeResult = calculateSurgeFromDB(
+      effectiveRideCount,
+      availableDriversCount,
+      rideToDriverRatio,
+      todayFare.surge,
+    );
+
+    // Prepare response
+    const response = {
+      isSurge: surgeResult.isSurge,
+      surgeMultiplier: surgeResult.surgeMultiplier,
+      surgeLevel: surgeResult.surgeLevel,
+      message: surgeResult.message,
+      rideCount: effectiveRideCount,
+      existingRideCount: activeRidesCount,
+      driverCount: availableDriversCount,
+      rideToDriverRatio: parseFloat(rideToDriverRatio.toFixed(2)),
+      requiredRidesForNextLevel: surgeResult.requiredRidesForNextLevel,
+      includesCurrentRide: includeCurrentRide,
+      surgeConfig: {
+        carType,
+        day: currentDay,
+        configuredLevels: todayFare.surge.length,
+      },
+    };
+
+    return response;
+  } catch (error) {
+    console.error('Error checking surge pricing:', error);
+    return getNoSurgeResponse(
+      0,
+      0,
+      0,
+      'Error checking surge pricing',
+      includeCurrentRide,
+    );
+  }
+};
+
+// Helper function to calculate surge from database configuration
+const calculateSurgeFromDB = (
+  activeRidesCount,
+  availableDriversCount,
+  rideToDriverRatio,
+  surgeConfig,
+) => {
+  // Sort surge levels by ratio (ascending order) - lowest ratio first
+  const sortedLevels = surgeConfig
+    .filter((level) => level.level && level.ratio && level.multiplier)
+    .sort((a, b) => {
+      const ratioA = parseFloat(a.ratio.split(':')[0]);
+      const ratioB = parseFloat(b.ratio.split(':')[0]);
+      return ratioA - ratioB;
+    });
+
+  if (sortedLevels.length === 0) {
+    return {
+      isSurge: false,
+      surgeMultiplier: 1.0,
+      surgeLevel: 0,
+      message: `No surge levels configured. ${activeRidesCount} rides, ${availableDriversCount} drivers available`,
+      requiredRidesForNextLevel: null,
+    };
+  }
+
+  let highestQualifyingLevel = null;
+
+  console.log(`🔍 Checking surge levels from lowest to highest:`);
+
+  // Find all qualifying levels
+  for (let i = 0; i < sortedLevels.length; i++) {
+    const level = sortedLevels[i];
+    const requiredRatio = parseFloat(level.ratio.split(':')[0]);
+
+    console.log(
+      `   Level ${level.level}: requires ${requiredRatio}:1 ratio, current ratio: ${rideToDriverRatio.toFixed(2)}:1`,
+    );
+
+    if (rideToDriverRatio >= requiredRatio) {
+      // This level qualifies
+      console.log(
+        `   ✅ Level ${level.level} qualifies (${level.multiplier}x)`,
+      );
+
+      // Keep track of the highest qualifying level
+      if (
+        !highestQualifyingLevel ||
+        level.level > highestQualifyingLevel.level
+      ) {
+        highestQualifyingLevel = level;
+      }
+    } else {
+      console.log(`   ❌ Level ${level.level} does not qualify`);
+    }
+  }
+
+  // Apply the highest qualifying level found
+  const isSurge = highestQualifyingLevel !== null;
+  const surgeMultiplier = isSurge ? highestQualifyingLevel.multiplier : 1.0;
+  const surgeLevel = isSurge ? highestQualifyingLevel.level : 0;
+
+  // Prepare message and next level requirements
+  let message;
+  if (isSurge) {
+    message = `🚨 SURGE LEVEL ${surgeLevel} (${highestQualifyingLevel.ratio})! ${activeRidesCount} rides waiting, ${availableDriversCount} drivers available (${rideToDriverRatio.toFixed(1)}:1 ratio)`;
+  } else {
+    message = `Normal pricing: ${activeRidesCount} rides, ${availableDriversCount} drivers available (${rideToDriverRatio.toFixed(1)}:1 ratio)`;
+  }
+
+  console.log(
+    `🎯 Final applied surge level: ${surgeLevel}, multiplier: ${surgeMultiplier}x`,
+  );
+
+  const requiredRidesForNextLevel = getNextSurgeLevelRequirementFromDB(
+    surgeLevel,
+    activeRidesCount,
+    availableDriversCount,
+    sortedLevels,
+  );
+
+  return {
+    isSurge,
+    surgeMultiplier,
+    surgeLevel,
+    message,
+    requiredRidesForNextLevel,
+  };
+};
+
+// Helper function to get next surge level requirements from DB config
+const getNextSurgeLevelRequirementFromDB = (
+  currentLevel,
+  currentRides,
+  currentDrivers,
+  surgeLevels,
+) => {
+  if (currentDrivers === 0) {
+    return {
+      nextLevel: null,
+      message: 'No drivers available for surge calculation',
+    };
+  }
+
+  // Find the next surge level
+  const nextLevel = surgeLevels.find((level) => level.level > currentLevel);
+
+  if (!nextLevel) {
+    return {
+      nextLevel: null,
+      message: 'Maximum surge level reached',
+    };
+  }
+
+  const requiredRatio = parseFloat(nextLevel.ratio.split(':')[0]);
+  const requiredRides = Math.ceil(currentDrivers * requiredRatio);
+  const additionalRidesNeeded = Math.max(0, requiredRides - currentRides);
+
+  return {
+    nextLevel: nextLevel.level,
+    requiredRides: requiredRides,
+    additionalRidesNeeded: additionalRidesNeeded,
+    ratio: nextLevel.ratio,
+    multiplier: nextLevel.multiplier,
+    message: `Need ${additionalRidesNeeded} more rides for Surge Level ${nextLevel.level} (${nextLevel.ratio})`,
+  };
+};
+
+// Helper function for no surge response
+const getNoSurgeResponse = (rideCount, driverCount, ratio, reason) => {
+  return {
+    isSurge: false,
+    surgeMultiplier: 1.0,
+    surgeLevel: 0,
+    message: `Normal pricing: ${rideCount} rides, ${driverCount} drivers available - ${reason}`,
+    rideCount,
+    driverCount,
+    rideToDriverRatio: parseFloat(ratio.toFixed(2)),
+    requiredRidesForNextLevel: null,
+  };
+};
+
+// Function to update existing rides with new surge pricing
+export const updateExistingRidesSurgePricing = async (
+  pickupCoordinates,
+  carType,
+  surgeMultiplier,
+  surgeLevel,
+) => {
+  try {
+    const radiusMeters = 5 * 1000; // 5km in meters
+
+    // Find all requested rides in the area that need surge update using $geoWithin
+    const existingRides = await RideModel.find({
+      'pickupLocation.coordinates': {
+        $geoWithin: {
+          $centerSphere: [pickupCoordinates, radiusMeters / 6378100], // Convert meters to radians
+        },
+      },
+      status: 'REQUESTED',
+      carType: carType,
+    }).populate('passengerId');
+
+    console.log(existingRides);
+
+    if (existingRides.length === 0) {
+      console.log(
+        `No existing rides need surge update for level ${surgeLevel}`,
+      );
+      return;
+    }
+
+    console.log(
+      `🔄 Updating surge pricing for ${existingRides.length} existing rides to level ${surgeLevel}`,
+    );
+
+    // Update each ride with new surge pricing
+    for (const ride of existingRides) {
+      try {
+        // Recalculate fare with new surge multiplier
+        const recalculatedFare = await recalculateRideFareWithSurge(
+          ride,
+          surgeMultiplier,
+        );
+
+        // Update the ride
+        await RideModel.findByIdAndUpdate(ride._id, {
+          surgeMultiplier: surgeMultiplier,
+          isSurgeApplied: true,
+          surgeLevel: surgeLevel,
+          estimatedFare: recalculatedFare.newFare,
+          $set: {
+            'fareBreakdown.surgeMultiplier': surgeMultiplier,
+            'fareBreakdown.surgeAmount': recalculatedFare.surgeAmount,
+            'fareBreakdown.finalAmount': recalculatedFare.newFare,
+          },
+          $push: {
+            fareUpdates: {
+              previousFare: ride.estimatedFare,
+              newFare: recalculatedFare.newFare,
+              surgeMultiplier: surgeMultiplier,
+              surgeLevel: surgeLevel,
+              updatedAt: new Date(),
+              reason: 'Surge level increased',
+            },
+          },
+        });
+
+        console.log(ride);
+
+        // Notify passenger about fare update
+        emitToUser(ride.passengerId?.userId, 'ride:surge_applied', {
+          success: true,
+          objectType: 'fare-update',
+          data: {
+            rideId: ride._id,
+            previousFare: ride.estimatedFare,
+            newFare: recalculatedFare.newFare,
+            surgeMultiplier: surgeMultiplier,
+            surgeLevel: surgeLevel,
+            message: `Fare updated due to increased demand in your area`,
+          },
+          message:
+            'Ride fare has been updated due to increased demand in your area',
+        });
+      } catch (rideError) {
+        console.error(`Error updating surge for ride ${ride._id}:`, rideError);
+      }
+    }
+
+    console.log(
+      `✅ Successfully updated surge pricing for ${existingRides.length} rides`,
+    );
+  } catch (error) {
+    console.error('Error updating existing rides surge pricing:', error);
+  }
+};
+
+const recalculateRideFareWithSurge = async (ride, newSurgeMultiplier) => {
+  try {
+    const currentFareBreakdown = ride.fareBreakdown || {};
+    const totalBeforeSurge =
+      currentFareBreakdown.finalAmount || ride.estimatedFare;
+
+    const newBase = currentFareBreakdown.baseFare * newSurgeMultiplier;
+    const newFare =
+      currentFareBreakdown.finalAmount -
+      currentFareBreakdown.baseFare +
+      newBase;
+    const surgeAmount = newBase - currentFareBreakdown.baseFare;
+
+    return {
+      newFare,
+      surgeAmount,
+      totalBeforeSurge,
+    };
+  } catch (error) {
+    console.error('Error recalculating ride fare:', error);
+    // Fallback: simple calculation
+    const newFare = ride.estimatedFare * newSurgeMultiplier;
+    return {
+      newFare: newFare,
+      surgeAmount: newFare - ride.estimatedFare,
+      totalBeforeSurge: ride.estimatedFare,
+    };
   }
 };

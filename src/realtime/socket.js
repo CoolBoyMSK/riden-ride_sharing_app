@@ -42,17 +42,22 @@ import {
   updateDriverRideHistory,
   createRideTransaction,
   getPayoutWeek,
+  haversineDistance,
 } from '../dal/ride.js';
 import {
   findDriverByUserId,
   updateDriverByUserId,
+  toggleDriverLocation,
   findAllDestination,
   findDriverById,
+  onRideAccepted,
+  onRideCancelled,
 } from '../dal/driver.js';
 import { calculateActualFare } from '../services/User/ride/fareCalculationService.js';
 import { findPassengerByUserId, findPassengerById } from '../dal/passenger.js';
 import { passengerPaysDriver, payDriverFromWallet } from '../dal/stripe.js';
 import { createCallLog, findCallById, updateCallLogById } from '../dal/call.js';
+import { findDrivingHours } from '../dal/stats.js';
 import { findDashboardData } from '../dal/admin/index.js';
 import { findUserById } from '../dal/user/index.js';
 import {
@@ -129,7 +134,7 @@ export const initSocket = (server) => {
               code: 'NOT_FOUND',
               message: 'Driver not found',
             });
-          } else if (driver.isBlocked || driver.isSuspended) {
+          } else if (driver.isBlocked) {
             return socket.emit('error', {
               success: false,
               objectType,
@@ -159,13 +164,6 @@ export const initSocket = (server) => {
               objectType,
               code: 'FORBIDDEN',
               message: 'Forbidden: Connected account not found',
-            });
-          } else if (driver.isRestricted) {
-            return socket.emit('error', {
-              success: false,
-              objectType,
-              code: 'FORBIDDEN',
-              message: 'Forbidden: Driver is restricted',
             });
           } else if (driver.backgroundCheckStatus !== 'approved') {
             return socket.emit('error', {
@@ -229,17 +227,36 @@ export const initSocket = (server) => {
             });
           }
 
+          const stats = await findDrivingHours(driver._id);
+          if (stats.remainingHours < 3 && stats.remainingHours > 0) {
+            emitToUser(driver.userId, 'driver:remaining_driving_hours', {
+              success: true,
+              objectType: 'remaining-driving-hours',
+              data: stats,
+              message: `Only ${stats.remainingHours} driving hours left.`,
+            });
+          } else if (stats.remainingHours >= 0) {
+            return emitToUser(driver.userId, 'driver:remaining_driving_hours', {
+              success: true,
+              objectType: 'remaining-driving-hours',
+              data: stats,
+              message: `Your driving hours are finished`,
+            });
+          }
+
           let updatedDriver;
           if (driver.isActive && driver.status === 'online') {
             updatedDriver = await updateDriverByUserId(userId, {
               isActive: false,
               status: 'offline',
             });
+            await toggleDriverLocation(driver._id, 'offline', false);
           } else if (!driver.isActive && driver.status === 'offline') {
             updatedDriver = await updateDriverByUserId(userId, {
               isActive: true,
               status: 'online',
             });
+            await toggleDriverLocation(driver._id, 'online', true);
           } else {
             updatedDriver = driver;
           }
@@ -268,14 +285,8 @@ export const initSocket = (server) => {
         if (['driver'].includes(socket.user.roles[0])) {
           user = await findDriverByUserId(userId);
 
-          if (
-            !user ||
-            user.isBlocked ||
-            user.isSuspended ||
-            user.backgroundCheckStatus !== 'approved' ||
-            !['online', 'on_ride'].includes(user.status)
-          ) {
-            return socket.emit('ride:active', {
+          if (!user || !['online', 'on_ride'].includes(user.status)) {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
@@ -285,8 +296,8 @@ export const initSocket = (server) => {
         } else if (['passenger'].includes(socket.user.roles[0])) {
           user = await findPassengerByUserId(userId);
 
-          if (!user || user.isBlocked || user.isSuspended) {
-            return socket.emit('ride:active', {
+          if (!user) {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
@@ -321,30 +332,71 @@ export const initSocket = (server) => {
       const objectType = 'find-ride';
       try {
         const driver = await findDriverByUserId(userId);
-        if (
-          !driver ||
-          !driver.isActive ||
-          driver.isRestricted ||
-          driver.isBlocked ||
-          driver.isSuspended ||
-          driver.backgroundCheckStatus !== 'approved' ||
-          driver.status !== 'online'
-        ) {
-          return socket.emit('ride:find', {
+        if (!driver) {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'FORBIDDEN',
-            message: 'Forbidden: Driver not eligible',
+            message: 'Driver not found',
+          });
+        } else if (!driver.isActive) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver is not active',
+          });
+        } else if (driver.isRestricted) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver in restricted area',
+          });
+        } else if (driver.isBlocked) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver is blocked',
+          });
+        } else if (driver.isSuspended) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver is suspended',
+          });
+        } else if (driver.backgroundCheckStatus !== 'approved') {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver background not verified',
+          });
+        } else if (driver.status !== 'online') {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver is not online',
           });
         }
 
         const driverLocation = await findDriverLocation(driver._id);
-        if (!driverLocation || !driverLocation.isAvailable) {
-          return socket.emit('ride:find', {
+        if (!driverLocation) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'NOT_FOUND',
+            message: 'Driver location not found',
+          });
+        } else if (!driverLocation.isAvailable) {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'LOCATION_UNAVAILABLE',
-            message: 'Driver location unavailable or not marked as available',
+            message: 'Driver not available',
           });
         }
 
@@ -411,7 +463,7 @@ export const initSocket = (server) => {
           driver.backgroundCheckStatus !== 'approved' ||
           driver.status !== 'online'
         ) {
-          return socket.emit('ride:response', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'FORBIDDEN',
@@ -442,44 +494,77 @@ export const initSocket = (server) => {
       const objectType = 'decline-ride';
       try {
         const driver = await findDriverByUserId(userId);
-        if (
-          !driver ||
-          driver.isRestricted ||
-          driver.isBlocked ||
-          driver.isSuspended ||
-          driver.backgroundCheckStatus !== 'approved' ||
-          driver.status !== 'online'
-        ) {
-          return socket.emit('ride:decline_ride', {
+        if (!driver) {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'FORBIDDEN',
-            message: 'Forbidden: Driver not eligible',
+            message: 'Driver not found',
+          });
+        } else if (driver.isRestricted) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver is restricted',
+          });
+        } else if (driver.isBlocked) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver is blocked',
+          });
+        } else if (driver.isSuspended) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver is suspended',
+          });
+        } else if (driver.backgroundCheckStatus !== 'approved') {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver is backgound not verified',
+          });
+        } else if (driver.status !== 'online') {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver must be online',
           });
         }
 
         const driverLocation = await findDriverLocation(driver._id);
-        if (!driverLocation || !driverLocation.isAvailable) {
-          return socket.emit('ride:decline_ride', {
+        if (!driverLocation) {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'LOCATION_UNAVAILABLE',
-            message: 'Driver location unavailable or not marked as available',
+            message: 'Driver location not found',
+          });
+        } else if (!driverLocation.isAvailable) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'LOCATION_UNAVAILABLE',
+            message: 'Driver not available',
           });
         }
 
         const ride = await findRideById(rideId);
         if (!ride) {
-          return socket.emit('ride:decline_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'NOT_FOUND',
             message: 'Ride not found',
           });
-        }
-
-        if (ride.driverId?.toString() === driver._id.toString()) {
-          return socket.emit('ride:decline_ride', {
+        } else if (ride.driverId?.toString() === driver._id.toString()) {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'ALREADY_ASSIGNED',
@@ -516,51 +601,102 @@ export const initSocket = (server) => {
       const objectType = 'accept-ride';
       try {
         const driver = await findDriverByUserId(userId);
-        if (
-          !driver ||
-          !driver.isActive ||
-          driver.isRestricted ||
-          driver.isBlocked ||
-          driver.isSuspended ||
-          driver.backgroundCheckStatus !== 'approved' ||
-          driver.status !== 'online'
-        ) {
-          return socket.emit('ride:accept_ride', {
+        if (!driver) {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'FORBIDDEN',
-            message: 'Forbidden: Driver not eligible',
+            message: 'Driver not found',
+          });
+        } else if (!driver.isActive) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver is not active',
+          });
+        } else if (driver.isRestricted) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver in restricted area',
+          });
+        } else if (driver.isBlocked) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver is blocked',
+          });
+        } else if (driver.isSuspended) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver is suspended',
+          });
+        } else if (driver.backgroundCheckStatus !== 'approved') {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver background not verified',
+          });
+        } else if (driver.status !== 'online') {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver is not online',
           });
         }
 
         const ride = await findRideById(rideId);
         if (!ride) {
-          return socket.emit('ride:accept_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'NOT_FOUND',
             message: 'Ride not found',
           });
         } else if (ride.driverId) {
-          return socket.emit('ride:accept_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'ALREADY_ASSIGNED',
             message: 'Ride already assigned to another driver',
           });
+        } else if (ride.status !== 'REQUESTED') {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'This ride is not available',
+          });
         }
 
         const availability = await findDriverLocation(driver._id);
-        if (
-          !availability ||
-          availability.isAvailable === false ||
-          availability.currentRideId
-        ) {
-          return socket.emit('ride:accept_ride', {
+        if (!availability) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'NOT_FOUND',
+            message: 'Driver location not found',
+          });
+        } else if (availability.isAvailable === false) {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'NOT_AVAILABLE',
-            message: 'You are not available to accept the ride',
+            message: 'Driver not available',
+          });
+        } else if (availability.currentRideId) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'NOT_AVAILABLE',
+            message: 'Driver on another ride',
           });
         }
 
@@ -569,27 +705,41 @@ export const initSocket = (server) => {
           isDestinationRide = true;
         }
 
+        const driverDistance = haversineDistance(
+          ride.pickupLocation?.coordinates,
+          availability.location?.coordinates,
+        );
+        if (!driverDistance) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'INVALID_DISTANCE',
+            message: 'Driver distance is not valid with in the search radius',
+          });
+        }
+
         const updatedRide = await updateRideById(ride._id, {
           status: 'DRIVER_ASSIGNED',
           driverId: driver._id,
           driverAssignedAt: new Date(),
           isDestinationRide,
+          driverDistance,
         });
         if (!updatedRide) {
-          return socket.emit('ride:accept_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
-            code: 'RIDE_UPDATE_FAILED',
+            code: 'UPDATE_FAILED',
             message: 'Failed to update ride with driver assignment',
           });
         }
+        await onRideAccepted(ride._id);
 
         const updateAvailability = await updateDriverAvailability(
           driver._id,
           false,
           ride._id,
         );
-
         const updatedDriver = await updateDriverByUserId(userId, {
           status: 'on_ride',
         });
@@ -598,14 +748,22 @@ export const initSocket = (server) => {
           // Rollback ride update inside the transaction
           await updateRideById(ride._id, {
             driverId: null,
-            status: 'REQUESTED',
+            status: 'CANCELLED_BY_SYSTEM',
+            cancelledAt: new Date(),
+            cancelledBy: 'system',
+            cancellationReason: 'Failed to assign driver',
+            driverDistance: 0,
+            paymentStatus: 'CANCELLED',
           });
           await updateDriverAvailability(driver._id, true, null);
-          return socket.emit('ride:accept_ride', {
+          await updateDriverByUserId(userId, {
+            status: 'online',
+          });
+          return socket.emit('error', {
             success: false,
             objectType,
-            code: 'DRIVER_UPDATE_FAILED',
-            message: 'Failed to update driver status',
+            code: 'UPDATE_FAILED',
+            message: 'Failed to accept ride',
           });
         }
 
@@ -632,68 +790,68 @@ export const initSocket = (server) => {
       const session = await mongoose.startSession();
       try {
         const driver = await findDriverByUserId(userId);
-        if (
-          !driver ||
-          driver.isRestricted ||
-          driver.isBlocked ||
-          driver.isSuspended ||
-          driver.backgroundCheckStatus !== 'approved' ||
-          driver.status !== 'on_ride'
-        ) {
-          return socket.emit('ride:driver_cancel_ride', {
+        if (!driver) {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'FORBIDDEN',
-            message: 'Forbidden: Driver not eligible',
+            message: 'Driver not found',
+          });
+        } else if (driver.status !== 'on_ride') {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Invalid driver status',
           });
         }
 
         const ride = await findRideById(rideId);
         const driverId = ride?.driverId?._id;
         if (!ride) {
-          return socket.emit('ride:driver_cancel_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'NOT_FOUND',
             message: 'Ride not found',
           });
         } else if (driverId.toString() !== driver._id.toString()) {
-          return socket.emit('ride:driver_cancel_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'NOT_ASSIGNED',
             message: 'Cannot cancel a ride not assigned to you',
           });
         } else if (ride.status === 'CANCELLED_BY_PASSENGER') {
-          return socket.emit('ride:driver_cancel_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'ALREADY_CANCELLED',
             message: 'Ride already cancelled by passenger',
           });
         } else if (ride.status === 'CANCELLED_BY_DRIVER') {
-          return socket.emit('ride:driver_cancel_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'ALREADY_CANCELLED',
             message: 'You have already cancelled this ride',
           });
         } else if (ride.status === 'CANCELLED_BY_SYSTEM') {
-          return socket.emit('ride:driver_cancel_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'ALREADY_CANCELLED',
             message: 'Ride already cancelled by system',
           });
         } else if (ride.status === 'RIDE_COMPLETED') {
-          return socket.emit('ride:driver_cancel_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'ALREADY_COMPLETED',
             message: 'Cannot cancel a completed ride',
           });
         } else if (!ride.passengerId) {
-          return socket.emit('ride:driver_cancel_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'NO_PASSENGER_AVAILABLE',
@@ -710,7 +868,7 @@ export const initSocket = (server) => {
         ];
 
         if (!cancellableStatuses.includes(ride.status)) {
-          return socket.emit('ride:driver_cancel_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'CANNOT_CANCEL',
@@ -719,7 +877,7 @@ export const initSocket = (server) => {
         }
 
         if (!reason || reason.trim().length < 3 || reason.trim().length > 500) {
-          return socket.emit('ride:driver_cancel_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'INVALID_REASON',
@@ -737,7 +895,7 @@ export const initSocket = (server) => {
         );
         if (!updateAvailability) {
           await session.abortTransaction();
-          return socket.emit('ride:driver_cancel_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'DRIVER AVAILABILITY_FAILED',
@@ -774,7 +932,7 @@ export const initSocket = (server) => {
         );
         if (!updatedRide) {
           await session.abortTransaction();
-          return socket.emit('ride:driver_cancel_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'CANCELLATION_FAILED',
@@ -782,7 +940,7 @@ export const initSocket = (server) => {
           });
         } else if (updatedRide.status !== 'CANCELLED_BY_DRIVER') {
           await session.abortTransaction();
-          return socket.emit('ride:driver_cancel_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'RIDE_UPDATE_FAILED',
@@ -861,33 +1019,33 @@ export const initSocket = (server) => {
       const objectType = 'driver-arriving';
       try {
         const driver = await findDriverByUserId(userId);
-        if (
-          !driver ||
-          driver.isRestricted ||
-          driver.isBlocked ||
-          driver.isSuspended ||
-          driver.backgroundCheckStatus !== 'approved' ||
-          driver.status !== 'on_ride'
-        ) {
-          return socket.emit('ride:driver_arriving', {
+        if (!driver) {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'FORBIDDEN',
-            message: 'Forbidden: Driver not eligible',
+            message: 'Driver not found',
+          });
+        } else if (driver.status !== 'on_ride') {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Invalid driver status',
           });
         }
 
         const ride = await findRideById(rideId);
         const driverId = ride?.driverId?._id;
         if (!ride) {
-          return socket.emit('ride:driver_arriving', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'NOT_FOUND',
             message: 'Ride not found',
           });
         } else if (driverId.toString() !== driver._id.toString()) {
-          return socket.emit('ride:driver_arriving', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'NOT_ASSIGNED',
@@ -896,7 +1054,7 @@ export const initSocket = (server) => {
         }
 
         if (ride.status !== 'DRIVER_ASSIGNED') {
-          return socket.emit('ride:driver_arriving', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'INVALID_STATUS',
@@ -909,7 +1067,7 @@ export const initSocket = (server) => {
           driverArrivingAt: new Date(),
         });
         if (!updatedRide) {
-          return socket.emit('ride:driver_arriving', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'RIDE_UPDATE_FAILED',
@@ -939,19 +1097,19 @@ export const initSocket = (server) => {
       const objectType = 'driver-arrived';
       try {
         const driver = await findDriverByUserId(userId);
-        if (
-          !driver ||
-          driver.isRestricted ||
-          driver.isBlocked ||
-          driver.isSuspended ||
-          driver.backgroundCheckStatus !== 'approved' ||
-          driver.status !== 'on_ride'
-        ) {
-          return socket.emit('ride:driver_arrived', {
+        if (!driver) {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'FORBIDDEN',
-            message: 'Forbidden: Driver not eligible',
+            message: 'Driver not found',
+          });
+        } else if (driver.status !== 'on_ride') {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Invalid driver status',
           });
         }
 
@@ -959,14 +1117,14 @@ export const initSocket = (server) => {
         const driverId = ride?.driverId?._id;
 
         if (!ride) {
-          return socket.emit('ride:driver_arrived', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'NOT_FOUND',
             message: 'Ride not found',
           });
         } else if (driverId.toString() !== driver._id.toString()) {
-          return socket.emit('ride:driver_arrived', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'NOT_ASSIGNED',
@@ -975,7 +1133,7 @@ export const initSocket = (server) => {
         }
 
         if (ride.status !== 'DRIVER_ARRIVING') {
-          return socket.emit('ride:driver_arrived', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'INVALID_STATUS',
@@ -988,7 +1146,7 @@ export const initSocket = (server) => {
           driverArrivedAt: new Date(),
         });
         if (!updatedRide) {
-          return socket.emit('ride:driver_arrived', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'RIDE_UPDATE_FAILED',
@@ -1018,33 +1176,33 @@ export const initSocket = (server) => {
       const objectType = 'driver-start-ride';
       try {
         const driver = await findDriverByUserId(userId);
-        if (
-          !driver ||
-          driver.isRestricted ||
-          driver.isBlocked ||
-          driver.isSuspended ||
-          driver.backgroundCheckStatus !== 'approved' ||
-          driver.status !== 'on_ride'
-        ) {
-          return socket.emit('ride:driver_start_ride', {
+        if (!driver) {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'FORBIDDEN',
-            message: 'Forbidden: Driver not eligible',
+            message: 'Driver not found',
+          });
+        } else if (driver.status !== 'on_ride') {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Invalid driver status',
           });
         }
 
         const ride = await findRideById(rideId);
         const driverId = ride?.driverId?._id;
         if (!ride) {
-          return socket.emit('ride:driver_start_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'NOT_FOUND',
             message: 'Ride not found',
           });
         } else if (driverId.toString() !== driver._id.toString()) {
-          return socket.emit('ride:driver_start_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'NOT_ASSIGNED',
@@ -1053,7 +1211,7 @@ export const initSocket = (server) => {
         }
 
         if (ride.status !== 'DRIVER_ARRIVED') {
-          return socket.emit('ride:driver_start_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'INVALID_STATUS',
@@ -1066,7 +1224,7 @@ export const initSocket = (server) => {
           rideStartedAt: new Date(),
         });
         if (!updatedRide) {
-          return socket.emit('ride:driver_start_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'RIDE_UPDATE_FAILED',
@@ -1098,18 +1256,19 @@ export const initSocket = (server) => {
         const objectType = 'driver-complete-ride';
         try {
           const driver = await findDriverByUserId(userId);
-          if (
-            !driver ||
-            driver.isBlocked ||
-            driver.isSuspended ||
-            driver.backgroundCheckStatus !== 'approved' ||
-            !['online', 'on_ride'].includes(driver.status)
-          ) {
+          if (!driver) {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Driver not eligible',
+              message: 'Driver not found',
+            });
+          } else if (driver.status !== 'on_ride') {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Invalid driver status',
             });
           }
 
@@ -1129,9 +1288,7 @@ export const initSocket = (server) => {
               code: 'NOT_ASSIGNED',
               message: 'Cannot update a ride not assigned to you',
             });
-          }
-
-          if (
+          } else if (
             ride.status !== 'RIDE_STARTED' &&
             ride.status !== 'RIDE_IN_PROGRESS'
           ) {
@@ -1143,7 +1300,7 @@ export const initSocket = (server) => {
             });
           }
 
-          if (!actualDistance || Math.ceil(actualDistance) < 0) {
+          if (!actualDistance || actualDistance < 0) {
             return socket.emit('error', {
               success: false,
               objectType,
@@ -1152,12 +1309,17 @@ export const initSocket = (server) => {
             });
           }
 
-          const actualDuration =
-            Date.now() - new Date(ride.driverAssignedAt).getTime();
+          const actualDuration = parseFloat(
+            (
+              (Date.now() - new Date(ride.driverAssignedAt).getTime()) /
+              (1000 * 60)
+            ).toFixed(2),
+          );
 
           const waitingTime =
-            new Date(ride.rideStartedAt).getTime() -
-            new Date(ride.driverArrivedAt).getTime();
+            (new Date(ride.rideStartedAt).getTime() -
+              new Date(ride.driverArrivedAt).getTime()) /
+            1000;
 
           const carType = ride.driverId?.vehicle?.type;
 
@@ -1168,6 +1330,9 @@ export const initSocket = (server) => {
             waitingTime,
             promoCode: ride.promoCode,
             rideStartedAt: ride.rideStartedAt,
+            rideCompletedAt: Date.now(),
+            isAirportRide: ride.isAirport,
+            surgeMultiplier: ride.fareBreakdown?.surgeMultiplier,
           });
 
           const updatedRide = await updateRideById(ride._id, {
@@ -1177,6 +1342,8 @@ export const initSocket = (server) => {
             actualFare: Math.floor(fareResult.actualFare),
             actualDistance,
             actualDuration,
+            actualWaitingTime: parseFloat((waitingTime / 60).toFixed(2)),
+            fareBreakdown: fareResult.fareBreakdown,
           });
           if (!updatedRide) {
             return socket.emit('error', {
@@ -1257,25 +1424,26 @@ export const initSocket = (server) => {
         const objectType = 'driver-rate-passenger';
         try {
           const driver = await findDriverByUserId(userId);
-          if (
-            !driver ||
-            driver.isBlocked ||
-            driver.isSuspended ||
-            driver.backgroundCheckStatus !== 'approved' ||
-            !['online', 'on_ride'].includes(driver.status)
-          ) {
-            return socket.emit('ride:driver_rate_passenger', {
+          if (!driver) {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Driver not eligible',
+              message: 'Driver not found',
+            });
+          } else if (!['online', 'on_ride'].includes(driver.status)) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Invalid driver status',
             });
           }
 
           const ride = await findRideById(rideId);
           const driverId = ride?.driverId?._id;
           if (!ride) {
-            return socket.emit('ride:driver_rate_passenger', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'NOT_FOUND',
@@ -1284,7 +1452,7 @@ export const initSocket = (server) => {
           }
 
           if (driverId.toString() !== driver._id.toString()) {
-            return socket.emit('ride:driver_rate_passenger', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'NOT_ASSIGNED',
@@ -1293,7 +1461,7 @@ export const initSocket = (server) => {
           }
 
           if (ride.status !== 'RIDE_COMPLETED') {
-            return socket.emit('ride:driver_rate_passenger', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'INVALID_STATUS',
@@ -1302,7 +1470,7 @@ export const initSocket = (server) => {
           }
 
           if (ride.passengerRating) {
-            return socket.emit('ride:driver_rate_passenger', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'ALREADY_RATED',
@@ -1311,7 +1479,7 @@ export const initSocket = (server) => {
           }
 
           if (typeof rating !== 'number' || rating < 1 || rating > 5) {
-            return socket.emit('ride:driver_rate_passenger', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'INVALID_RATING',
@@ -1320,7 +1488,7 @@ export const initSocket = (server) => {
           }
 
           if (feedback && (feedback.length < 3 || feedback.length > 500)) {
-            return socket.emit('ride:driver_rate_passenger', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'INVALID_FEEDBACK',
@@ -1338,10 +1506,10 @@ export const initSocket = (server) => {
           };
           const driverFeedback = await createFeedback(payload);
           if (!driverFeedback) {
-            return socket.emit('ride:driver_rate_passenger', {
+            return socket.emit('error', {
               success: false,
               objectType,
-              code: 'IFEEDBACK_FAILED',
+              code: 'FEEDBACK_FAILED',
               message: 'Driver failed to send feedback for passenger',
             });
           }
@@ -1351,7 +1519,7 @@ export const initSocket = (server) => {
           });
 
           if (!updatedRide) {
-            return socket.emit('ride:driver_rate_passenger', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'RIDE_UPDATE_FAILED',
@@ -1406,22 +1574,6 @@ export const initSocket = (server) => {
       async ({ location, isAvailable, speed, heading }) => {
         const objectType = 'driver-update-location';
         try {
-          const driver = await findDriverByUserId(userId);
-          if (
-            !driver ||
-            driver.isBlocked ||
-            driver.isSuspended ||
-            driver.backgroundCheckStatus !== 'approved' ||
-            !['online', 'on_ride'].includes(driver.status)
-          ) {
-            return socket.emit('error', {
-              success: false,
-              objectType,
-              code: 'FORBIDDEN',
-              message: 'Forbidden: Driver not eligible',
-            });
-          }
-
           if (
             !location ||
             !Array.isArray(location.coordinates) ||
@@ -1435,18 +1587,19 @@ export const initSocket = (server) => {
               message:
                 'Location must be a GeoJSON Point [lng, lat] with valid numbers',
             });
-          }
-
-          if (typeof speed !== 'number' || !speed || speed < 0 || speed > 100) {
+          } else if (
+            typeof speed !== 'number' ||
+            !speed ||
+            speed < 0 ||
+            speed > 100
+          ) {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'INVALID_SPEED',
               message: 'Speed must be greater 0 and less than 100',
             });
-          }
-
-          if (
+          } else if (
             !heading ||
             typeof heading !== 'number' ||
             heading > 360 ||
@@ -1458,14 +1611,57 @@ export const initSocket = (server) => {
               code: 'INVALID_HEADING',
               message: 'Heading must be greater 0 and less than 360',
             });
-          }
-
-          if (typeof isAvailable !== 'boolean') {
+          } else if (typeof isAvailable !== 'boolean') {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'INVALID_AVAILABILITY',
               message: 'isAvailable must be a boolean',
+            });
+          }
+
+          const driver = await findDriverByUserId(userId);
+          if (!driver) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'NOT_FOUND',
+              message: 'Driver not found',
+            });
+          } else if (driver.isBlocked) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Driver is blocked',
+            });
+          } else if (driver.isSuspended) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Driver is suspended',
+            });
+          } else if (driver.backgroundCheckStatus !== 'approved') {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Driver background not verified',
+            });
+          } else if (!['online', 'on_ride'].includes(driver.status)) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Invalid Driver Status',
+            });
+          } else if (!driver.isActive) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Driver is not active',
             });
           }
 
@@ -1570,19 +1766,47 @@ export const initSocket = (server) => {
       try {
         const driver = await findDriverByUserId(userId);
 
-        if (
-          !driver ||
-          driver.isRestricted ||
-          driver.isBlocked ||
-          driver.isSuspended ||
-          driver.backgroundCheckStatus !== 'approved' ||
-          driver.status !== 'online'
-        ) {
-          return socket.emit('ride:find_destination_rides', {
+        if (!driver) {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'FORBIDDEN',
-            message: 'Forbidden: Driver not eligible',
+            message: 'Driver not found',
+          });
+        } else if (driver.isRestricted) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver in restricted area',
+          });
+        } else if (driver.isBlocked) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver is blocked',
+          });
+        } else if (driver.isSuspended) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver is suspended',
+          });
+        } else if (driver.backgroundCheckStatus !== 'approved') {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver background not verified',
+          });
+        } else if (driver.status !== 'online') {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Invalid driver status',
           });
         }
 
@@ -1592,7 +1816,7 @@ export const initSocket = (server) => {
         ]);
 
         if (!destination) {
-          return socket.emit('ride:find_destination_rides', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'NO_DESTINATION',
@@ -1601,7 +1825,7 @@ export const initSocket = (server) => {
         }
 
         if (!driverLocation) {
-          return socket.emit('ride:find_destination_rides', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'LOCATION_UNAVAILABLE',
@@ -1661,54 +1885,54 @@ export const initSocket = (server) => {
       const objectType = 'driver-join-ride';
       try {
         const driver = await findDriverByUserId(userId);
-        if (
-          !driver ||
-          driver.isRestricted ||
-          driver.isBlocked ||
-          driver.isSuspended ||
-          driver.backgroundCheckStatus !== 'approved' ||
-          !['on_ride', 'online'].includes(driver.status)
-        ) {
-          return socket.emit('ride:driver_join_ride', {
+        if (!driver) {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'FORBIDDEN',
-            message: 'Forbidden: Driver not eligible',
+            message: 'Driver not found',
+          });
+        } else if (driver.status !== 'on_ride') {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Invalid driver status',
           });
         }
 
         const ride = await findRideByRideId(rideId);
         const driverId = ride?.driverId?._id;
         if (!ride) {
-          return socket.emit('ride:driver_join_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'NOT_FOUND',
             message: 'Ride not found',
           });
         } else if (driverId.toString() !== driver._id.toString()) {
-          return socket.emit('ride:driver_join_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'NOT_OWNED',
             message: 'Cannot join a ride not booked by you',
           });
         } else if (ride.status === 'CANCELLED_BY_PASSENGER') {
-          return socket.emit('ride:driver_join_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'ALREADY_CANCELLED',
             message: 'Ride already cancelled by you',
           });
         } else if (ride.status === 'CANCELLED_BY_DRIVER') {
-          return socket.emit('ride:driver_join_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'CANCELLED_BY_DRIVER',
             message: 'Ride already cancelled by the driver',
           });
         } else if (ride.status === 'CANCELLED_BY_SYSTEM') {
-          return socket.emit('ride:driver_join_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'ALREADY_CANCELLED',
@@ -1718,21 +1942,21 @@ export const initSocket = (server) => {
           ride.status === 'RIDE_COMPLETED' &&
           ride.paymentStatus === 'COMPLETED'
         ) {
-          return socket.emit('ride:driver_join_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'RIDE_COMPLETED',
             message: 'Cannot join a completed ride',
           });
         } else if (!ride.driverId) {
-          return socket.emit('ride:driver_join_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'NO_DRIVER_FOUND',
             message: 'Cannot join ride. No driver found',
           });
         } else if (ride.status === 'REQUESTED') {
-          return socket.emit('ride:driver_join_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'DRIVER_NOT_ASSIGNED',
@@ -1764,47 +1988,47 @@ export const initSocket = (server) => {
       const objectType = 'passenger-join-ride';
       try {
         const passenger = await findPassengerByUserId(userId);
-        if (!passenger || passenger.isBlocked || passenger.isSuspended) {
-          return socket.emit('ride:passenger_join_ride', {
+        if (!passenger) {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'FORBIDDEN',
-            message: 'Forbidden: Passenger not eligible',
+            message: 'Passenger not found',
           });
         }
 
         const ride = await findRideByRideId(rideId);
         const passengerId = ride?.passengerId?._id;
         if (!ride) {
-          return socket.emit('ride:passenger_join_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'NOT_FOUND',
             message: 'Ride not found',
           });
         } else if (passengerId.toString() !== passenger._id.toString()) {
-          return socket.emit('ride:passenger_join_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'NOT_OWNED',
             message: 'Cannot join a ride not booked by you',
           });
         } else if (ride.status === 'CANCELLED_BY_PASSENGER') {
-          return socket.emit('ride:passenger_join_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'ALREADY_CANCELLED',
             message: 'Ride already cancelled by you',
           });
         } else if (ride.status === 'CANCELLED_BY_DRIVER') {
-          return socket.emit('ride:passenger_join_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'CANCELLED_BY_DRIVER',
             message: 'Ride already cancelled by the driver',
           });
         } else if (ride.status === 'CANCELLED_BY_SYSTEM') {
-          return socket.emit('ride:passenger_join_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'ALREADY_CANCELLED',
@@ -1814,21 +2038,21 @@ export const initSocket = (server) => {
           ride.status === 'RIDE_COMPLETED' &&
           ride.paymentStatus === 'COMPLETED'
         ) {
-          return socket.emit('ride:passenger_join_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'RIDE_COMPLETED',
             message: 'Cannot join a completed ride',
           });
         } else if (!ride.driverId) {
-          return socket.emit('ride:passenger_join_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'NO_DRIVER_ASSIGNED',
             message: 'Cannot join ride. No driver assigned yet',
           });
         } else if (ride.status === 'REQUESTED') {
-          return socket.emit('ride:passenger_join_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'DRIVER_NOT_ASSIGNED',
@@ -1860,54 +2084,54 @@ export const initSocket = (server) => {
       const session = await mongoose.startSession();
       try {
         const passenger = await findPassengerByUserId(userId);
-        if (!passenger || passenger.isBlocked || passenger.isSuspended) {
-          return socket.emit('ride:passenger_cancel_ride', {
+        if (!passenger) {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'FORBIDDEN',
-            message: 'Forbidden: Passenger not eligible',
+            message: 'Passenger not found',
           });
         }
 
         const ride = await findRideById(rideId);
         const passengerId = ride?.passengerId?._id;
         if (!ride) {
-          return socket.emit('ride:passenger_cancel_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'NOT_FOUND',
             message: 'Ride not found',
           });
         } else if (passengerId.toString() !== passenger._id.toString()) {
-          return socket.emit('ride:passenger_cancel_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'NOT_OWNED',
             message: 'Cannot cancel a ride not booked by you',
           });
         } else if (ride.status === 'CANCELLED_BY_PASSENGER') {
-          return socket.emit('ride:passenger_cancel_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'ALREADY_CANCELLED',
             message: 'Ride already cancelled by you',
           });
         } else if (ride.status === 'CANCELLED_BY_DRIVER') {
-          return socket.emit('ride:passenger_cancel_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'CANCELLED_BY_DRIVER',
             message: 'Ride already cancelled by the driver',
           });
         } else if (ride.status === 'CANCELLED_BY_SYSTEM') {
-          return socket.emit('ride:passenger_cancel_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'ALREADY_CANCELLED',
             message: 'Ride already cancelled by system',
           });
         } else if (ride.status === 'RIDE_COMPLETED') {
-          return socket.emit('ride:passenger_cancel_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'RIDE_COMPLETED',
@@ -1922,7 +2146,7 @@ export const initSocket = (server) => {
           'DRIVER_ARRIVED',
         ];
         if (!cancellableStatuses.includes(ride.status)) {
-          return socket.emit('ride:passenger_cancel_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'CANNOT_CANCEL',
@@ -1931,7 +2155,7 @@ export const initSocket = (server) => {
         }
 
         if (!reason || reason.trim().length < 3 || reason.trim().length > 500) {
-          return socket.emit('ride:passenger_cancel_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'INVALID_REASON',
@@ -1950,7 +2174,7 @@ export const initSocket = (server) => {
           );
           if (!updateAvailability) {
             await session.abortTransaction();
-            return socket.emit('ride:passenger_cancel_ride', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'DRIVER_AVAILABILITY_FAILED',
@@ -1988,7 +2212,7 @@ export const initSocket = (server) => {
         );
         if (!updatedRide) {
           await session.abortTransaction();
-          return socket.emit('ride:passenger_cancel_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'CANCELLATION_FAILED',
@@ -1996,13 +2220,15 @@ export const initSocket = (server) => {
           });
         } else if (updatedRide.status !== 'CANCELLED_BY_PASSENGER') {
           await session.abortTransaction();
-          return socket.emit('ride:passenger_cancel_ride', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'RIDE_UPDATE_FAILED',
             message: 'Failed to update ride status',
           });
         }
+
+        await onRideCancelled(updatedRide._id);
 
         await session.commitTransaction();
 
@@ -2079,40 +2305,40 @@ export const initSocket = (server) => {
         const objectType = 'passenger-rate-driver';
         try {
           const passenger = await findPassengerByUserId(userId);
-          if (!passenger || passenger.isBlocked || passenger.isSuspended) {
-            return socket.emit('ride:passenger_rate_driver', {
+          if (!passenger) {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Passenger not eligible',
+              message: 'Passenger not found',
             });
           }
 
           const ride = await findRideById(rideId);
           const passengerId = ride?.passengerId?._id;
           if (!ride) {
-            return socket.emit('ride:passenger_rate_driver', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'NOT_FOUND',
               message: 'Ride not found',
             });
           } else if (ride.status !== 'RIDE_COMPLETED') {
-            return socket.emit('ride:passenger_rate_driver', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'INVALID_STATUS',
               message: `Cannot rate driver. Current ride status: ${ride.status}`,
             });
           } else if (ride.driverRating) {
-            return socket.emit('ride:passenger_rate_driver', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'ALREADY_RATED',
               message: 'You have already rated this driver for this ride',
             });
           } else if (typeof rating !== 'number' || rating < 1 || rating > 5) {
-            return socket.emit('ride:passenger_rate_driver', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'INVALID_RATING',
@@ -2122,14 +2348,14 @@ export const initSocket = (server) => {
             feedback &&
             (feedback.length < 3 || feedback.length > 500)
           ) {
-            return socket.emit('ride:passenger_rate_driver', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'INVALID_FEEDBACK',
               message: 'Feedback must be between 3 and 500 characters',
             });
           } else if (passengerId.toString() !== passenger._id.toString()) {
-            return socket.emit('ride:passenger_rate_driver', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'NOT_OWNED',
@@ -2150,7 +2376,7 @@ export const initSocket = (server) => {
             return socket.emit('ride:driver_rate_passenger', {
               success: false,
               objectType,
-              code: 'IFEEDBACK_FAILED',
+              code: 'FEEDBACK_FAILED',
               message: 'Passenger failed to send feedback for driver',
             });
           }
@@ -2160,7 +2386,7 @@ export const initSocket = (server) => {
           });
 
           if (!updatedRide) {
-            return socket.emit('ride:passenger_rate_driver', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'RIDE_UPDATE_FAILED',
@@ -2217,28 +2443,28 @@ export const initSocket = (server) => {
           ((ride.actualFare || ride.estimatedFare) / percent) * 100,
         );
         if (!ride) {
-          return socket.emit('ride:tip_driver', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'NOT_FOUND',
             message: 'Ride not found',
           });
         } else if (ride.status !== 'RIDE_COMPLETED') {
-          return socket.emit('ride:tip_driver', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'INVALID_STATUS',
             message: `Cannot rate driver. Current ride status: ${ride.status}`,
           });
         } else if (ride.tipBreakdown?.isApplied) {
-          return socket.emit('ride:tip_driver', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'ALLREADY_PAID',
             message: `You have already paid $${ride.tipBreakdown?.amount} which is ${ride.tipBreakdown?.percent}% of fare`,
           });
         } else if (isApplied !== true || amount <= 0 || percent <= 0) {
-          return socket.emit('ride:tip_driver', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'INVALID_AMOUNT',
@@ -2250,7 +2476,7 @@ export const initSocket = (server) => {
         const driver = await findDriverById(ride.driverId._id);
 
         if (!passenger || !driver) {
-          return socket.emit('ride:tip_driver', {
+          return socket.emit('error', {
             success: false,
             objectType,
             code: 'NOT_FOUND',
@@ -2269,7 +2495,7 @@ export const initSocket = (server) => {
             'TIP',
           );
           if (tip.error) {
-            return socket.emit('ride:tip_driver', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'PAYMENT_FAILED',
@@ -2299,7 +2525,7 @@ export const initSocket = (server) => {
             'TIP',
           );
           if (!tip.payment || !tip.transaction) {
-            return socket.emit('ride:tip_driver', {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'PAYMENT_FAILED',

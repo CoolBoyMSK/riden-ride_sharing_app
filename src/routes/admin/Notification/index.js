@@ -13,6 +13,7 @@ registerRoute({
   router,
   route: '/',
   admin_auth_enable: true,
+  get_permission: 'notifications',
   get_method: getAllNotificationsController,
 });
 
@@ -20,6 +21,7 @@ registerRoute({
   router,
   route: '/read/:id',
   admin_auth_enable: true,
+  post_permission: 'notifications',
   post_method: readNotificationsController,
 });
 
@@ -27,6 +29,7 @@ registerRoute({
   router,
   route: '/delete',
   admin_auth_enable: true,
+  delete_permission: 'notifications',
   delete_method: deleteNotificationsController,
 });
 
@@ -34,6 +37,7 @@ registerRoute({
   router,
   route: '/delete/:id',
   admin_auth_enable: true,
+  delete_permission: 'notifications',
   delete_method: deleteNotificationByIdController,
 });
 

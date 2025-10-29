@@ -5,17 +5,18 @@ import {
   findRideByRideId,
 } from '../../../dal/ride.js';
 import { findPassengerByUserId } from '../../../dal/passenger.js';
-import { findNearbyDriverUserIds } from '../../../dal/driver.js';
+import { isRideInRestrictedArea } from '../../../dal/ride.js';
+import {
+  findNearbyDriverUserIds,
+  checkSurgePricing,
+  startProgressiveDriverSearch,
+  updateExistingRidesSurgePricing,
+} from '../../../dal/driver.js';
 import { getPassengerWallet } from '../../../dal/stripe.js';
 import { validatePromoCode } from '../../../dal/promo_code.js';
 import { calculateEstimatedFare } from './fareCalculationService.js';
-import {
-  findAndAssignDriver,
-  getNearbyDriversCount,
-} from './driverMatchingService.js';
-import { notifyUser } from '../../../dal/notification.js';
-import env from '../../../config/envConfig.js';
-import { emitToUser } from '../../../realtime/socket.js';
+import { getNearbyDriversCount } from './driverMatchingService.js';
+// import { emitToUser } from '../../../realtime/socket.js';
 
 // Calculate distance using simple Haversine formula (for estimation)
 const calculateDistance = (pickup, dropoff) => {
@@ -96,7 +97,6 @@ export const getFareEstimate = async (
   }
 };
 
-// Book a ride
 export const bookRide = async (userId, rideData) => {
   try {
     const {
@@ -128,9 +128,51 @@ export const bookRide = async (userId, rideData) => {
       };
     }
 
+    const isAirport = isRideInRestrictedArea(pickupLocation.coordinates, 10);
+
     // Calculate distance and duration
     const distance = calculateDistance(pickupLocation, dropoffLocation);
     const duration = estimateDuration(distance);
+
+    const surgeDataWithCurrentRide = await checkSurgePricing(
+      pickupLocation.coordinates,
+      carType,
+      true, // Include current ride in calculation
+    );
+
+    // Check current surge level WITHOUT current ride
+    const currentSurgeData = await checkSurgePricing(
+      pickupLocation.coordinates,
+      carType,
+      false, // Don't include current ride
+    );
+
+    let surgeMultiplier = 1.0;
+    let isSurgeApplied = false;
+    let shouldUpdateExistingRides = false;
+
+    // Determine if surge applies or level increases due to current ride
+    if (surgeDataWithCurrentRide.isSurge) {
+      surgeMultiplier = surgeDataWithCurrentRide.surgeMultiplier;
+      isSurgeApplied = true;
+
+      // Check if surge level increased due to current ride
+      const surgeLevelIncreased =
+        surgeDataWithCurrentRide.surgeLevel > currentSurgeData.surgeLevel;
+      const newSurgeActivated =
+        !currentSurgeData.isSurge && surgeDataWithCurrentRide.isSurge;
+
+      if (newSurgeActivated || surgeLevelIncreased) {
+        shouldUpdateExistingRides = true;
+        console.log(
+          `🚨 SURGE ${newSurgeActivated ? 'ACTIVATED' : 'LEVEL INCREASED'} by current ride: ${surgeDataWithCurrentRide.message}`,
+        );
+      } else {
+        console.log(
+          `🚨 SURGE APPLIED (existing level): ${surgeDataWithCurrentRide.message}`,
+        );
+      }
+    }
 
     // Validate and apply promo code if provided
     let promoDetails = null;
@@ -155,6 +197,9 @@ export const bookRide = async (userId, rideData) => {
       distance,
       duration,
       promoCode,
+      isAirport,
+      surgeMultiplier, // Pass the surge multiplier
+      surgeDataWithCurrentRide,
     );
 
     if (!fareResult.success) {
@@ -193,7 +238,7 @@ export const bookRide = async (userId, rideData) => {
       }
     }
 
-    // Create ride record
+    // Create ride record with search tracking
     const ridePayload = {
       passengerId: passenger._id,
       pickupLocation,
@@ -209,59 +254,35 @@ export const bookRide = async (userId, rideData) => {
       estimatedFare: fareResult.estimatedFare,
       fareBreakdown: fareResult.fareBreakdown,
       status: 'REQUESTED',
+      isAirport,
+      searchRadius: 5, // Current search radius in km
+      searchStartTime: new Date(),
+      expiryTime: new Date(Date.now() + 3 * 60 * 1000), // 5 minutes total
+      surgeMultiplier: surgeMultiplier,
+      isSurgeApplied: isSurgeApplied,
+      surgeLevel: surgeDataWithCurrentRide.surgeLevel,
+      surgeData: surgeDataWithCurrentRide,
     };
 
     const newRide = await createRide(ridePayload);
     if (newRide) {
-      //   // Notification Logic Start
-      //   const notify = await notifyUser({
-      //     userId: passenger.userId,
-      //     title: 'New Ride',
-      //     message: `New ride request from ${pickupLocation.address} to ${dropoffLocation.address} — tap to respond! `,
-      //     module: 'ride',
-      //     metadata: newRide,
-      //     type: 'ALERT',
-      //     actionLink: `${env.BASE_URL}/api/user/profile/me`,
-      //   });
-      //   if (!notify) {
-      //     console.error('Failed to send notification');
-      //   }
-
-      const availableDrivers = await findNearbyDriverUserIds(
-        carType,
-        pickupLocation.coordinates,
-      );
-
-      if (!availableDrivers) {
-        console.error('No Drivers found to notify');
-      } else if (availableDrivers.length > 0) {
-        const rideNotificationData = {
-          success: true,
-          objectType: 'new-ride',
-          ride: newRide,
-          message: `New ride request from ${pickupLocation.address} to ${dropoffLocation.address} — tap to respond`,
-        };
-
-        availableDrivers.forEach((driverId) => {
-          emitToUser(driverId, 'ride:new_request', rideNotificationData);
-        });
+      // Update existing rides if surge was activated or level increased
+      if (shouldUpdateExistingRides) {
+        await updateExistingRidesSurgePricing(
+          pickupLocation.coordinates,
+          carType,
+          surgeMultiplier,
+          surgeDataWithCurrentRide.surgeLevel,
+        );
       }
 
-      // Notification Logic End
+      // Start the progressive search immediately
+      await startProgressiveDriverSearch(newRide);
+
       return {
         success: true,
-        message: 'Ride requested successfully',
-        ride: {
-          rideId: newRide.rideId,
-          _id: newRide._id,
-          status: 'REQUESTED',
-          estimatedFare: fareResult.estimatedFare,
-          fareBreakdown: fareResult.fareBreakdown,
-          promoDetails: promoDetails,
-          pickupLocation,
-          dropoffLocation,
-          scheduledTime: newRide.scheduledTime,
-        },
+        message: 'Ride requested successfully. Searching for drivers...',
+        data: newRide,
       };
     } else {
       return {

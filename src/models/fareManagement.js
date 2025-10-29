@@ -11,7 +11,15 @@ const DailyFareSchema = new Schema(
       enum: DAYS_OF_WEEK,
       required: true,
     },
+    rideSetupFee: {
+      type: Number,
+      required: true,
+    },
     baseFare: {
+      type: Number,
+      required: true,
+    },
+    perMinuteFare: {
       type: Number,
       required: true,
     },
@@ -20,7 +28,21 @@ const DailyFareSchema = new Schema(
       required: true,
     },
     waiting: {
+      seconds: {
+        type: Number,
+        required: true,
+      },
+      charge: {
+        type: Number,
+        required: true,
+      },
+    },
+    discount: {
       minutes: {
+        type: Number,
+        required: true,
+      },
+      distance: {
         type: Number,
         required: true,
       },
@@ -44,6 +66,24 @@ const DailyFareSchema = new Schema(
       required: true,
     },
     peakCharge: {
+      type: Number,
+      required: true,
+    },
+    surge: [
+      {
+        level: {
+          type: Number,
+        },
+        ratio: {
+          type: String,
+        },
+        multiplier: {
+          type: Number,
+          min: 0,
+        },
+      },
+    ],
+    airportCharge: {
       type: Number,
       required: true,
     },

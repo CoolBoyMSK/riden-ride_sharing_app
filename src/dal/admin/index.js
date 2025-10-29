@@ -1606,30 +1606,38 @@ export const passengersAnalytics = async (filter = 'today') => {
 export const ridesAnalytics = async (filter = 'today') => {
   try {
     // --- Totals ---
-    const [totalOngoingRides, totalCompletedRides, totalCancelledRides] =
-      await Promise.all([
-        Booking.countDocuments({
-          status: {
-            $in: [
-              'DRIVER_ASSIGNED',
-              'DRIVER_ARRIVING',
-              'DRIVER_ARRIVED',
-              'RIDE_STARTED',
-              'RIDE_IN_PROGRESS',
-            ],
-          },
-        }),
-        Booking.countDocuments({ status: 'RIDE_COMPLETED' }),
-        Booking.countDocuments({
-          status: {
-            $in: [
-              'CANCELLED_BY_PASSENGER',
-              'CANCELLED_BY_DRIVER',
-              'CANCELLED_BY_SYSTEM',
-            ],
-          },
-        }),
-      ]);
+    const [
+      totalOngoingRides,
+      totalCompletedRides,
+      totalCancelledRides,
+      totalAirportRides,
+    ] = await Promise.all([
+      Booking.countDocuments({
+        status: {
+          $in: [
+            'DRIVER_ASSIGNED',
+            'DRIVER_ARRIVING',
+            'DRIVER_ARRIVED',
+            'RIDE_STARTED',
+            'RIDE_IN_PROGRESS',
+          ],
+        },
+      }),
+      Booking.countDocuments({ status: 'RIDE_COMPLETED' }),
+      Booking.countDocuments({
+        status: {
+          $in: [
+            'CANCELLED_BY_PASSENGER',
+            'CANCELLED_BY_DRIVER',
+            'CANCELLED_BY_SYSTEM',
+          ],
+        },
+      }),
+      Booking.countDocuments({
+        isAirport: true,
+        status: 'RIDE_COMPLETED',
+      }),
+    ]);
 
     // --- Cancellation reasons ---
     const [cancelledByDriver, cancelledByPassenger] = await Promise.all([
@@ -1713,6 +1721,23 @@ export const ridesAnalytics = async (filter = 'today') => {
       { $sort: { _id: 1 } },
     ]);
 
+    // --- Airport rides aggregation for chart ---
+    const airportRideCounts = await Booking.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: startDate, $lte: endDate },
+          isAirport: true,
+        },
+      },
+      {
+        $group: {
+          _id: { $dateToString: { format: groupFormat, date: '$createdAt' } },
+          airportRides: { $sum: 1 },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]);
+
     // --- Fill missing slots for chart ---
     const chartData = [];
     const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -1735,9 +1760,11 @@ export const ridesAnalytics = async (filter = 'today') => {
       for (let h = 0; h < 24; h++) {
         const hourStr = h.toString().padStart(2, '0');
         const entry = rideCounts.find((r) => r._id === hourStr);
+        const airportEntry = airportRideCounts.find((r) => r._id === hourStr);
         chartData.push({
           hour: `${hourStr}:00`,
           rides: entry?.rides || 0,
+          airportRides: airportEntry?.airportRides || 0,
         });
       }
     } else if (filter === 'this_week') {
@@ -1745,10 +1772,12 @@ export const ridesAnalytics = async (filter = 'today') => {
       for (let i = 0; i < 7; i++) {
         const dayKey = curDate.toISOString().split('T')[0];
         const entry = rideCounts.find((r) => r._id === dayKey);
+        const airportEntry = airportRideCounts.find((r) => r._id === dayKey);
         chartData.push({
           day: dayKey,
           dayName: daysOfWeek[curDate.getDay()],
           rides: entry?.rides || 0,
+          airportRides: airportEntry?.airportRides || 0,
         });
         curDate.setDate(curDate.getDate() + 1);
       }
@@ -1757,10 +1786,12 @@ export const ridesAnalytics = async (filter = 'today') => {
       allDays.forEach((date) => {
         const dayKey = date.toISOString().split('T')[0];
         const entry = rideCounts.find((r) => r._id === dayKey);
+        const airportEntry = airportRideCounts.find((r) => r._id === dayKey);
         chartData.push({
           day: dayKey,
           dayName: daysOfWeek[date.getDay()],
           rides: entry?.rides || 0,
+          airportRides: airportEntry?.airportRides || 0,
         });
       });
     } else if (filter === 'last_year') {
@@ -1769,10 +1800,12 @@ export const ridesAnalytics = async (filter = 'today') => {
           .toString()
           .padStart(2, '0')}`;
         const entry = rideCounts.find((r) => r._id === monthKey);
+        const airportEntry = airportRideCounts.find((r) => r._id === monthKey);
         chartData.push({
           month: monthKey,
           monthName: monthsOfYear[m],
           rides: entry?.rides || 0,
+          airportRides: airportEntry?.airportRides || 0,
         });
       }
     }
@@ -1845,6 +1878,7 @@ export const ridesAnalytics = async (filter = 'today') => {
       totalOngoingRides,
       totalCompletedRides,
       totalCancelledRides,
+      totalAirportRides,
       driverCancellationRate,
       passengerCancellationRate,
       rideChart: chartData,

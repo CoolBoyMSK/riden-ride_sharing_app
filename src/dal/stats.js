@@ -420,6 +420,10 @@ export const findDailyStatsForWeek = async (driverId, year, week) => {
   weekEnd.setDate(weekStart.getDate() + 6);
   weekEnd.setHours(23, 59, 59, 999);
 
+  console.log(
+    `📅 Week ${week} of ${year}: ${weekStart.toISOString()} to ${weekEnd.toISOString()}`,
+  );
+
   // Get daily breakdown of rides for the week
   const dailyStats = await RideModel.aggregate([
     {
@@ -432,36 +436,64 @@ export const findDailyStatsForWeek = async (driverId, year, week) => {
     {
       $lookup: {
         from: 'ridetransactions',
-        let: { rideId: '$_id' },
-        pipeline: [
-          {
-            $match: {
-              $expr: { $eq: ['$rideId', '$$rideId'] },
-              status: { $in: ['COMPLETED', 'REFUNDED'] },
-            },
-          },
-        ],
+        localField: '_id',
+        foreignField: 'rideId',
         as: 'transactions',
       },
     },
     {
       $unwind: {
         path: '$transactions',
-        preserveNullAndEmptyArrays: false,
+        preserveNullAndEmptyArrays: true, // Handle rides without transactions
+      },
+    },
+    {
+      $match: {
+        $or: [
+          { 'transactions.status': { $in: ['COMPLETED', 'REFUNDED'] } },
+          { transactions: { $exists: false } }, // Include rides without transactions
+        ],
+      },
+    },
+    {
+      $group: {
+        _id: '$_id', // Group by ride ID first to avoid duplicates
+        rideId: { $first: '$_id' },
+        createdAt: { $first: '$createdAt' },
+        actualDistance: { $first: '$actualDistance' },
+        actualFare: { $first: '$actualFare' },
+        tipBreakdown: { $first: '$tipBreakdown' },
+        transaction: { $first: '$transactions' },
       },
     },
     {
       $project: {
-        rideId: '$_id',
-        date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
-        dayOfWeek: { $dayOfWeek: '$createdAt' },
+        rideId: 1,
+        date: {
+          $dateToString: {
+            format: '%Y-%m-%d',
+            date: '$createdAt',
+            timezone: 'UTC', // Ensure consistent timezone
+          },
+        },
+        dayOfWeek: {
+          $dayOfWeek: {
+            date: '$createdAt',
+            timezone: 'UTC',
+          },
+        },
+        distance: { $ifNull: ['$actualDistance', 0] },
         fare: { $ifNull: ['$actualFare', 0] },
         tip: { $ifNull: ['$tipBreakdown.amount', 0] },
-        commission: { $ifNull: ['$transactions.commission', 0] },
-        discount: { $ifNull: ['$transactions.discount', 0] },
-        driverEarning: { $ifNull: ['$transactions.driverEarning', 0] },
-        transactionStatus: '$transactions.status',
-        distance: { $ifNull: ['$actualDistance', 0] },
+        commission: { $ifNull: ['$transaction.commission', 0] },
+        discount: { $ifNull: ['$transaction.discount', 0] },
+        driverEarning: { $ifNull: ['$transaction.driverEarning', 0] },
+        transactionStatus: { $ifNull: ['$transaction.status', 'COMPLETED'] },
+      },
+    },
+    {
+      $match: {
+        transactionStatus: 'COMPLETED', // Only include completed transactions
       },
     },
     {
@@ -471,21 +503,18 @@ export const findDailyStatsForWeek = async (driverId, year, week) => {
         dayOfWeek: { $first: '$dayOfWeek' },
         rides: {
           $push: {
-            $cond: [
-              { $eq: ['$transactionStatus', 'COMPLETED'] },
-              {
-                rideId: '$rideId',
-                distance: '$distance',
-                fare: '$fare',
-                tip: '$tip',
-                commission: '$commission',
-                discount: '$discount',
-                driverEarning: '$driverEarning',
-              },
-              null,
-            ],
+            rideId: '$rideId',
+            distance: '$distance',
+            fare: '$fare',
+            tip: '$tip',
+            commission: '$commission',
+            discount: '$discount',
+            driverEarning: '$driverEarning',
           },
         },
+        totalRides: { $sum: 1 },
+        totalEarnings: { $sum: '$driverEarning' },
+        totalDistance: { $sum: '$distance' },
       },
     },
     {
@@ -504,15 +533,13 @@ export const findDailyStatsForWeek = async (driverId, year, week) => {
               { case: { $eq: ['$dayOfWeek', 6] }, then: 'Friday' },
               { case: { $eq: ['$dayOfWeek', 7] }, then: 'Saturday' },
             ],
+            default: 'Unknown',
           },
         },
-        rides: {
-          $filter: {
-            input: '$rides',
-            as: 'ride',
-            cond: { $ne: ['$$ride', null] },
-          },
-        },
+        rides: 1,
+        totalRides: 1,
+        totalEarnings: 1,
+        totalDistance: 1,
       },
     },
     {
@@ -520,32 +547,51 @@ export const findDailyStatsForWeek = async (driverId, year, week) => {
     },
   ]);
 
-  // Fill in missing days with empty arrays
+  console.log(`📊 Found ${dailyStats.length} days with data`);
+
+  // Fill in missing days with consistent structure
   const allDays = [];
   for (let i = 0; i < 7; i++) {
     const date = new Date(weekStart);
     date.setDate(weekStart.getDate() + i);
     const dateStr = date.toISOString().split('T')[0];
 
+    // MongoDB dayOfWeek: 1=Sunday, 2=Monday, ..., 7=Saturday
+    const dayOfWeek = date.getUTCDay() + 1; // getUTCDay() returns 0=Sunday, 6=Saturday
+
+    const dayNames = [
+      'Sunday',
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+    ];
+    const dayName = dayNames[date.getUTCDay()];
+
     const existingDay = dailyStats.find((day) => day.date === dateStr);
 
     allDays.push(
       existingDay || {
         date: dateStr,
-        dayOfWeek: date.getDay() + 1,
-        dayName: [
-          'Sunday',
-          'Monday',
-          'Tuesday',
-          'Wednesday',
-          'Thursday',
-          'Friday',
-          'Saturday',
-        ][date.getDay()],
-        completedRides: [],
+        dayOfWeek: dayOfWeek,
+        dayName: dayName,
+        rides: [],
+        totalRides: 0,
+        totalEarnings: 0,
+        totalDistance: 0,
       },
     );
   }
+
+  // Debug: Log the final structure
+  console.log('📋 FINAL DAILY STATS STRUCTURE:');
+  allDays.forEach((day) => {
+    console.log(
+      `  ${day.date} (${day.dayName}): ${day.rides.length} rides, $${day.totalEarnings} earnings`,
+    );
+  });
 
   return {
     weekInfo: {

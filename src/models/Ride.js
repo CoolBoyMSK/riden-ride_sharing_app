@@ -24,6 +24,15 @@ const locationSchema = new mongoose.Schema(
 
 const fareBreakdownSchema = new mongoose.Schema(
   {
+    rideSetupFee: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+    airportRideFee: {
+      type: Number,
+      min: 0,
+    },
     baseFare: {
       type: Number,
       required: true,
@@ -54,12 +63,27 @@ const fareBreakdownSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    discount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     subtotal: {
       type: Number,
       required: true,
       min: 0,
     },
     promoDiscount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    surgeMultiplier: {
+      type: Number,
+      default: 1,
+      min: 1,
+    },
+    surgeAmount: {
       type: Number,
       default: 0,
       min: 0,
@@ -152,6 +176,47 @@ const rideSchema = new mongoose.Schema(
     },
     fareBreakdown: fareBreakdownSchema,
 
+    surgeMultiplier: {
+      type: Number,
+      min: 0,
+    },
+    isSurgeApplied: {
+      type: Boolean,
+      default: false,
+    },
+    surgeLevel: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    surgeData: {
+      type: Object,
+    },
+    fareUpdates: {
+      previousFare: {
+        type: Number,
+        min: 0,
+      },
+      newFare: {
+        type: Number,
+        min: 0,
+      },
+      surgeMultiplier: {
+        type: Number,
+        min: 0,
+      },
+      surgeLevel: {
+        type: Number,
+        min: 0,
+      },
+      updatedAt: {
+        type: Date,
+      },
+      reason: {
+        type: String,
+      },
+    },
+
     tipBreakdown: {
       amount: {
         type: Number,
@@ -216,6 +281,10 @@ const rideSchema = new mongoose.Schema(
       type: Number, // in minutes
       min: 0,
     },
+    actualWaitingTime: {
+      type: Number, // in minutes
+      min: 0,
+    },
 
     // Timestamps
     requestedAt: {
@@ -239,6 +308,9 @@ const rideSchema = new mongoose.Schema(
       type: Date,
     },
     driverPaidAt: {
+      type: Date,
+    },
+    cancelledAt: {
       type: Date,
     },
 
@@ -276,7 +348,10 @@ const rideSchema = new mongoose.Schema(
     receipt: {
       type: Object,
     },
-
+    isAirport: {
+      type: Boolean,
+      default: false,
+    },
     isReported: {
       type: Boolean,
       default: false,
@@ -285,7 +360,39 @@ const rideSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+
     // Metadata
+    notifiedDrivers: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+      },
+    ],
+    driverDistance: {
+      type: Number,
+      min: 0,
+    },
+    searchRadius: {
+      type: Number,
+      min: 0,
+    },
+    searchStartTime: {
+      type: Date,
+    },
+    searchHistory: [
+      {
+        radius: {
+          type: Number,
+          min: 0,
+        },
+        timestamp: {
+          type: Date,
+        },
+      },
+    ],
+    expiryTime: {
+      type: Date,
+    },
     createdAt: {
       type: Date,
       default: Date.now,

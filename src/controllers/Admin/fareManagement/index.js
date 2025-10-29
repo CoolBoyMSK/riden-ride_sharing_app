@@ -17,7 +17,7 @@ export function createFare(req, res) {
   return handleResponse(
     {
       handler: createFareManagement,
-      validationFn: () => createFareManagementValidation(req.body),
+      // validationFn: () => createFareManagementValidation(req.body),
       handlerParams: [
         { carType: req.body.carType, dailyFares: req.body.dailyFares },
       ],
@@ -56,11 +56,11 @@ export function replaceFare(req, res) {
   return handleResponse(
     {
       handler: updateFareManagement,
-      validationFn: () =>
-        updateFareManagementValidation({
-          carType: req.params.carType,
-          dailyFares: req.body.dailyFares,
-        }),
+      // validationFn: () =>
+      //   updateFareManagementValidation({
+      //     carType: req.params.carType,
+      //     dailyFares: req.body.dailyFares,
+      //   }),
       handlerParams: [
         { carType: req.params.carType, dailyFares: req.body.dailyFares },
       ],

@@ -157,15 +157,24 @@ export const downloadReceipt = async ({ id }, res, resp) => {
 
 export const updateLocation = async (user, { coordinates }, resp) => {
   try {
+    const driver = await findDriverByUserId(user._id);
+    if (!driver) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch driver';
+      return resp;
+    }
+
     const location = { type: 'Point', coordinates };
-    const updatedLocation = await upsertDriverLocation(user._id, { location });
+    const updatedLocation = await upsertDriverLocation(driver._id, {
+      location,
+    });
     if (!updatedLocation) {
       resp.error = true;
       resp.error_message = 'Failed to update driver location';
       return resp;
     }
 
-    const ride = await findActiveRideByDriver(user._id);
+    const ride = await findActiveRideByDriver(driver._id);
     if (ride) {
       emitToRide(ride._id, 'ride:driver_update_location', {
         success: true,

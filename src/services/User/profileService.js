@@ -42,6 +42,274 @@ export const getUserProfile = async (user, resp) => {
   return resp;
 };
 
+export const updatePassengerProfile = async (user, body, file, resp) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const update = { ...body };
+    const messages = {};
+    const passwordRedirect = {}; // Changed from otpRedirect to passwordRedirect
+
+    if (!user?.id) throw new Error('User ID is missing.');
+
+    const myUser = await findUserById(user.id);
+    if (!myUser) throw new Error('User not found.');
+
+    // Normalize roles (handles string or array, case-insensitive)
+    const roles = Array.isArray(user.roles)
+      ? user.roles
+      : [user.roles].filter(Boolean);
+    const rolesNorm = roles.map((r) => String(r).toLowerCase().trim());
+    const isDriver = rolesNorm.includes('driver');
+    const isPassenger = rolesNorm.includes('passenger');
+
+    // --- NAME ---
+    if (
+      update.name?.trim() &&
+      update.name.trim() !== myUser.userId.name?.trim()
+    ) {
+    }
+
+    // --- IMAGE ---
+    if (file) {
+      // Determine the new image source for comparison: prefer Buffer (memoryStorage), otherwise path
+      const newImageSource = Buffer.isBuffer(file.buffer)
+        ? file.buffer
+        : file.path;
+
+      if (!newImageSource) {
+        // If neither buffer nor path is available, skip image logic
+        console.warn(
+          'No file.buffer or file.path available on multer file; skipping image comparison/upload.',
+        );
+      } else {
+        // Compare existing (URL) with the new image (buffer or path)
+        const same = await isSameImage(
+          myUser.userId.profileImg,
+          newImageSource,
+        );
+
+        if (!same) {
+          // Try uploading directly (most uploadToS3 implementations accept buffer within file)
+          let url;
+          try {
+            url = await uploadToS3(myUser.userId._id, file);
+          } catch (uploadErr) {
+            console.warn(
+              'uploadToS3 failed with direct file. Attempting tmp-file fallback:',
+              uploadErr?.message,
+            );
+
+            // Fallback: write buffer to temp file and call uploadToS3 with path-like object
+            if (file?.buffer) {
+              const tmpName = `${uuidv4()}-${file.originalname || 'upload'}`;
+              const tmpPath = path.join(os.tmpdir(), tmpName);
+              try {
+                await fs.writeFile(tmpPath, file.buffer);
+                // many upload helpers accept object with path; adjust if your uploadToS3 signature differs
+                url = await uploadToS3(myUser.userId._id, {
+                  path: tmpPath,
+                  mimetype: file.mimetype,
+                  originalname: file.originalname,
+                });
+              } finally {
+                // best-effort cleanup
+                try {
+                  await fs.unlink(tmpPath);
+                } catch (e) {
+                  /* ignore */
+                }
+              }
+            } else {
+              throw uploadErr; // cannot fallback
+            }
+          }
+
+          if (!url) throw new Error('S3 upload returned no URL.');
+
+          if (isPassenger) {
+            update.profileImg = url;
+            messages.profileImgMessage = 'Profile Image updated successfully';
+          }
+        } else {
+          messages.profileImgMessage =
+            'Uploaded image is same as existing; no action taken.';
+          console.log('Uploaded image is same as existing; no action taken.');
+        }
+      }
+    }
+
+    // --- PASSWORD VERIFICATION FOR EMAIL/PHONE CHANGES ---
+    const emailChangeRequested =
+      update.email?.trim() &&
+      update.email.trim() !== myUser.userId.email?.trim();
+    const phoneChangeRequested =
+      update.phoneNumber?.trim() &&
+      update.phoneNumber.trim() !== myUser.userId.phoneNumber?.trim();
+
+    if (emailChangeRequested || phoneChangeRequested) {
+      // Check if password is provided for verification
+      if (!update.password) {
+        resp.error = true;
+        resp.error_message =
+          'Password is required to change email or phone number';
+        return resp;
+      }
+
+      // Verify password
+      const isPasswordValid = await bcrypt.compare(
+        update.password,
+        myUser.userId.password,
+      );
+      if (!isPasswordValid) {
+        resp.error = true;
+        resp.error_message = 'Invalid password';
+        return resp;
+      }
+
+      // Remove password from update object after verification
+      delete update.password;
+
+      // Handle email change
+      if (emailChangeRequested) {
+        const newEmail = update.email.trim();
+        const isRegistered = await findUserByEmail(newEmail);
+        if (isRegistered) {
+          messages.emailMessage = `Email ${newEmail} is already registered`;
+          delete update.email;
+        } else {
+          passwordRedirect.email = {
+            success: true,
+            currentEmail: myUser.userId.email?.trim(),
+            newEmail,
+            name: myUser.userId.name?.trim(),
+            userId: myUser.userId._id,
+            requiresPassword: false, // Password already verified
+          };
+          // Don't delete email yet - we'll handle it after OTP verification
+        }
+      }
+
+      // Handle phone change
+      if (phoneChangeRequested) {
+        const newPhone = update.phoneNumber.trim();
+        const isRegistered = await findUserByPhone(newPhone);
+        if (isRegistered) {
+          messages.phoneNumberMessage = `Phone Number ${newPhone} is already registered`;
+          delete update.phoneNumber;
+        } else {
+          passwordRedirect.phoneNumber = {
+            success: true,
+            currentPhone: myUser.userId.phoneNumber?.trim(),
+            newPhone,
+            name: myUser.userId.name?.trim(),
+            userId: myUser.userId._id,
+            requiresPassword: false, // Password already verified
+          };
+          // Don't delete phone yet - we'll handle it after OTP verification
+        }
+      }
+
+      // If both email and phone are being changed, store the context for coordinated update
+      if (emailChangeRequested && phoneChangeRequested) {
+        passwordRedirect.bothChanging = true;
+      }
+    } else {
+      // Handle email without password (if no change requested but email exists in update)
+      if (
+        update.email?.trim() &&
+        update.email.trim() !== myUser.userId.email?.trim()
+      ) {
+        const newEmail = update.email.trim();
+        const isRegistered = await findUserByEmail(newEmail);
+        if (isRegistered && isRegistered.roles[0] === user.roles[0]) {
+          messages.emailMessage = `Email ${newEmail} is already registered`;
+        } else {
+          messages.emailMessage = 'Password is required to change email';
+        }
+        delete update.email;
+      }
+
+      // Handle phone without password (if no change requested but phone exists in update)
+      if (
+        update.phoneNumber?.trim() &&
+        update.phoneNumber.trim() !== myUser.userId.phoneNumber?.trim()
+      ) {
+        const newPhone = update.phoneNumber.trim();
+        const isRegistered = await findUserByPhone(newPhone);
+        if (isRegistered && isRegistered.roles[0] === user.roles[0]) {
+          messages.phoneNumberMessage = `Phone Number ${newPhone} is already registered`;
+        } else {
+          messages.phoneNumberMessage =
+            'Password is required to change phone number';
+        }
+        delete update.phoneNumber;
+      }
+    }
+
+    // --- ALLOWED FIELDS (role-based) ---
+    const BASE_ALLOWED_FIELDS = ['gender'];
+    const ALLOWED_FIELDS = isPassenger
+      ? [...BASE_ALLOWED_FIELDS, 'profileImg']
+      : BASE_ALLOWED_FIELDS;
+
+    const safeUpdate = Object.keys(update)
+      .filter((key) => ALLOWED_FIELDS.includes(key))
+      .reduce((obj, key) => {
+        obj[key] = update[key];
+        return obj;
+      }, {});
+
+    // --- PERFORM UPDATE ---
+    let updated = null;
+    if (Object.keys(safeUpdate).length > 0) {
+      updated = await updateUserById(user.id, safeUpdate, { session });
+      if (!updated) throw new Error('Failed to update profile.');
+      updated = updated.toObject ? updated.toObject() : updated;
+      delete updated.password;
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    if (messages.length > 0) {
+      await sendPassengerProfileEditRequestEmail(
+        myUser.userId?.email,
+        myUser.userId?.name,
+      );
+
+      const notify = await createAdminNotification({
+        title: 'Profile Edit Request',
+        message: `A ${user.roles[0]} has submitted a profile edit request.`,
+        metadata: updated,
+        module: `${user.roles[0]}_management`,
+        type: 'ALERT',
+        actionLink:
+          user.roles[0] === 'driver'
+            ? `${env.FRONTEND_URL}/api/admin/drivers/update-requests?page=1&limit=10`
+            : `${env.FRONTEND_URL}/api/admin/passengers/update-requests/?page=1&limit=10`,
+      });
+      if (!notify) {
+        console.error('Failed to send notification');
+      }
+    }
+
+    resp.data = {
+      messages,
+      passwordRedirect, // Changed from otpRedirect to passwordRedirect
+      updatedProfile: updated || null,
+    };
+    return resp;
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'something went wrong';
+    return resp;
+  }
+};
+
 export const updateUserProfile = async (user, body, file, resp) => {
   const session = await mongoose.startSession();
   session.startTransaction();

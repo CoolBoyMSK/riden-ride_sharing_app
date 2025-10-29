@@ -17,6 +17,7 @@ registerRoute({
   router,
   route: '/',
   admin_auth_enable: true,
+  get_permission: 'support_ticket',
   get_method: findAllComplainTicketsController,
 });
 
@@ -24,6 +25,7 @@ registerRoute({
   router,
   route: '/get',
   admin_auth_enable: true,
+  get_permission: 'support_ticket',
   get_method: getComplainByIdController,
 });
 
@@ -31,6 +33,7 @@ registerRoute({
   router,
   route: '/edit',
   admin_auth_enable: true,
+  put_permission: 'support_ticket',
   put_method: updateComplainStatusController,
 });
 
@@ -39,6 +42,7 @@ registerRoute({
   route: '/reply',
   admin_auth_enable: true,
   put_middlewares: [uploadMany],
+  put_permission: 'support_ticket',
   put_method: replyToComplainController,
 });
 
@@ -46,6 +50,7 @@ registerRoute({
   router,
   route: '/reports',
   admin_auth_enable: true,
+  get_permission: 'report_management',
   get_method: findAllReportsController,
 });
 
@@ -53,6 +58,7 @@ registerRoute({
   router,
   route: '/report',
   admin_auth_enable: true,
+  get_permission: 'report_management',
   get_method: getReportByIdController,
 });
 
@@ -60,6 +66,7 @@ registerRoute({
   router,
   route: '/report-edit',
   admin_auth_enable: true,
+  put_permission: 'report_management',
   put_method: updateReportStatusController,
 });
 

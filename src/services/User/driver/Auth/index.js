@@ -15,6 +15,7 @@ import {
 import {
   createDriverProfile,
   findDriverByUserId,
+  createDriverLocation,
 } from '../../../../dal/driver.js';
 import {
   createDriverStripeAccount,
@@ -470,6 +471,13 @@ export const otpVerification = async (
       if (!wallet) {
         resp.error = true;
         resp.error_message = 'Failed to create In-App wallet';
+        return resp;
+      }
+
+      const driverLocation = await createDriverLocation(driver._id);
+      if (!driverLocation) {
+        resp.error = true;
+        resp.error_message = 'Failed to create driver location';
         return resp;
       }
 

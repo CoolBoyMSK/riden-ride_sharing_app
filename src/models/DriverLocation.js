@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { DRIVER_STATUS } from '../enums/rideStatus.js';
+import { DRIVER_STATUS } from '../enums/driver.js';
 
 const driverLocationSchema = new mongoose.Schema(
   {
@@ -19,12 +19,13 @@ const driverLocationSchema = new mongoose.Schema(
       coordinates: {
         type: [Number], // [longitude, latitude]
         required: true,
+        
       },
     },
     status: {
       type: String,
       enum: DRIVER_STATUS,
-      default: 'OFFLINE',
+      default: 'offline',
       index: true,
     },
     isAvailable: {

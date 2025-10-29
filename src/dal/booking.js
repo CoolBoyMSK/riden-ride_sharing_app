@@ -170,7 +170,7 @@ export const findPassengerBookingById = async (passengerId, bookingId) =>
       { path: 'driverRating' },
       {
         path: 'driverId',
-        select: 'userId',
+        select: 'userId vehicle',
         populate: {
           path: 'userId',
           select: 'name email phoneNumber profileImg',

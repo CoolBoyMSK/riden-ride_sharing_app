@@ -37,6 +37,10 @@ const adminCommissionSchema = new mongoose.Schema(
       required: true,
       min: 0,
     },
+    driverDistanceCommission: {
+      type: Number,
+      min: 0,
+    },
     isRefunded: {
       type: Boolean,
       default: false,

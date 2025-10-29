@@ -12,8 +12,8 @@ import Feedback from '../models/Feedback.js';
 import Commission from '../models/Commission.js';
 import AdminCommission from '../models/AdminCommission.js';
 import RideTransaction from '../models/RideTransaction.js';
-import { notifyUser } from '../dal/notification.js';
 import moment from 'moment';
+import Ride from '../models/Ride.js';
 
 // Ride Operations
 export const createRide = async (rideData) => {
@@ -817,6 +817,14 @@ export const deductRidenCommission = async (
   discount,
   rideId,
 ) => {
+  const ride = await Ride.findById(rideId);
+  if (!ride) {
+    return false;
+  }
+  let driverDistanceCommission = 0;
+  if (ride.driverDistance > 5) {
+    driverDistanceCommission = 5 - Math.ceil(ride.driverDistance);
+  }
   const commission = await Commission.findOne({ carType }).lean();
 
   await AdminCommission.create({
@@ -826,7 +834,10 @@ export const deductRidenCommission = async (
     totalAmount: actualFare,
     discount,
     commission: commission.percentage,
-    commissionAmount: Math.floor((actualFare / 100) * commission.percentage),
+    commissionAmount:
+      Math.floor((actualFare / 100) * commission.percentage) -
+      driverDistanceCommission,
+    driverDistanceCommission,
   });
 
   return Math.floor((actualFare / 100) * commission.percentage);

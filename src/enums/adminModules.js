@@ -5,7 +5,6 @@ export const ADMIN_MODULES = [
   'admin_roles',
   'driver_management',
   'passenger_management',
-  'vehicle_type_management',
   'booking_management',
   'reviews_ratings',
   'promo_code_management',

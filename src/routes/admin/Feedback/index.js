@@ -12,6 +12,7 @@ registerRoute({
   router,
   route: '/',
   admin_auth_enable: true,
+  get_permission: 'reviews_ratings',
   get_method: getDriverFeedbacksController,
 });
 
@@ -19,6 +20,7 @@ registerRoute({
   router,
   route: '/delete',
   admin_auth_enable: true,
+  delete_permission: 'reviews_ratings',
   delete_method: deleteFeedbackController,
 });
 
@@ -26,6 +28,7 @@ registerRoute({
   router,
   route: '/stats',
   admin_auth_enable: true,
+  get_permission: 'reviews_ratings',
   get_method: feedbackStatsController,
 });
 
