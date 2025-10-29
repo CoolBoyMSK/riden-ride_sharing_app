@@ -21,9 +21,8 @@ export const findDriverByUserId = (userId, { session } = {}) => {
   return query.lean();
 };
 
-export const findDriverByDriverId = async (id) => {
+export const findDriverByDriverId = async (id) =>
   DriverModel.findById(id).lean();
-};
 
 export const createDriverWallet = (driverId) =>
   new DriverWallet({

@@ -335,17 +335,17 @@ export const approveRequestedDriver = async ({ id }, resp) => {
 
     const documents = driver.documents;
     const isDocsApproved =
-      documents.proofOfWork.status === 'approved' &&
-      documents.profilePicture.status === 'approved' &&
-      documents.driversLicense.status === 'approved' &&
-      documents.commercialDrivingRecord.status === 'approved' &&
-      documents.vehicleOwnerCertificateAndInsurance.status === 'approved' &&
-      documents.vehicleInspection.status === 'approved';
+      documents.proofOfWork.status === 'verified' &&
+      documents.profilePicture.status === 'verified' &&
+      documents.driversLicense.status === 'verified' &&
+      documents.commercialDrivingRecord.status === 'verified' &&
+      documents.vehicleOwnerCertificateAndInsurance.status === 'verified' &&
+      documents.vehicleInspection.status === 'verified';
 
     if (!isDocsApproved) {
       await session.abortTransaction();
       resp.error = true;
-      resp.error_message = 'Documents not approved';
+      resp.error_message = 'Documents not verified';
       return resp;
     }
 

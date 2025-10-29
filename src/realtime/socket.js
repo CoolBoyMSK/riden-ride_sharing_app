@@ -677,6 +677,8 @@ export const initSocket = (server) => {
         }
 
         const availability = await findDriverLocation(driver._id);
+
+        console.log(availability);
         if (!availability) {
           return socket.emit('error', {
             success: false,
@@ -709,6 +711,7 @@ export const initSocket = (server) => {
           ride.pickupLocation?.coordinates,
           availability.location?.coordinates,
         );
+        console.log(driverDistance);
         if (!driverDistance) {
           return socket.emit('error', {
             success: false,

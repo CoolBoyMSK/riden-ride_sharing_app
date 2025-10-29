@@ -1,6 +1,7 @@
 import { handleResponse } from '../../../utils/handleRespone.js';
 import {
   getAllNotifications,
+  getUnreadNotificationsCount,
   readNotifications,
   deleteNotifications,
   deleteNotificationById,
@@ -13,6 +14,18 @@ export const getAllNotificationsController = (req, res) =>
       validationFn: null,
       handlerParams: [req.user],
       successMessage: 'Admin notifications fetched successfully',
+    },
+    req,
+    res,
+  );
+
+export const getUnreadNotificationsCountController = (req, res) =>
+  handleResponse(
+    {
+      handler: getUnreadNotificationsCount,
+      validationFn: null,
+      handlerParams: [req.user],
+      successMessage: 'Admin unread notifications count fetched successfully',
     },
     req,
     res,

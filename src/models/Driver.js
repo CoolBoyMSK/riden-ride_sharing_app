@@ -160,7 +160,7 @@ const driverSchema = new mongoose.Schema(
     },
     isApproved: {
       type: Boolean,
-      default: true,
+      default: false,
       index: true,
     },
     isActive: {

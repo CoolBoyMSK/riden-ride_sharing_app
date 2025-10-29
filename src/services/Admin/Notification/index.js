@@ -1,5 +1,6 @@
 import {
   findAdminNotifications,
+  findUnreadNotificationsCount,
   toggleNotificationReadStatus,
   updateNotificationsAsDeleted,
   updateNotificationsAsDeletedById,
@@ -15,6 +16,25 @@ export const getAllNotifications = async (user, resp) => {
     }
 
     resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
+    return resp;
+  }
+};
+
+export const getUnreadNotificationsCount = async (user, resp) => {
+  try {
+    const success = await findUnreadNotificationsCount(user._id);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to count unread notifications';
+      return resp;
+    }
+
+    resp.data = { unreadNotificationsCount: success };
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);

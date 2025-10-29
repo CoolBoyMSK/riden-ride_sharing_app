@@ -69,6 +69,13 @@ export const findAdminNotifications = async (adminId, page = 1, limit = 10) => {
   };
 };
 
+export const findUnreadNotificationsCount = async (adminId) =>
+  AdminNotification.countDocuments({
+    'recipients.adminId': new mongoose.Types.ObjectId(adminId),
+    'recipients.isRead': false,
+    'recipients.isDeleted': false,
+  });
+
 export const toggleNotificationReadStatus = async (adminId, notificationId) => {
   try {
     if (!adminId || !notificationId) {

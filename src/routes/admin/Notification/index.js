@@ -2,6 +2,7 @@ import express from 'express';
 import { registerRoute } from '../../../utils/registerRoute.js';
 import {
   getAllNotificationsController,
+  getUnreadNotificationsCountController,
   readNotificationsController,
   deleteNotificationsController,
   deleteNotificationByIdController,
@@ -15,6 +16,14 @@ registerRoute({
   admin_auth_enable: true,
   get_permission: 'notifications',
   get_method: getAllNotificationsController,
+});
+
+registerRoute({
+  router,
+  route: '/count',
+  admin_auth_enable: true,
+  get_permission: 'notifications',
+  get_method: getUnreadNotificationsCountController,
 });
 
 registerRoute({
