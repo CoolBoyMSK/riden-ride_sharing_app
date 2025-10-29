@@ -976,6 +976,7 @@ export const sendPassengerPhoneOtp = async (
       }
 
       const user = await findUserByEmail(email);
+      console.log(user);
       if (!user || !user.roles.includes('passenger')) {
         resp.error = true;
         resp.error_message = 'User not found';

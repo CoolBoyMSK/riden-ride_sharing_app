@@ -362,11 +362,12 @@ export const approveRequestedDriver = async ({ id }, resp) => {
     }
 
     const isVehicleAdded =
-      driver.vehicle?.trim() &&
+      driver.vehicle &&
       driver.vehicle?.type.trim() &&
       driver.vehicle?.model.trim() &&
       driver.vehicle?.plateNumber.trim() &&
-      driver.vehicle?.color.trim();
+      driver.vehicle?.color.trim() &&
+      driver.vehicle?.imageUrl.trim();
 
     if (!isVehicleAdded) {
       await session.abortTransaction();
@@ -375,7 +376,15 @@ export const approveRequestedDriver = async ({ id }, resp) => {
       return resp;
     }
 
-    // const isPaymentMethod
+    const isPaymentMethodAdded =
+      driver.payoutMethodIds && driver.payoutMethodIds.length > 0;
+
+    if (!isPaymentMethodAdded) {
+      await session.abortTransaction();
+      resp.error = true;
+      resp.error_message = 'Payment method not added';
+      return resp;
+    }
 
     const success = await updateDriverById(
       id,

@@ -22,7 +22,7 @@ export const findDriverByUserId = (userId, { session } = {}) => {
 };
 
 export const findDriverByDriverId = async (id) => {
-  DriverModel.findById(id);
+  DriverModel.findById(id).lean();
 };
 
 export const createDriverWallet = (driverId) =>
