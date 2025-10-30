@@ -283,13 +283,13 @@ export const initSocket = (server) => {
           }
 
           let updatedDriver;
-          if (driver.isActive && driver.status === 'online') {
+          if (driver.status === 'online') {
             updatedDriver = await updateDriverByUserId(userId, {
               isActive: false,
               status: 'offline',
             });
             await toggleDriverLocation(driver._id, 'offline', false);
-          } else if (!driver.isActive && driver.status === 'offline') {
+          } else if (driver.status === 'offline') {
             updatedDriver = await updateDriverByUserId(userId, {
               isActive: true,
               status: 'online',
@@ -303,6 +303,36 @@ export const initSocket = (server) => {
             objectType,
             data: updatedDriver,
             message: `Driver status set to ${updatedDriver.status} successfully`,
+          });
+        } catch (error) {
+          console.error(`SOCKET ERROR: ${error}`);
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: `${error.code || 'SOCKET_ERROR'}`,
+            message: `SOCKET ERROR: ${error.message}`,
+          });
+        }
+      });
+
+      socket.on('driver:status', async () => {
+        const objectType = 'driver-status';
+        try {
+          const driver = await findDriverByUserId(userId);
+          if (!driver) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'NOT_FOUND',
+              message: 'Driver not found',
+            });
+          }
+
+          socket.emit('driver:status', {
+            success: true,
+            objectType,
+            data: driver,
+            message: `Driver fetched successfully`,
           });
         } catch (error) {
           console.error(`SOCKET ERROR: ${error}`);
