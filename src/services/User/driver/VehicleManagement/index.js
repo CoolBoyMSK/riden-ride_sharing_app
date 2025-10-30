@@ -24,11 +24,11 @@ export async function getVehicle(params, resp) {
   return resp;
 }
 
-export async function updateDriverVehicleRequest(userId, vehicle, resp) {
+export async function updateDriverVehicleRequest(user, vehicle, resp) {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const updated = await vehicleUpdateRequest(userId, vehicle, session);
+    const updated = await vehicleUpdateRequest(user, vehicle, session);
     if (!updated) {
       await session.abortTransaction();
       session.endSession();

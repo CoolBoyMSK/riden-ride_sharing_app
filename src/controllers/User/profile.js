@@ -1,6 +1,6 @@
 import {
   getUserProfile,
-  updateUserProfile,
+  updateDriverProfile,
   sendEmailUpdateOtp,
   verifyEmailUpdate,
   sendPhoneUpdateOtp,
@@ -21,10 +21,10 @@ export const fetchProfile = (req, res) =>
     res,
   );
 
-export const editProfile = (req, res) =>
+export const editDriverProfile = (req, res) =>
   handleResponse(
     {
-      handler: updateUserProfile,
+      handler: updateDriverProfile,
       // validationFn: validateProfileUpdate,
       handlerParams: [req.user, req.body, req.file],
       successMessage: 'Profile updated successfully',

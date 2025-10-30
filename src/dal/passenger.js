@@ -22,6 +22,9 @@ export const findPassengerByUserId = (userId, options = {}) => {
   return query.lean();
 };
 
+export const findPassengerData = async (userId) =>
+  PassengerModel.findOne({ userId }).populate('userId');
+
 export const createPassengerProfile = (userId, uniqueId) =>
   new PassengerModel({
     userId,

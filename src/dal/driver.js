@@ -11,15 +11,20 @@ import { DOCUMENT_TYPES } from '../enums/driver.js';
 import { findUserById } from './user/index.js';
 import { sendDocumentEditRequestApprovalEmail } from '../templates/emails/user/index.js';
 import { emitToUser, emitToRide } from '../realtime/socket.js';
+import { notifyUser, createAdminNotification } from '../dal/notification.js';
 import env from '../config/envConfig.js';
 import Queue from 'bull';
 import Redis from 'ioredis';
+import User from '../models/User.js';
 
 export const findDriverByUserId = (userId, { session } = {}) => {
   let query = DriverModel.findOne({ userId });
   if (session) query = query.session(session);
   return query.lean();
 };
+
+export const findDriverData = async (userId) =>
+  DriverModel.findOne({ userId }).populate('userId');
 
 export const findDriverByDriverId = async (id) =>
   DriverModel.findById(id).lean();
@@ -215,7 +220,7 @@ export const addDriverSuspension = (driverId, reason, endDate) =>
 export const removeDriverSuspension = (driverId) =>
   DriverModel.findByIdAndUpdate(
     driverId,
-    { $set: { status: 'offline', isSuspended: false } },
+    { $set: { status: 'offline', isActive: false, isSuspended: false } },
     { new: true },
   ).lean();
 
@@ -403,12 +408,38 @@ export const deleteDriver = async (driverId, session) => {
   return true;
 };
 
-export const updateDocumentStatus = (driverId, type, status, options = {}) => {
-  return DriverModel.findOneAndUpdate(
-    { _id: driverId },
-    { $set: { [`documents.${type}.status`]: status } },
-    { new: true, ...options },
-  );
+export const updateDocumentStatus = async (
+  driverId,
+  type,
+  status,
+  options = {},
+) => {
+  try {
+    const driver = await DriverModel.findOneAndUpdate(
+      { _id: driverId },
+      { $set: { [`documents.${type}.status`]: status } },
+      { new: true, ...options },
+    );
+
+    if (!driver) {
+      throw new Error('Driver not found');
+    }
+
+    if (type === 'profilePicture' && status === 'verified') {
+      const imageUrl = driver.documents?.profilePicture?.imageUrl;
+
+      if (imageUrl) {
+        await UserModel.findByIdAndUpdate(driver.userId, {
+          profileImg: imageUrl,
+        });
+      }
+    }
+
+    return driver;
+  } catch (error) {
+    console.error('Error updating document status:', error);
+    throw error;
+  }
 };
 
 export const updateWayBillStatus = (driverId, type, status, options = {}) => {
@@ -555,6 +586,8 @@ export const updateDriverRequest = async (requestId, status, options = {}) => {
   // 2️⃣ If rejected, return the rejected request
   if (finalStatus !== 'approved') return request;
 
+  const user = await UserModel.findById(request.userId).lean();
+
   // 3️⃣ Handle Vehicle Update Requests
   if (request.vehicleRequest) {
     const newVehicle = request.vehicleRequest.new;
@@ -567,6 +600,20 @@ export const updateDriverRequest = async (requestId, status, options = {}) => {
     ).lean();
 
     if (!updatedDriver) throw new Error('Driver not found');
+
+    const notify = await notifyUser({
+      userId: user._id,
+      title: 'Update Request Approved',
+      message: `A driver ${user.name}'s vehicle update request has be approved`,
+      module: 'support',
+      metadata: { updatedDriver },
+      type: 'ALERT',
+      actionLink: null,
+    });
+    if (!notify) {
+      console.log('Failed to send notification');
+    }
+
     return updatedDriver;
   }
 
@@ -599,6 +646,7 @@ export const updateDriverRequest = async (requestId, status, options = {}) => {
       user.userId?.email,
       user.userId.name,
     );
+
     return updatedDriver;
   }
 
@@ -610,6 +658,19 @@ export const updateDriverRequest = async (requestId, status, options = {}) => {
   )
     .select('name email phoneNumber roles gender profileImg')
     .lean();
+
+  const notify = await notifyUser({
+    userId: user._id,
+    title: 'Update Request Approved',
+    message: `A driver ${user.name}'s ${fieldToUpdate} update request has been approved`,
+    module: 'support',
+    metadata: { updatedUser },
+    type: 'ALERT',
+    actionLink: null,
+  });
+  if (!notify) {
+    console.log('Failed to send notification');
+  }
 
   if (!updatedUser) throw new Error('User not found');
   return updatedUser;
@@ -633,16 +694,30 @@ export const updateDriverLegalAgreement = async (
   }
 };
 
-export const vehicleUpdateRequest = async (userId, vehicle, options = {}) => {
-  const oldVehicleRecord = await findVehicleByUserId(userId, options);
+export const vehicleUpdateRequest = async (user, vehicle, options = {}) => {
+  const oldVehicleRecord = await findVehicleByUserId(user._id, options);
   if (!oldVehicleRecord) {
     return false;
   }
   const doc = new UpdateRequestModel({
-    userId,
+    userId: user._id,
     vehicleRequest: { new: vehicle, old: oldVehicleRecord.vehicle },
   });
   await doc.save(options);
+
+  const notify = await notifyUser({
+    userId: user._id,
+    title: 'New Vehicle update Request',
+    message: `A driver ${user.name} submitted vehicle update request`,
+    module: 'support',
+    metadata: { doc },
+    module: 'driver_management',
+    type: 'ALERT',
+    actionLink: null,
+  });
+  if (!notify) {
+    console.log('Failed to send notification');
+  }
   return doc;
 };
 
@@ -1103,9 +1178,27 @@ export const notifyDriversInRadius = async (ride, maxRadius, minRadius = 0) => {
     };
 
     // Notify ONLY new drivers
-    newDrivers.forEach((driverId) => {
+    for (const driverId of newDrivers) {
       emitToUser(driverId, 'ride:new_request', rideNotificationData);
-    });
+
+      try {
+        const notify = await notifyUser({
+          userId: driverId,
+          title: 'New Ride Request',
+          message: `New ride request from ${ride.pickupLocation.address} to ${ride.dropoffLocation.address} — tap to respond`,
+          module: 'ride',
+          metadata: ride,
+          actionLink: 'ride:find',
+          isPush: true,
+        });
+
+        if (!notify) {
+          console.log(`Failed to send notification to driver ${driverId}`);
+        }
+      } catch (error) {
+        console.error(`Error notifying driver ${driverId}:`, error);
+      }
+    }
 
     // Store notified drivers in Redis
     if (newDrivers.length > 0) {

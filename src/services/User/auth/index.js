@@ -123,7 +123,7 @@ export const signupUser = async (
 
     const notify = await createAdminNotification({
       title: 'New Driver Registered',
-      message: `${user.name} registered as drive successfully, Their Phone No: ${user.phoneNumber} and Email: ${user.email}`,
+      message: `${user.name} registered as driver successfully, Their Phone No: ${user.phoneNumber} and Email: ${user.email}`,
       metadata: user,
       module: 'passenger_management',
       type: 'ALERT',

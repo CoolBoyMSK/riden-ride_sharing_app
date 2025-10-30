@@ -367,6 +367,15 @@ export const findBookingById = async (id) => {
       },
     },
     { $unwind: { path: '$passengerUser', preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: 'passengers',
+        localField: 'passengerDoc.userId',
+        foreignField: 'userId',
+        as: 'passengerData',
+      },
+    },
+    { $unwind: { path: '$passengerData', preserveNullAndEmptyArrays: true } },
 
     // 3️⃣ Join Driver document (contains vehicle info)
     {
@@ -389,6 +398,15 @@ export const findBookingById = async (id) => {
       },
     },
     { $unwind: { path: '$driverUser', preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: 'drivers',
+        localField: 'driverDoc.userId',
+        foreignField: 'userId',
+        as: 'driverData',
+      },
+    },
+    { $unwind: { path: '$driverData', preserveNullAndEmptyArrays: true } },
 
     {
       $lookup: {
@@ -417,53 +435,63 @@ export const findBookingById = async (id) => {
       $project: {
         _id: 1,
         rideId: 1,
+        passengerId: 1,
+        driverId: 1,
         status: 1,
         createdAt: 1,
         updatedAt: 1,
-        actualFare: 1,
         pickupLocation: 1,
         dropoffLocation: 1,
+        actualFare: 1,
         actualDistance: 1,
+        estimatedFaree: 1,
+        estimatedDistance: 1,
         paymentMethod: 1,
-        tipBreakdown: {
-          amount: '$tipBreakdown.amount',
-        },
-        passengerFeedback: {
-          rating: '$passengerFeedback.rating',
-          review: '$passengerFeedback.feedback',
-        },
-        driverFeedback: {
-          rating: '$driverFeedback.rating',
-          feedback: '$driverFeedback.feedback',
-        },
+        fareBreakdown: '$fareBreakdown',
+        tipBreakdown: '$tipBreakdown',
+        passengerFeedback: '$passengerFeedback',
+        driverFeedback: '$driverFeedback',
         passenger: {
-          _id: '$passengerUser._id',
-          name: { $ifNull: ['$passengerUser.name', 'N/A'] },
-          email: { $ifNull: ['$passengerUser.email', 'N/A'] },
-          phoneNumber: { $ifNull: ['$passengerUser.phoneNumber', 'N/A'] },
-          profileImg: { $ifNull: ['$passengerUser.profileImg', 'N/A'] },
+          passengerUser: '$passengerUser',
+          passengerData: '$passengerData',
         },
-
-        driver: {
-          _id: '$driverUser._id',
-          name: { $ifNull: ['$driverUser.name', 'N/A'] },
-          email: { $ifNull: ['$driverUser.email', 'N/A'] },
-          phoneNumber: { $ifNull: ['$driverUser.phoneNumber', 'N/A'] },
-          profileImg: { $ifNull: ['$driverUser.profileImg', 'N/A'] },
-          // ✅ Vehicle details from Driver schema
-          vehicle: {
-            type: { $ifNull: ['$driverDoc.vehicle.type', 'N/A'] },
-            model: { $ifNull: ['$driverDoc.vehicle.model', 'N/A'] },
-            plateNumber: { $ifNull: ['$driverDoc.vehicle.plateNumber', 'N/A'] },
-            color: { $ifNull: ['$driverDoc.vehicle.color', 'N/A'] },
-            imageUrl: { $ifNull: ['$driverDoc.vehicle.imageUrl', 'N/A'] },
-          },
-        },
+        driver: { driverUser: '$driverUser', driverData: '$driverData' },
       },
     },
   ]);
 
-  return booking || null;
+  booking || null;
+
+  const passengerRides = await Booking.countDocuments({
+    passengerId: booking.passengerId,
+    status: 'RIDE_COMPLETED',
+  });
+  const passengerReviews = await Feedback.countDocuments({
+    passengerId: booking.passengerId,
+    type: 'by_driver',
+  });
+
+  let driverRides = 0;
+  let driverReviews = 0;
+
+  if (booking.driverId) {
+    driverRides = await Booking.countDocuments({
+      driverId: booking.driverId,
+      status: 'RIDE_COMPLETED',
+    });
+    driverReviews = await Feedback.countDocuments({
+      driverId: booking.driverId,
+      type: 'by_passenger',
+    });
+  }
+
+  return {
+    ...booking,
+    passengerRides,
+    passengerReviews,
+    driverRides,
+    driverReviews,
+  };
 };
 
 export const findDriverFeedbacks = async ({

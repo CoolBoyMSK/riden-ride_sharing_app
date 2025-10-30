@@ -2,7 +2,7 @@ import express from 'express';
 import { uploadSingle } from '../../../middlewares/upload.js';
 import {
   fetchProfile,
-  editProfile,
+  editDriverProfile,
   sendEmailUpdateOtpController,
   verifyEmailUpdateController,
   sendPhoneUpdateOtpController,
@@ -23,9 +23,18 @@ registerRoute({
 
 registerRoute({
   router,
-  route: '/update',
-  put_middlewares: [anyUserAuth, uploadSingle],
-  put_method: editProfile,
+  route: '/driver/update',
+  driver_auth_enable: true,
+  put_middlewares: [uploadSingle],
+  put_method: editDriverProfile,
+});
+
+registerRoute({
+  router,
+  route: '/passenger/update',
+  passenger_auth_enable: true,
+  put_middlewares: [uploadSingle],
+  put_method: editDriverProfile,
 });
 
 registerRoute({

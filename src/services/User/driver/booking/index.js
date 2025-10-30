@@ -4,7 +4,7 @@ import {
   findBookingById,
   findReceipt,
 } from '../../../../dal/booking.js';
-import { findDriverByUserId } from '../../../../dal/driver.js';
+import { findDriverByUserId, findDriverData } from '../../../../dal/driver.js';
 import {
   findActiveRideByDriver,
   upsertDriverLocation,
@@ -12,6 +12,7 @@ import {
 import { generateRideReceipt } from '../../../../utils/receiptGenerator.js';
 import { createAdminNotification } from '../../../../dal/notification.js';
 import { emitToRide } from '../../../../realtime/socket.js';
+import env from '../../../../config/envConfig.js';
 
 export const getAllBookings = async (user, { page, limit }, resp) => {
   try {
@@ -67,7 +68,7 @@ export const getBookingById = async (user, { id }, resp) => {
 
 export const addBookingReport = async (user, { id }, { reason }, resp) => {
   try {
-    const driver = await findDriverByUserId(user._id);
+    const driver = await findDriverData(user._id);
     if (!driver) {
       resp.error = true;
       resp.error_message = 'Failed to fetch driver';
@@ -83,7 +84,7 @@ export const addBookingReport = async (user, { id }, { reason }, resp) => {
 
     const notify = await createAdminNotification({
       title: 'Issue Reported',
-      message: `A driver has reported an issue that needs your attention.`,
+      message: `A driver ${driver.userId?.name} has reported an issue that needs your attention.`,
       metadata: success,
       module: 'report_management',
       type: 'ALERT',

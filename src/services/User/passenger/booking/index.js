@@ -4,7 +4,10 @@ import {
   createBookingReportByPassengerId,
   findReceipt,
 } from '../../../../dal/booking.js';
-import { findPassengerByUserId } from '../../../../dal/passenger.js';
+import {
+  findPassengerByUserId,
+  findPassengerData,
+} from '../../../../dal/passenger.js';
 import { generateRideReceipt } from '../../../../utils/receiptGenerator.js';
 import { createAdminNotification } from '../../../../dal/notification.js';
 
@@ -66,7 +69,7 @@ export const getBookingById = async (user, { id }, resp) => {
 
 export const addBookingReport = async (user, { id }, { reason }, resp) => {
   try {
-    const passenger = await findPassengerByUserId(user._id);
+    const passenger = await findPassengerData(user._id);
     if (!passenger) {
       resp.error = true;
       resp.error_message = 'Failed to fetch passenger';
@@ -86,7 +89,7 @@ export const addBookingReport = async (user, { id }, { reason }, resp) => {
 
     const notify = await createAdminNotification({
       title: 'Issue Reported',
-      message: `A passenger has reported an issue that needs your attention.`,
+      message: `A passenger ${passenger.userId?.name} has reported an issue that needs your attention.`,
       metadata: success,
       module: 'report_management',
       type: 'ALERT',

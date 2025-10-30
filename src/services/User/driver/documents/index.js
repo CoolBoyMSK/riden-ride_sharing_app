@@ -7,6 +7,7 @@ import {
   updateDriverLegalAgreement,
   findWayBill,
   findDriverWayBill,
+  findDriverData,
 } from '../../../../dal/driver.js';
 import { uploadDriverDocumentToS3 } from '../../../../utils/s3Uploader.js';
 import { createAdminNotification } from '../../../../dal/notification.js';
@@ -31,42 +32,60 @@ export const getDriverDocuments = async (driverId, resp) => {
 };
 
 export const uploadDriverDocument = async (user, file, docType, resp) => {
-  if (!file) {
+  try {
+    if (!file) {
+      resp.error = true;
+      resp.error_message = 'No file provided';
+      return resp;
+    }
+
+    const imageUrl = await uploadDriverDocumentToS3(user._id, docType, file);
+
+    const updated = await updateDriverDocumentRecord(
+      user._id,
+      docType,
+      imageUrl,
+    );
+    if (!updated) {
+      resp.error = true;
+      resp.error_message = 'Driver record not found';
+      return resp;
+    }
+
+    const driver = await findDriverData(user._id);
+    if (!driver) {
+      resp.error = true;
+      resp.error_message = 'Driver not found';
+      return resp;
+    }
+
+    const notify = await createAdminNotification({
+      title: 'Document Submission',
+      message: `A Driver ${driver.userId?.name} has uploaded new documents for verification.`,
+      metadata: updated,
+      module: 'driver_management',
+      type: 'ALERT',
+      actionLink: `${env.FRONTEND_URL}/api/admin/drivers/fetch/${updated._id}`,
+    });
+    if (!notify) {
+      console.error('Failed to send notification');
+    }
+
+    resp.data = updated.documents[docType];
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
     resp.error = true;
-    resp.error_message = 'No file provided';
+    resp.error_message = error.message || 'something went wrong';
     return resp;
   }
-
-  const imageUrl = await uploadDriverDocumentToS3(user._id, docType, file);
-
-  const updated = await updateDriverDocumentRecord(user._id, docType, imageUrl);
-  if (!updated) {
-    resp.error = true;
-    resp.error_message = 'Driver record not found';
-    return resp;
-  }
-
-  const notify = await createAdminNotification({
-    title: 'Document Submission',
-    message: `A Driver has uploaded new documents for verification.`,
-    metadata: updated,
-    module: 'driver_management',
-    type: 'ALERT',
-    actionLink: `${env.FRONTEND_URL}/api/admin/drivers/fetch/${updated._id}`,
-  });
-  if (!notify) {
-    console.error('Failed to send notification');
-  }
-
-  resp.data = updated.documents[docType];
-  return resp;
 };
 
 export const updateDriverDocument = async (user, file, docType, resp) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const driver = await findDriverByUserId(user._id);
+    const driver = await findDriverData(user._id);
     if (!driver) {
       await session.abortTransaction();
       session.endSession();
@@ -119,7 +138,7 @@ export const updateDriverDocument = async (user, file, docType, resp) => {
 
     const notify = await createAdminNotification({
       title: 'Document Update Request',
-      message: `A Driver has submitted document update request for verification.`,
+      message: `A Driver $ has submitted document update request for verification.`,
       metadata: { driver, request },
       module: 'driver_management',
       type: 'ALERT',

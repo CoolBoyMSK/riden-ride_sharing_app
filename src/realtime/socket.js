@@ -134,26 +134,26 @@ export const initSocket = (server) => {
               code: 'NOT_FOUND',
               message: 'Driver not found',
             });
-          } else if (driver.isBlocked) {
+          } else if (driver.isBlocked || driver.status === 'blocked') {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Driver is blocked',
+              message: 'Driver is blocked',
             });
-          } else if (driver.isSuspended) {
+          } else if (driver.isSuspended || driver.status === 'suspended') {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Driver is suspended',
+              message: 'Driver is suspended',
             });
           } else if (!driver.legalAgreemant) {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Legal Agreement not approved',
+              message: 'Legal Agreement not approved',
             });
           } else if (
             !driver.stripeAccountId ||
@@ -163,14 +163,14 @@ export const initSocket = (server) => {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Connected account not found',
+              message: 'Connected account not found',
             });
           } else if (driver.backgroundCheckStatus !== 'approved') {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Driver backgound not approved',
+              message: 'Driver backgound not approved',
             });
           } else if (
             !driver.wayBill ||
@@ -181,7 +181,27 @@ export const initSocket = (server) => {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Incomplete driver profile',
+              message: 'Incomplete driver profile',
+            });
+          } else if (
+            !driver.payoutMethodIds ||
+            driver.payoutMethodIds.length <= 0
+          ) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Payout method not found',
+            });
+          } else if (
+            !driver.defaultAccountId ||
+            driver.defaultAccountId.trim() === ''
+          ) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Default payout method not found',
             });
           }
 
@@ -197,7 +217,7 @@ export const initSocket = (server) => {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Vehicle not registered',
+              message: 'Vehicle not registered',
             });
           }
 
@@ -210,7 +230,7 @@ export const initSocket = (server) => {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Way Bill not issued',
+              message: 'Way Bill not issued',
             });
           }
 
@@ -223,7 +243,7 @@ export const initSocket = (server) => {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Documents not verified',
+              message: 'Documents not verified',
             });
           }
 
@@ -285,12 +305,12 @@ export const initSocket = (server) => {
         if (['driver'].includes(socket.user.roles[0])) {
           user = await findDriverByUserId(userId);
 
-          if (!user || !['online', 'on_ride'].includes(user.status)) {
+          if (!user) {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Driver not eligible',
+              message: 'Driver not found',
             });
           }
         } else if (['passenger'].includes(socket.user.roles[0])) {
@@ -301,7 +321,7 @@ export const initSocket = (server) => {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Passenger not eligible',
+              message: 'Passenger not found',
             });
           }
         }
@@ -622,14 +642,14 @@ export const initSocket = (server) => {
             code: 'FORBIDDEN',
             message: 'Driver in restricted area',
           });
-        } else if (driver.isBlocked) {
+        } else if (driver.isBlocked || driver.status === 'blocked') {
           return socket.emit('error', {
             success: false,
             objectType,
             code: 'FORBIDDEN',
             message: 'Driver is blocked',
           });
-        } else if (driver.isSuspended) {
+        } else if (driver.isSuspended || driver.status === 'suspended') {
           return socket.emit('error', {
             success: false,
             objectType,
@@ -649,6 +669,26 @@ export const initSocket = (server) => {
             objectType,
             code: 'FORBIDDEN',
             message: 'Driver is not online',
+          });
+        } else if (
+          !driver.payoutMethodIds ||
+          driver.payoutMethodIds.length <= 0
+        ) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Payout method not found',
+          });
+        } else if (
+          !driver.defaultAccountId ||
+          driver.defaultAccountId.trim() === ''
+        ) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Default Payout method not found',
           });
         }
 
@@ -1792,6 +1832,7 @@ export const initSocket = (server) => {
     socket.on('ride:find_destination_rides', async () => {
       const objectType = 'find-destination-rides';
       const MAX_RIDES = 10;
+      const MAX_RADIUS = 10;
 
       try {
         const driver = await findDriverByUserId(userId);
@@ -1868,7 +1909,7 @@ export const initSocket = (server) => {
         const rides = await findNearbyRideRequests(
           destCoords,
           driverCoords,
-          5,
+          MAX_RADIUS,
           MAX_RIDES,
         );
 

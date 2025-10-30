@@ -49,7 +49,7 @@ export function updateDriverVehicleRequestController(req, res) {
           const imageUrl = await uploadDriverImage(user._id, file);
           vehicle.imageUrl = imageUrl;
         }
-        return updateDriverVehicleRequest(user._id, vehicle, resp);
+        return updateDriverVehicleRequest(user, vehicle, resp);
       },
       validationFn: () => patchVehicleValidation(req.body),
       handlerParams: [req.user, req.file, req.body],

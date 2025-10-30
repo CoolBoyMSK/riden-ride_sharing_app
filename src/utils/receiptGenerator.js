@@ -34,10 +34,9 @@ const formatTime = (date) => {
   }
 };
 
-const formatDuration = (seconds) => {
-  if (!seconds || isNaN(seconds)) return '0 min';
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes} min`;
+const formatDuration = (minutes) => {
+  if (!minutes || isNaN(minutes)) return '0 min';
+  return `${Math.floor(minutes)} ${minutes > 1 ? 'mins' : 'min'}`;
 };
 
 const formatCurrency = (amount) => {
@@ -128,7 +127,7 @@ const generateReceiptContent = (doc, ride, transaction, driver, passenger) => {
     doc.font('Helvetica');
 
     // Colors
-    const primaryColor = '#2563eb';
+    const primaryColor = '#ff161f';
     const secondaryColor = '#6b7280';
     const borderColor = '#e5e7eb';
     const backgroundColor = '#f8fafc';
@@ -195,7 +194,8 @@ const generateReceiptContent = (doc, ride, transaction, driver, passenger) => {
       .fontSize(10)
       .fillColor(secondaryColor)
       .font('Helvetica')
-      .text(`Name: ${driver.userId?.name || 'Driver'}`, 300, infoStartY + 20)
+      .text(`Driver Id: ${driver.uniqueId || 'N/A'}`, 300, infoStartY + 20)
+      .text(`Name: ${driver.userId?.name || 'N/A'}`, 300, infoStartY + 20)
       .text(`Vehicle: ${driver.vehicle?.type || 'N/A'}`, 300, infoStartY + 35);
 
     // Passenger Info
@@ -209,12 +209,13 @@ const generateReceiptContent = (doc, ride, transaction, driver, passenger) => {
       .fontSize(10)
       .fillColor(secondaryColor)
       .font('Helvetica')
-      .text(`Name: ${passenger.userId?.name || 'N/A'}`, 300, infoStartY + 80)
       .text(
-        `Phone: ${passenger.userId?.phoneNumber || 'N/A'}`,
+        `Passenger Id: ${passenger.uniqueId || 'N/A'}`,
         300,
-        infoStartY + 95,
-      );
+        infoStartY + 20,
+      )
+      .text(`Name: ${passenger.userId?.name || 'N/A'}`, 300, infoStartY + 80)
+      .text(`email: ${passenger.userId?.email || 'N/A'}`, 300, infoStartY + 95);
 
     yPosition = 200;
 
@@ -238,17 +239,13 @@ const generateReceiptContent = (doc, ride, transaction, driver, passenger) => {
         65,
         yPosition + 15,
       )
-      .text(
-        `Time: ${formatTime(ride.rideStartedAt || ride.createdAt)}`,
-        400,
-        yPosition,
-      );
+      .text(`Time: ${formatTime(ride.rideStartedAt || 'N/A')}`, 400, yPosition);
 
     yPosition += 40;
 
     // Dropoff Location
     doc
-      .fillColor('#10b981')
+      .fillColor(primaryColor)
       .text('•', 50, yPosition)
       .fillColor(secondaryColor)
       .text(' Dropoff:', 65, yPosition)
@@ -258,7 +255,7 @@ const generateReceiptContent = (doc, ride, transaction, driver, passenger) => {
         yPosition + 15,
       )
       .text(
-        `Time: ${formatTime(ride.rideCompletedAt || ride.createdAt)}`,
+        `Time: ${formatTime(ride.rideCompletedAt || 'N/A')}`,
         400,
         yPosition,
       );
@@ -289,7 +286,12 @@ const generateReceiptContent = (doc, ride, transaction, driver, passenger) => {
         70,
         yPosition + 50,
       )
-      .text(`Payment: ${ride.paymentMethod || 'N/A'}`, 250, yPosition + 35)
+      .text(
+        `Waiting: ${formatDuration(ride.actualWaitingTime)}`,
+        70,
+        yPosition + 50,
+      )
+      .te.text(`Payment: ${ride.paymentMethod || 'N/A'}`, 250, yPosition + 35)
       .text(
         `Transaction: ${safeSliceId(transaction._id)}`,
         250,
@@ -330,6 +332,16 @@ const generateReceiptContent = (doc, ride, transaction, driver, passenger) => {
 
     const items = [
       {
+        label: 'Setup Fee',
+        amount: fareBreakdown.rideSetupFee || 0,
+        type: 'income',
+      },
+      {
+        label: 'Airport Fee',
+        amount: fareBreakdown.airportRideFee || 0,
+        type: 'income',
+      },
+      {
         label: 'Base Fare',
         amount: fareBreakdown.baseFare || 0,
         type: 'income',
@@ -344,7 +356,27 @@ const generateReceiptContent = (doc, ride, transaction, driver, passenger) => {
         amount: fareBreakdown.distanceFare || 0,
         type: 'income',
       },
+      {
+        label: 'Waiting Charges',
+        amount: fareBreakdown.waitingCharge || 0,
+        type: 'income',
+      },
+      {
+        label: 'Surge Multiplier',
+        amount: fareBreakdown.surgeMultiplier || 1,
+        type: 'income',
+      },
+      {
+        label: 'Surge Amount',
+        amount: fareBreakdown.surgeAmount || 0,
+        type: 'income',
+      },
       { label: 'Tips', amount: tipBreakdown.amount || 0, type: 'income' },
+      {
+        label: 'Total Amount Paid',
+        amount: fareBreakdown.finalAmount || 0,
+        type: 'deduction',
+      },
       {
         label: 'Platform Fee',
         amount: transaction.commission || 0,
@@ -352,7 +384,8 @@ const generateReceiptContent = (doc, ride, transaction, driver, passenger) => {
       },
       {
         label: 'Discount',
-        amount: tipBreakdown.promoDiscount || 0,
+        amount:
+          (tipBreakdown.promoDiscount || 0) + (fareBreakdown.discount || 0),
         type: 'deduction',
       },
     ];
@@ -395,7 +428,7 @@ const generateReceiptContent = (doc, ride, transaction, driver, passenger) => {
       .fontSize(12)
       .fillColor('#000000')
       .font('Helvetica-Bold')
-      .text('TOTAL EARNINGS', 50, yPosition)
+      .text('TOTAL DRIVER EARNINGS', 50, yPosition)
       .text(formatCurrency(totalEarnings), 450, yPosition, { align: 'right' });
 
     yPosition += 40;
