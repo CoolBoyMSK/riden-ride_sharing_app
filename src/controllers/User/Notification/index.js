@@ -41,7 +41,7 @@ export const getNotificationsController = (req, res) =>
     {
       handler: getNotifications,
       validationFn: null,
-      handlerParams: [req.user],
+      handlerParams: [req.user, req.query],
       successMessage: 'Notifications fetched successfully',
     },
     req,

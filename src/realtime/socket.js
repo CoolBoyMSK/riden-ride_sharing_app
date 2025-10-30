@@ -1360,7 +1360,7 @@ export const initSocket = (server) => {
 
     socket.on(
       'ride:driver_complete_ride',
-      async ({ rideId, actualDistance }) => {
+      async ({ rideId, actualDistance, earlyCompleteReason }) => {
         const objectType = 'driver-complete-ride';
         try {
           const driver = await findDriverByUserId(userId);
@@ -1371,13 +1371,31 @@ export const initSocket = (server) => {
               code: 'FORBIDDEN',
               message: 'Driver not found',
             });
-          } else if (driver.status !== 'on_ride') {
+          } else if (
+            driver.status !== 'on_ride' ||
+            driver.status !== 'online'
+          ) {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
               message: 'Invalid driver status',
             });
+          }
+
+          if (earlyCompleteReason) {
+            if (
+              earlyCompleteReason.trim() === '' ||
+              earlyCompleteReason.trim().length > 3
+            ) {
+              return socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'FORBIDDEN',
+                message:
+                  'Early completion reason must not be empty and contain atleast 3 characters',
+              });
+            }
           }
 
           const ride = await findRideById(rideId);
@@ -1452,6 +1470,9 @@ export const initSocket = (server) => {
             actualDuration,
             actualWaitingTime: parseFloat((waitingTime / 60).toFixed(2)),
             fareBreakdown: fareResult.fareBreakdown,
+            earlyCompleteReason: earlyCompleteReason
+              ? earlyCompleteReason
+              : null,
           });
           if (!updatedRide) {
             return socket.emit('error', {
@@ -1523,6 +1544,10 @@ export const initSocket = (server) => {
             objectType,
             data: updatedRide,
             message: 'Ride status updated to RIDE_COMPLETED',
+          });
+
+          setImmediate(() => {
+            socket.emit('ride:pay_driver', { rideId: updatedRide._id });
           });
         } catch (error) {
           console.error(`SOCKET ERROR: ${error}`);

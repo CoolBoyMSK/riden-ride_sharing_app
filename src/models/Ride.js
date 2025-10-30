@@ -329,6 +329,12 @@ const rideSchema = new mongoose.Schema(
       trim: true,
       maxlength: 500,
     },
+    earlyCompleteReason: {
+      type: String,
+      trim: true,
+      min: 3,
+      maxlength: 500,
+    },
 
     // Rating & Feedback
     passengerRating: {

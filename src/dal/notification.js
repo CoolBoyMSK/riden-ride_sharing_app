@@ -355,19 +355,39 @@ export const createAdminNotification = async ({
   }
 };
 
-export const findUserNotifications = async (userId) => {
+export const findUserNotifications = async (
+  userId,
+  { page = 1, limit = 10 },
+) => {
   if (!userId) {
     throw new Error('User ID is required to fetch notifications.');
   }
 
+  const skip = (page - 1) * limit;
+
+  // Fetch notifications with pagination
   const notifications = await Notification.find({
     'recipient.userId': userId,
     'recipient.isDeleted': false,
   })
     .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
     .lean();
 
-  return notifications;
+  // Count total notifications for pagination info
+  const total = await Notification.countDocuments({
+    'recipient.userId': userId,
+    'recipient.isDeleted': false,
+  });
+
+  return {
+    notifications,
+    total: total,
+    page: parseInt(page),
+    limit: parseInt(limit),
+    totalPages: Math.ceil(total / limit),
+  };
 };
 
 export const toggleUserNotificationReadStatus = async (

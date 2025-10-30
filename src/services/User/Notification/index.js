@@ -67,9 +67,16 @@ export const toggleNotification = async (user, { type }, resp) => {
   }
 };
 
-export const getNotifications = async (user, resp) => {
+export const getNotifications = async (
+  user,
+  { page = 1, limit = 10 },
+  resp,
+) => {
   try {
-    const success = await findUserNotifications(user.id);
+    const success = await findUserNotifications(user.id, {
+      page,
+      limit,
+    });
     if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to fetch notifications';
