@@ -172,16 +172,29 @@ export const initSocket = (server) => {
               code: 'FORBIDDEN',
               message: 'Driver backgound not approved',
             });
-          } else if (
-            !driver.wayBill ||
-            !driver.documents ||
-            driver.vehicle.length < 5
-          ) {
+          } else if (!driver.wayBill) {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Incomplete driver profile',
+              message: 'Way bill not issued',
+              isWayBill: false,
+            });
+          } else if (!driver.documents) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Documents not uploaded',
+              isDocuments: false,
+            });
+          } else if (driver.vehicle.length < 5) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Vehicle details not provided',
+              isVehicle: false,
             });
           } else if (
             !driver.payoutMethodIds ||
@@ -192,6 +205,7 @@ export const initSocket = (server) => {
               objectType,
               code: 'FORBIDDEN',
               message: 'Payout method not found',
+              isPayment: false,
             });
           } else if (
             !driver.defaultAccountId ||
@@ -202,6 +216,7 @@ export const initSocket = (server) => {
               objectType,
               code: 'FORBIDDEN',
               message: 'Default payout method not found',
+              isPayment: false,
             });
           }
 
@@ -218,6 +233,7 @@ export const initSocket = (server) => {
               objectType,
               code: 'FORBIDDEN',
               message: 'Vehicle not registered',
+              isVehicle: false,
             });
           }
 
@@ -231,6 +247,7 @@ export const initSocket = (server) => {
               objectType,
               code: 'FORBIDDEN',
               message: 'Way Bill not issued',
+              isWayBill: false,
             });
           }
 
@@ -244,6 +261,7 @@ export const initSocket = (server) => {
               objectType,
               code: 'FORBIDDEN',
               message: 'Documents not verified',
+              isDocuments: false,
             });
           }
 
