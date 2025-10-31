@@ -2,9 +2,10 @@ import nodemailer from 'nodemailer';
 import env from './envConfig.js';
 
 const emailTransporter = nodemailer.createTransport({
-  // service: 'mail.ridentech.ca',
-  service: 'gmail',
-  // port: 465,
+  // service: 'gmail',
+  host: 'email-smtp.us-east-2.amazonaws.com/',
+  port: 465,
+  secure: true,
   auth: {
     user: env.EMAIL_USER,
     pass: env.EMAIL_PASS,

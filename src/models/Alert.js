@@ -40,7 +40,7 @@ const alertSchema = new mongoose.Schema(
     blocks: [alertBlockSchema], // supports multiple messages or localized payloads
     status: {
       type: String,
-      enum: ['PENDING', 'IN_PROGRESS', 'SENT', 'FAILED'],
+      enum: ['PENDING', 'IN_PROGRESS', 'SENT', 'FAILED', 'PARTIALLY_SENT'],
       default: 'PENDING',
       index: true,
     },

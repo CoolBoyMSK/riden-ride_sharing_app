@@ -65,6 +65,7 @@ import {
   findAdminNotifications,
   toggleNotificationReadStatus,
   markAllNotificationsAsRead,
+  findUnreadNotificationsCount,
 } from '../dal/notification.js';
 import { generateAgoraToken } from '../utils/agoraTokenGenerator.js';
 import { generateRideReceipt } from '../utils/receiptGenerator.js';
@@ -1372,7 +1373,7 @@ export const initSocket = (server) => {
               message: 'Driver not found',
             });
           } else if (
-            driver.status !== 'on_ride' ||
+            driver.status !== 'on_ride' &&
             driver.status !== 'online'
           ) {
             return socket.emit('error', {
@@ -1384,10 +1385,8 @@ export const initSocket = (server) => {
           }
 
           if (earlyCompleteReason) {
-            if (
-              earlyCompleteReason.trim() === '' ||
-              earlyCompleteReason.trim().length > 3
-            ) {
+            earlyCompleteReason = earlyCompleteReason.trim();
+            if (earlyCompleteReason === '' || earlyCompleteReason.length > 3) {
               return socket.emit('error', {
                 success: false,
                 objectType,
@@ -4506,6 +4505,36 @@ export const initSocket = (server) => {
           objectType,
           data,
           message: 'All notifications read successfully',
+        });
+      } catch (error) {
+        console.error(`SOCKET ERROR: ${error}`);
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: `${error.code || 'SOCKET_ERROR'}`,
+          message: `SOCKET ERROR: ${error.message}`,
+        });
+      }
+    });
+
+    socket.on('admin:get_unread_notifications_count', async () => {
+      const objectType = 'get-unread-notifications-count';
+      try {
+        const data = await findUnreadNotificationsCount(userId);
+        if (!data) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'NOT_FOUND',
+            message: 'Failed to count unread notifications',
+          });
+        }
+
+        socket.emit('admin:get_unread_notifications_count', {
+          success: true,
+          objectType,
+          data: { unreadNotificationsCount: data },
+          message: 'Unread notifications count fetched successfully',
         });
       } catch (error) {
         console.error(`SOCKET ERROR: ${error}`);

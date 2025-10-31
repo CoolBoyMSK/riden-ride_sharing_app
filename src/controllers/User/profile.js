@@ -1,5 +1,6 @@
 import {
   getUserProfile,
+  updatePassengerProfile,
   updateDriverProfile,
   sendEmailUpdateOtp,
   verifyEmailUpdate,
@@ -25,6 +26,18 @@ export const editDriverProfile = (req, res) =>
   handleResponse(
     {
       handler: updateDriverProfile,
+      // validationFn: validateProfileUpdate,
+      handlerParams: [req.user, req.body, req.file],
+      successMessage: 'Profile updated successfully',
+    },
+    req,
+    res,
+  );
+
+export const editPassengerProfile = (req, res) =>
+  handleResponse(
+    {
+      handler: updatePassengerProfile,
       // validationFn: validateProfileUpdate,
       handlerParams: [req.user, req.body, req.file],
       successMessage: 'Profile updated successfully',

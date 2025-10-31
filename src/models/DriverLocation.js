@@ -19,7 +19,6 @@ const driverLocationSchema = new mongoose.Schema(
       coordinates: {
         type: [Number], // [longitude, latitude]
         required: true,
-        
       },
     },
     status: {
@@ -67,19 +66,20 @@ driverLocationSchema.index({
   status: 1,
   isAvailable: 1,
 });
-driverLocationSchema.index({
-  driverId: 1,
-  lastUpdated: -1,
-});
+
+// driverLocationSchema.index({
+//   driverId: 1,
+//   lastUpdated: -1,
+// });
 
 // TTL index to automatically remove old location data
-driverLocationSchema.index(
-  {
-    lastUpdated: 1,
-  },
-  {
-    expireAfterSeconds: 86400, // 24 hours
-  },
-);
+// driverLocationSchema.index(
+//   {
+//     lastUpdated: 1,
+//   },
+//   {
+//     expireAfterSeconds: 86400, // 24 hours
+//   },
+// );
 
 export default mongoose.model('DriverLocation', driverLocationSchema);

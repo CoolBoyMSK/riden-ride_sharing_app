@@ -3,6 +3,7 @@ import Ride from '../models/Ride.js';
 import Driver from '../models/Driver.js';
 import PromoCode from '../models/promo_code.js';
 
+import env from '../config/envConfig.js';
 import { createAdminNotification, notifyUser } from '../dal/notification.js';
 
 // Helper function to determine missing fields
@@ -243,7 +244,7 @@ const suspensionCheckingJob = await createCronJob(
       const now = new Date();
 
       // Find all drivers currently suspended whose latest suspension has expired
-      const suspendedDrivers = await DriverModel.find({
+      const suspendedDrivers = await Driver.find({
         isSuspended: true,
         'suspensions.end': { $lte: now },
       }).lean();

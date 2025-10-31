@@ -417,8 +417,8 @@ const rideSchema = new mongoose.Schema(
 rideSchema.index({ passengerId: 1, status: 1 });
 rideSchema.index({ driverId: 1, status: 1 });
 rideSchema.index({ status: 1, requestedAt: -1 });
-rideSchema.index({ 'pickupLocation.coordinates': '2dsphere' });
-rideSchema.index({ 'dropoffLocation.coordinates': '2dsphere' });
+// rideSchema.index({ 'pickupLocation.coordinates': '2dsphere' });
+// rideSchema.index({ 'dropoffLocation.coordinates': '2dsphere' });
 
 // Generate ride ID before saving
 rideSchema.pre('save', function (next) {
