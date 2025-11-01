@@ -3,7 +3,7 @@ import env from './envConfig.js';
 
 const emailTransporter = nodemailer.createTransport({
   // service: 'gmail',
-  host: 'email-smtp.us-east-2.amazonaws.com/',
+  host: 'email-smtp.us-east-2.amazonaws.com',
   port: 465,
   secure: true,
   auth: {
