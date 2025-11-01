@@ -57,7 +57,6 @@ const userSchema = new mongoose.Schema(
     email: {
       type: String,
       lowercase: true,
-      nullable: false,
     },
     phoneNumber: {
       type: String,

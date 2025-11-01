@@ -429,7 +429,9 @@ const generateReceiptContent = (doc, ride, transaction, driver, passenger) => {
       .fillColor('#000000')
       .font('Helvetica-Bold')
       .text('TOTAL DRIVER EARNINGS', 50, yPosition)
-      .text(formatCurrency(totalEarnings), 450, yPosition, { align: 'right' });
+      .text(`${formatCurrency(totalEarnings)} CAD`, 450, yPosition, {
+        align: 'right',
+      });
 
     yPosition += 40;
 

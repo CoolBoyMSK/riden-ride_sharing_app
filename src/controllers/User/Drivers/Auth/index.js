@@ -1,10 +1,12 @@
 import { handleResponse } from '../../../../utils/handleRespone.js';
 import {
-  signUpDriver,
+  signUpDriverwithEmail,
+  signUpDriverwithPhone,
   loginUser,
   socialLoginUser,
   otpVerification,
   sendDriverPhoneOtp,
+  sendDriverEmailOtp,
   forgotPassword,
   resetUserPassword,
   resendOtp,
@@ -12,13 +14,25 @@ import {
   updateFCMToken,
 } from '../../../../services/User/driver/Auth/index.js';
 
-export const signUpDriverController = (req, res) =>
+export const signUpDriverwithEmailController = (req, res) =>
   handleResponse(
     {
-      handler: signUpDriver,
+      handler: signUpDriverwithEmail,
       validationFn: null,
       handlerParams: [req.body],
       successMessage: 'Verify your email to complete registration',
+    },
+    req,
+    res,
+  );
+
+export const signUpDriverwithPhoneController = (req, res) =>
+  handleResponse(
+    {
+      handler: signUpDriverwithPhone,
+      validationFn: null,
+      handlerParams: [req.body],
+      successMessage: 'Verify your phone number to complete registration',
     },
     req,
     res,
@@ -67,6 +81,18 @@ export const sendDriverPhoneOtpController = (req, res) =>
       validationFn: null,
       handlerParams: [req.body],
       successMessage: 'OTP sent to your phone number successfully',
+    },
+    req,
+    res,
+  );
+
+export const sendDriverEmailOtpController = (req, res) =>
+  handleResponse(
+    {
+      handler: sendDriverEmailOtp,
+      validationFn: null,
+      handlerParams: [req.body],
+      successMessage: 'OTP sent to your email successfully',
     },
     req,
     res,

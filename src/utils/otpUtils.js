@@ -181,6 +181,7 @@ export const requestPhoneOtp = async (
   username,
   context,
   type,
+  role,
 ) => {
   const cooldownExists = await redisConfig.exists(
     phoneCooldownKey(currentPhone),
@@ -217,6 +218,7 @@ export const requestPhoneOtp = async (
       otp,
       username,
       type,
+      role,
     },
     {
       attempts: 3,

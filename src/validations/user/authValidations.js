@@ -44,6 +44,53 @@ export const validateDriverSignup = (data) => {
   return schema.validate(data, { abortEarly: false });
 };
 
+export const validateDriverPhoneSignup = (data) => {
+  const schema = Joi.object({
+    name: Joi.string().trim().min(3).max(50).required().messages({
+      'string.empty': 'Name is required',
+      'string.min': 'Name must be at least 3 characters long',
+      'any.required': 'Name is required',
+    }),
+
+    phoneNumber: Joi.string()
+      .pattern(/^\+?[0-9]{7,15}$/)
+      .required()
+      .messages({
+        'string.empty': 'Phone number is required',
+        'string.pattern.base':
+          'Phone number must be valid (7–15 digits, optional +)',
+        'any.required': 'Phone number is required',
+      }),
+
+    gender: Joi.string()
+      .valid(...GENDER_TYPES)
+      .required()
+      .messages({
+        'any.only': 'Gender must be male, female, or other',
+        'any.required': 'Gender is required',
+      }),
+
+    password: Joi.string()
+      .min(8)
+      .max(128)
+      .pattern(/^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).*$/)
+      .required()
+      .messages({
+        'string.empty': 'Password is required',
+        'string.min': 'Password must be at least 8 characters long',
+        'string.pattern.base':
+          'Password must include uppercase, lowercase, and a number',
+      }),
+
+    confirmPassword: Joi.any().valid(Joi.ref('password')).required().messages({
+      'any.only': 'Passwords must match',
+      'any.required': 'Confirm Password is required',
+    }),
+  });
+
+  return schema.validate(data, { abortEarly: false });
+};
+
 export const validatePassengerSignup = (data) => {
   const schema = Joi.object({
     name: Joi.string().trim().min(3).max(50).required().messages({

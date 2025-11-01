@@ -1,10 +1,12 @@
 import express from 'express';
 import { registerRoute } from '../../../../utils/registerRoute.js';
 import {
-  signUpDriverController,
+  signUpDriverwithEmailController,
+  signUpDriverwithPhoneController,
   loginUserController,
   otpVerificationController,
   sendDriverPhoneOtpController,
+  sendDriverEmailOtpController,
   socialLoginUserController,
   forgotPasswordController,
   resetUserPasswordController,
@@ -17,8 +19,14 @@ const router = express.Router();
 
 registerRoute({
   router,
-  route: '/signup',
-  post_method: signUpDriverController,
+  route: '/email-signup',
+  post_method: signUpDriverwithEmailController,
+});
+
+registerRoute({
+  router,
+  route: '/phone-signup',
+  post_method: signUpDriverwithPhoneController,
 });
 
 registerRoute({
@@ -43,6 +51,12 @@ registerRoute({
   router,
   route: '/phone',
   post_method: sendDriverPhoneOtpController,
+});
+
+registerRoute({
+  router,
+  route: '/email',
+  post_method: sendDriverEmailOtpController,
 });
 
 registerRoute({

@@ -52,6 +52,7 @@ import {
   findDriverById,
   onRideAccepted,
   onRideCancelled,
+  findDriverData,
 } from '../dal/driver.js';
 import { calculateActualFare } from '../services/User/ride/fareCalculationService.js';
 import { findPassengerByUserId, findPassengerById } from '../dal/passenger.js';
@@ -1205,7 +1206,7 @@ export const initSocket = (server) => {
     socket.on('ride:driver_arrived', async ({ rideId }) => {
       const objectType = 'driver-arrived';
       try {
-        const driver = await findDriverByUserId(userId);
+        const driver = await findDriverData(userId);
         if (!driver) {
           return socket.emit('error', {
             success: false,
@@ -1261,6 +1262,18 @@ export const initSocket = (server) => {
             code: 'RIDE_UPDATE_FAILED',
             message: 'Failed to update ride status',
           });
+        }
+
+        const notify = await notifyUser({
+          userId,
+          title: 'Driver Arrived',
+          message: `Your driver ${driver.userId?.name} has arrived at your pick-up location.`,
+          module: 'ride',
+          metadata: updatedRide,
+          type: 'ALERT',
+        });
+        if (!notify) {
+          console.log('Failed to send notification');
         }
 
         socket.join(`ride:${updatedRide._id}`);
