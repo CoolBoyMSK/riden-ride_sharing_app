@@ -32,6 +32,7 @@ const env = {
   JWT_REFRESH_EXPIRES_IN: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
   EMAIL_USER: required(process.env.EMAIL_USER, 'EMAIL_USER'),
   EMAIL_PASS: required(process.env.EMAIL_PASS, 'EMAIL_PASS'),
+  EMAIL_FROM: required(process.env.EMAIL_FROM, 'EMAIL_FROM'),
   FIREBASE_PROJECT_ID: required(
     process.env.FIREBASE_PROJECT_ID,
     'FIREBASE_PROJECT_ID',
@@ -94,7 +95,10 @@ const env = {
     process.env.OTP_COOLDOWN_SECONDS,
     'OTP_COOLDOWN_SECONDS',
   ),
-  OTP_MAX_ATTEMPTS_PER_HOUR: required(process.env, 'OTP_MAX_ATTEMPTS_PER_HOUR'),
+  OTP_MAX_ATTEMPTS_PER_HOUR: required(
+    process.env.OTP_MAX_ATTEMPTS_PER_HOUR,
+    'OTP_MAX_ATTEMPTS_PER_HOUR',
+  ),
   OTP_HMAC_KEY: required(process.env.OTP_HMAC_KEY, 'OTP_HMAC_KEY'),
   STRIPE_SECRET_KEY: required(
     process.env.STRIPE_SECRET_KEY,
