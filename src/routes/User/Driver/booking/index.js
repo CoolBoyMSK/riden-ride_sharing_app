@@ -4,6 +4,7 @@ import {
   getAllBookingsController,
   getBookingByIdController,
   addBookingReportController,
+  rateBookingController,
   downloadReceiptController,
   generateReceiptController,
   updateLocationController,
@@ -30,6 +31,13 @@ registerRoute({
   route: '/report',
   driver_auth_enable: true,
   post_method: addBookingReportController,
+});
+
+registerRoute({
+  router,
+  route: '/rate',
+  driver_auth_enable: true,
+  post_method: rateBookingController,
 });
 
 registerRoute({

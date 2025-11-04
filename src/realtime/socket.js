@@ -25,6 +25,7 @@ import {
   updateRideById,
   findRideById,
   saveDriverLocation,
+  removeDriverLocation,
   persistDriverLocationToDB,
   updateDriverAvailability,
   findNearbyRideRequests,
@@ -290,6 +291,7 @@ export const initSocket = (server) => {
               isActive: false,
               status: 'offline',
             });
+            await removeDriverLocation(driver._id);
             await toggleDriverLocation(driver._id, 'offline', false);
           } else if (driver.status === 'offline') {
             updatedDriver = await updateDriverByUserId(userId, {
@@ -767,8 +769,6 @@ export const initSocket = (server) => {
         }
 
         const availability = await findDriverLocation(driver._id);
-
-        console.log(availability);
         if (!availability) {
           return socket.emit('error', {
             success: false,
@@ -865,6 +865,33 @@ export const initSocket = (server) => {
             code: 'UPDATE_FAILED',
             message: 'Failed to accept ride',
           });
+        }
+
+        const [newDriver, newPassenger] = await Promise.all([
+          findUserById(ride.driverId?.userId),
+          findUserById(ride.passengerId?.userId),
+        ]);
+
+        const notifyDriver = await notifyUser({
+          userId: newDriver.userId?._id,
+          title: 'Ride Request Confirmed',
+          message: `Your ride with ${newPassenger.userId?.name} is confirmed.`,
+          module: 'ride',
+          metadata: updatedRide,
+          actionLink: 'ride:accept_ride',
+          storeInDB: false,
+        });
+        const notifyPassenger = await notifyUser({
+          userId: newPassenger.userId?._id,
+          title: 'Ride Request Confirmed',
+          message: `Your ride with ${newDriver.userId?.name} is confirmed.`,
+          module: 'ride',
+          metadata: updatedRide,
+          actionLink: 'ride:accept_ride',
+          storeInDB: false,
+        });
+        if (!notifyDriver || !notifyPassenger) {
+          console.log('Failed to send notification');
         }
 
         socket.join(`ride:${updatedRide._id}`);
@@ -1084,20 +1111,32 @@ export const initSocket = (server) => {
           message: 'Ride cancelled by driver',
         });
 
-        // Notification Logic Start
-        const notify = await notifyUser({
-          userId: ride.passengerId?.userId,
+        const [newDriver, newPassenger] = await Promise.all([
+          findUserById(ride.driverId?.userId),
+          findUserById(ride.passengerId?.userId),
+        ]);
+
+        const notifyDriver = await notifyUser({
+          userId: newDriver.userId?._id,
           title: 'Ride Cancelled',
-          message: `Your ride has been cancelled. We're sorry for the inconvenience. You can book a new ride anytime from the home screen.`,
+          message: `Ride cancelled successfully.`,
           module: 'ride',
           metadata: updatedRide,
-          type: 'ALERT',
-          actionLink: `ride_cancelled`,
+          actionLink: 'ride:driver_cancel_ride',
+          storeInDB: false,
         });
-        if (!notify) {
-          console.error('Failed to send notification');
+        const notifyPassenger = await notifyUser({
+          userId: newPassenger.userId?._id,
+          title: 'Driver Canceled Ride',
+          message: `Your driver ${newDriver.userId?.name} canceled the trip.`,
+          module: 'ride',
+          metadata: updatedRide,
+          actionLink: 'ride:driver_cancel_ride',
+          storeInDB: false,
+        });
+        if (!notifyDriver || !notifyPassenger) {
+          console.log('Failed to send notification');
         }
-        // Notification Logic End
 
         const rooms = Array.from(socket.rooms);
         if (rooms.includes(`ride:${ride._id}`)) {
@@ -1185,6 +1224,24 @@ export const initSocket = (server) => {
           });
         }
 
+        const [newDriver, newPassenger] = await Promise.all([
+          findUserById(ride.driverId?.userId),
+          findUserById(ride.passengerId?.userId),
+        ]);
+
+        const notifyPassenger = await notifyUser({
+          userId: newPassenger.userId?._id,
+          title: 'Driver En Route',
+          message: `${newDriver.userId?.name} is on the way to pick you up.`,
+          module: 'ride',
+          metadata: updatedRide,
+          actionLink: 'ride:driver_arriving',
+          storeInDB: false,
+        });
+        if (!notifyDriver || !notifyPassenger) {
+          console.log('Failed to send notification');
+        }
+
         socket.join(`ride:${updatedRide._id}`);
         io.to(`ride:${ride._id}`).emit('ride:driver_arriving', {
           success: true,
@@ -1264,15 +1321,30 @@ export const initSocket = (server) => {
           });
         }
 
-        const notify = await notifyUser({
-          userId,
+        const [newDriver, newPassenger] = await Promise.all([
+          findUserById(ride.driverId?.userId),
+          findUserById(ride.passengerId?.userId),
+        ]);
+
+        const notifyDriver = await notifyUser({
+          userId: newDriver.userId?._id,
           title: 'Driver Arrived',
-          message: `Your driver ${driver.userId?.name} has arrived at your pick-up location.`,
+          message: `Ride pick up location is arrived.`,
           module: 'ride',
           metadata: updatedRide,
-          type: 'ALERT',
+          actionLink: 'ride:driver_arrived',
+          storeInDB: false,
         });
-        if (!notify) {
+        const notifyPassenger = await notifyUser({
+          userId: newPassenger.userId?._id,
+          title: 'Driver Arrived',
+          message: `${newDriver.userId?.name} has arrived.`,
+          module: 'ride',
+          metadata: updatedRide,
+          actionLink: 'ride:driver_arrived',
+          storeInDB: false,
+        });
+        if (!notifyDriver || !notifyPassenger) {
           console.log('Failed to send notification');
         }
 
@@ -1352,6 +1424,33 @@ export const initSocket = (server) => {
             code: 'RIDE_UPDATE_FAILED',
             message: 'Failed to update ride status',
           });
+        }
+
+        const [newDriver, newPassenger] = await Promise.all([
+          findUserById(ride.driverId?.userId),
+          findUserById(ride.passengerId?.userId),
+        ]);
+
+        const notifyDriver = await notifyUser({
+          userId: newDriver.userId._id,
+          title: 'Ride Started',
+          message: `Ride started with ${newPassenger.userId?.name}.`,
+          module: 'ride',
+          metadata: updatedRide,
+          actionLink: 'ride:driver_start_ride',
+          storeInDB: false,
+        });
+        const notifyPassenger = await notifyUser({
+          userId: ride.passengerId?.userId,
+          title: 'Ride Started',
+          message: `Ride started with ${newDriver.userId?.name}.`,
+          module: 'ride',
+          metadata: updatedRide,
+          actionLink: 'ride:driver_start_ride',
+          storeInDB: false,
+        });
+        if (!notifyDriver || !notifyPassenger) {
+          console.log('Failed to send notification');
         }
 
         socket.join(`ride:${updatedRide._id}`);
@@ -1550,6 +1649,33 @@ export const initSocket = (server) => {
             });
           }
 
+          const [newDriver, newPassenger] = await Promise.all([
+            findUserById(ride.driverId?.userId),
+            findUserById(ride.passengerId?.userId),
+          ]);
+
+          const notifyDriver = await notifyUser({
+            userId: newDriver.userId?._id,
+            title: 'Ride Completed',
+            message: `Ride completed successfully`,
+            module: 'ride',
+            metadata: updatedRide,
+            actionLink: 'ride:driver_complete_ride',
+            storeInDB: false,
+          });
+          const notifyPassenger = await notifyUser({
+            userId: newPassenger.userId?._id,
+            title: 'Ride Completed',
+            message: `Ride completed. Fare: $${updatedRide.actualFare}`,
+            module: 'ride',
+            metadata: updatedRide,
+            actionLink: 'ride:driver_complete_ride',
+            storeInDB: false,
+          });
+          if (!notifyDriver || !notifyPassenger) {
+            console.log('Failed to send notification');
+          }
+
           socket.join(`ride:${updatedRide._id}`);
           io.to(`ride:${updatedRide._id}`).emit('ride:driver_complete_ride', {
             success: true,
@@ -1683,17 +1809,31 @@ export const initSocket = (server) => {
           }
 
           // Notification Logic Start
-          const notify = await notifyUser({
-            userId: ride.passengerId?.userId,
-            title: 'Driver Rated You',
-            message: `You passenger has gave you ${rating} star rating.`,
+          const [newDriver, newPassenger] = await Promise.all([
+            findUserById(ride.driverId?.userId),
+            findUserById(ride.passengerId?.userId),
+          ]);
+
+          const notifyDriver = await notifyUser({
+            userId: newDriver.userId?._id,
+            title: 'Passenger Rated',
+            message: `You successfully rated the ride with ${newDriver.userId?.name}.`,
             module: 'ride',
-            metadata: ride,
-            type: 'ALERT',
-            actionLink: `user_rated`,
+            metadata: updatedRide,
+            actionLink: 'ride:driver_rate_passenger',
+            storeInDB: false,
           });
-          if (!notify) {
-            console.error('Failed to send notification');
+          const notifyPassenger = await notifyUser({
+            userId: newPassenger.userId?._id,
+            title: 'Rating Received',
+            message: `You received a rating from ${newDriver.userId?.name}.`,
+            module: 'ride',
+            metadata: updatedRide,
+            actionLink: 'ride:driver_rate_passenger',
+            storeInDB: false,
+          });
+          if (!notifyDriver || !notifyPassenger) {
+            console.log('Failed to send notification');
           }
           // Notification Logic End
 
@@ -1818,6 +1958,13 @@ export const initSocket = (server) => {
               code: 'FORBIDDEN',
               message: 'Driver is not active',
             });
+          } else if (!driver.isApproved) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Driver is not approved',
+            });
           }
 
           if (driver.status === 'on_ride' && isAvailable) {
@@ -1833,6 +1980,9 @@ export const initSocket = (server) => {
           if (isRestricted && !isParkingLot) {
             await updateDriverByUserId(userId, { isRestricted });
             const parkingLot = findNearestParkingForPickup(coordsObj);
+            if (parkingLot?.parkingLotId) {
+              await removeDriverFromQueue(driver._id);
+            }
 
             io.to(`user:${userId}`).emit('ride:driver_update_location', {
               success: true,
@@ -1842,10 +1992,6 @@ export const initSocket = (server) => {
                 "You are inside the restricted area, and you can't pick ride in this area, reach to nearby parking lot in order to be able to pick rides",
               data: parkingLot,
             });
-
-            if (parkingLot?.parkingLotId) {
-              await removeDriverFromQueue(driver._id);
-            }
           } else if (isRestricted && isParkingLot) {
             const parkingLot = findNearestParkingForPickup(coordsObj);
             if (parkingLot?.parkingLotId) {
@@ -2412,19 +2558,31 @@ export const initSocket = (server) => {
         });
 
         // Notification Logic Start
-        if (ride.driverId) {
-          const notify = await notifyUser({
-            userId: ride.driverId?.userId,
-            title: 'Ride Cancelled',
-            message: `Passenger cancelled the ride — stay online to catch the next trip! `,
-            module: 'ride',
-            metadata: updatedRide,
-            type: 'ALERT',
-            actionLink: `ride_cancelled`,
-          });
-          if (!notify) {
-            console.error('Failed to send notification');
-          }
+        const [newDriver, newPassenger] = await Promise.all([
+          findUserById(ride.driverId?.userId),
+          findUserById(ride.passengerId?.userId),
+        ]);
+
+        const notifyDriver = await notifyUser({
+          userId: newDriver.userId?._id,
+          title: 'Passenger Canceled Ride',
+          message: `Your passenger ${newPassenger.userId?.name} canceled the trip.`,
+          module: 'ride',
+          metadata: updatedRide,
+          actionLink: 'ride:passenger_cancel_ride',
+          storeInDB: false,
+        });
+        const notifyPassenger = await notifyUser({
+          userId: newPassenger.userId?._id,
+          title: 'Ride Cancelled',
+          message: `Ride cancelled successfully.`,
+          module: 'ride',
+          metadata: updatedRide,
+          actionLink: 'ride:passenger_cancel_ride',
+          storeInDB: false,
+        });
+        if (!notifyDriver || !notifyPassenger) {
+          console.log('Failed to send notification');
         }
         // Notification Logic End
 

@@ -3,6 +3,7 @@ import {
   getAllBookings,
   getBookingById,
   addBookingReport,
+  rateBooking,
   downloadReceipt,
   generateReceipt,
 } from '../../../../services/User/passenger/booking/index.js';
@@ -38,6 +39,18 @@ export const addBookingReportController = (req, res) =>
       validationFn: null,
       handlerParams: [req.user, req.query, req.body],
       successMessage: 'Booking reported successfully',
+    },
+    req,
+    res,
+  );
+
+export const rateBookingController = (req, res) =>
+  handleResponse(
+    {
+      handler: rateBooking,
+      validationFn: null,
+      handlerParams: [req.user, req.query, req.body],
+      successMessage: 'Driver rated successfully',
     },
     req,
     res,

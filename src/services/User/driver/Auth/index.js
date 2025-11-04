@@ -210,6 +210,16 @@ export const loginUser = async ({ email, phoneNumber, password }, resp) => {
       }
 
       if (user) {
+        // For Testing
+        const payload = { id: user._id, roles: user.roles };
+        resp.data = {
+          user: user,
+          accessToken: generateAccessToken(payload),
+          refreshToken: generateRefreshToken(payload),
+        };
+        return resp;
+        // For Testing
+
         const result = await requestEmailOtp(
           user.email,
           user.name,
@@ -254,6 +264,16 @@ export const loginUser = async ({ email, phoneNumber, password }, resp) => {
       }
 
       if (user) {
+        // For Testing
+        const payload = { id: user._id, roles: user.roles };
+        resp.data = {
+          user: user,
+          accessToken: generateAccessToken(payload),
+          refreshToken: generateRefreshToken(payload),
+        };
+        return resp;
+        // For Testing
+
         const result = await requestPhoneOtp(user.phoneNumber, user.name);
         if (!result.ok) {
           resp.error = true;

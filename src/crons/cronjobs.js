@@ -89,7 +89,7 @@ const createCronJob = async (schedule, taskFunction, jobName = 'My Job') => {
 
 // 3. Job that runs at 2 AM daily
 const frequentCancellationJob = await createCronJob(
-  '0 2 * * *',
+  '10 2 * * *',
   async () => {
     try {
       // Find drivers who cancelled more than once today
@@ -238,7 +238,7 @@ const frequentCancellationJob = await createCronJob(
 );
 
 const suspensionCheckingJob = await createCronJob(
-  '0 2 * * *', // runs daily at 2 AM
+  '20 2 * * *', // runs daily at 2 AM
   async () => {
     try {
       const now = new Date();
@@ -296,7 +296,7 @@ const suspensionCheckingJob = await createCronJob(
 );
 
 const checkIncompleteProfileJob = await createCronJob(
-  '0 2 */2 * *', // Runs every 2 days at 2 AM
+  '30 2 * * *', // Runs every 2 days at 2 AM
   async () => {
     try {
       // Calculate date 2 days ago
@@ -446,7 +446,7 @@ const checkIncompleteProfileJob = await createCronJob(
 );
 
 const promoCodeExpiryJob = await createCronJob(
-  '0 3 * * *', // runs daily at 3 AM
+  '40 2 * * *', // runs daily at 3 AM
   async () => {
     try {
       const now = new Date();
@@ -479,13 +479,42 @@ const promoCodeExpiryJob = await createCronJob(
   'Promo Code Auto-Deactivation',
 );
 
-// To stop any job later:
-// job.stop();
+const rideRatingAllowedExpiryJob = await createCronJob(
+  '50 2 * * *', // runs daily at 3 AM
+  async () => {
+    try {
+      const now = new Date();
 
-// Export if needed
+      const rides = await Ride.find({
+        isRatingAllow: true,
+        rideCompletedAt: { $lte: now },
+      }).lean();
+
+      if (rides.length === 0) {
+        console.log('No Ride Found to Deactivate Rating');
+        return;
+      }
+
+      const result = await Ride.updateMany(
+        { _id: { $in: rides.map((r) => r._id) } },
+        { $set: { isRatingAllow: false } },
+      );
+
+      console.log(
+        `Deactivated ${result.modifiedCount} Rides from rating:`,
+        rides.map((r) => r.rideId).join(', '),
+      );
+    } catch (error) {
+      console.error('Error in Rating Time Expiry job:', error);
+    }
+  },
+  'Allowed Rating Time Expiry Auto-Deactivation',
+);
+
 export default {
   frequentCancellationJob,
   suspensionCheckingJob,
   checkIncompleteProfileJob,
   promoCodeExpiryJob,
+  rideRatingAllowedExpiryJob,
 };

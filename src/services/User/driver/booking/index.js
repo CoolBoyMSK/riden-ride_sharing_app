@@ -2,6 +2,7 @@ import {
   findAllBookingsByDriverId,
   createBookingReportByDriverId,
   findBookingById,
+  createBookingDriverRating,
   findReceipt,
 } from '../../../../dal/booking.js';
 import { findDriverByUserId, findDriverData } from '../../../../dal/driver.js';
@@ -92,6 +93,47 @@ export const addBookingReport = async (user, { id }, { reason }, resp) => {
     });
     if (!notify) {
       console.error('Failed to send notification');
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'something went wrong';
+    return resp;
+  }
+};
+
+export const rateBooking = async (user, { id }, { rating, feedback }, resp) => {
+  try {
+    const driver = await findDriverData(user._id);
+    if (!driver) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch driver';
+      return resp;
+    }
+
+    if (typeof rating !== 'number' || rating < 1 || rating > 5) {
+      resp.error = true;
+      resp.error_message = 'Rating must be a number between 1 and 5';
+      return resp;
+    } else if (feedback && (feedback.length < 3 || feedback.length > 500)) {
+      resp.error = true;
+      resp.error_message = 'Feedback must be between 3 and 500 characters';
+      return resp;
+    }
+
+    const success = await createBookingDriverRating(
+      driver._id,
+      id,
+      rating,
+      feedback,
+    );
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to report booking';
+      return resp;
     }
 
     resp.data = success;

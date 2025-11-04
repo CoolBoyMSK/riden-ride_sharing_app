@@ -67,19 +67,4 @@ driverLocationSchema.index({
   isAvailable: 1,
 });
 
-// driverLocationSchema.index({
-//   driverId: 1,
-//   lastUpdated: -1,
-// });
-
-// TTL index to automatically remove old location data
-// driverLocationSchema.index(
-//   {
-//     lastUpdated: 1,
-//   },
-//   {
-//     expireAfterSeconds: 86400, // 24 hours
-//   },
-// );
-
 export default mongoose.model('DriverLocation', driverLocationSchema);

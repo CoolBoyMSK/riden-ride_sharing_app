@@ -337,6 +337,10 @@ const rideSchema = new mongoose.Schema(
     },
 
     // Rating & Feedback
+    isRatingAllow: {
+      type: Boolean,
+      default: true,
+    },
     passengerRating: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Feedback',

@@ -4,6 +4,7 @@ import {
   getAllBookingsController,
   getBookingByIdController,
   addBookingReportController,
+  rateBookingController,
   downloadReceiptController,
   generateReceiptController,
 } from '../../../../controllers/User/Passengers/booking/index.js';
@@ -29,6 +30,13 @@ registerRoute({
   route: '/report',
   passenger_auth_enable: true,
   post_method: addBookingReportController,
+});
+
+registerRoute({
+  router,
+  route: '/rate',
+  passenger_auth_enable: true,
+  post_method: rateBookingController,
 });
 
 registerRoute({

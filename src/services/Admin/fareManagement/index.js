@@ -1,75 +1,94 @@
 import {
-  getFareByCarType,
-  createFareManagement as dalCreate,
-  getAllFareManagements as dalGetAll,
-  updateFareManagement as dalUpdate,
-  updateDailyFare as dalUpdateDay,
-  deleteFareManagement as dalDelete,
+  // getFareByCarType,
+  createFareConfiguration,
+  getFareConfigurations,
+  updateFareByZoneNameAndCarType,
+  deleteFareConfiguration,
 } from '../../../dal/fareManagement.js';
 
-export async function createFareManagement(params, resp) {
-  const { carType, dailyFares } = params;
-  const exists = await getFareByCarType(carType);
-  if (exists) {
+export async function addFare(body, resp) {
+  try {
+    const success = await createFareConfiguration(body);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to configure fare';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error('API ERROR: ', error);
     resp.error = true;
-    resp.error_message = 'Fare settings for this car type already exist.';
+    resp.error_message = error.message || 'Something went wrong';
     return resp;
   }
-  const data = await dalCreate(carType, dailyFares);
-  resp.data = data;
-  return resp;
 }
 
-export async function getAllFareManagements(_params, resp) {
-  const data = await dalGetAll();
-  resp.data = data;
-  return resp;
-}
+export async function getAllFares(
+  { city, carType, page = 1, limit = 10 },
+  resp,
+) {
+  try {
+    const success = await getFareConfigurations(
+      { city, cartype: carType },
+      { page: parseInt(page), limit: parseInt(limit) },
+    );
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to configure fare';
+      return resp;
+    }
 
-export async function getFareByCar(params, resp) {
-  const { carType } = params;
-  const data = await getFareByCarType(carType);
-  if (!data) {
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error('API ERROR: ', error);
     resp.error = true;
-    resp.error_message = 'Fare settings not found.';
+    resp.error_message = error.message || 'Something went wrong';
     return resp;
   }
-  resp.data = data;
-  return resp;
 }
 
-export async function updateFareManagement(params, resp) {
-  const { carType, dailyFares } = params;
-  const data = await dalUpdate(carType, dailyFares);
-  if (!data) {
+export async function updateFare({ carType }, { zone, city }, body, resp) {
+  try {
+    const success = await updateFareByZoneNameAndCarType(
+      zone,
+      city,
+      carType,
+      body,
+    );
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to update fare.';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error('API ERROR: ', error);
     resp.error = true;
-    resp.error_message = 'Failed to update fare settings.';
+    resp.error_message = error.message || 'Something went wrong';
     return resp;
   }
-  resp.data = data;
-  return resp;
 }
 
-export async function updateDailyFare(params, resp) {
-  const { carType, day, partialDailyFare } = params;
-  const data = await dalUpdateDay(carType, day, partialDailyFare);
-  if (!data) {
-    resp.error = true;
-    resp.error_message = 'Failed to update daily fare.';
-    return resp;
-  }
-  resp.data = data;
-  return resp;
-}
+export async function deleteFare({ id }, resp) {
+  try {
+    const success = await deleteFareConfiguration(id);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to configure fare';
+      return resp;
+    }
 
-export async function deleteFareManagement(params, resp) {
-  const { carType } = params;
-  const result = await dalDelete(carType);
-  if (result.deletedCount === 0) {
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error('API ERROR: ', error);
     resp.error = true;
-    resp.error_message = 'No fare settings found to delete.';
+    resp.error_message = error.message || 'Something went wrong';
     return resp;
   }
-  resp.data = { deleted: true };
-  return resp;
 }

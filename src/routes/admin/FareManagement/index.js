@@ -1,11 +1,9 @@
 import express from 'express';
 import {
-  createFare,
-  listFares,
-  getFare,
-  replaceFare,
-  modifyDailyFare,
-  removeFare,
+  addFareController,
+  getAllFaresController,
+  updateFareController,
+  deleteFareController,
 } from '../../../controllers/Admin/fareManagement/index.js';
 import { registerRoute } from '../../../utils/registerRoute.js';
 
@@ -15,9 +13,9 @@ registerRoute({
   router,
   route: '/',
   admin_auth_enable: true,
-  get_method: listFares,
+  get_method: getAllFaresController,
   get_permission: 'fare_management',
-  post_method: createFare,
+  post_method: addFareController,
   post_permission: 'fare_management',
 });
 
@@ -25,20 +23,18 @@ registerRoute({
   router,
   route: '/:carType',
   admin_auth_enable: true,
-  get_method: getFare,
-  get_permission: 'fare_management',
-  put_method: replaceFare,
+  put_method: updateFareController,
   put_permission: 'fare_management',
-  delete_method: removeFare,
+  delete_method: deleteFareController,
   delete_permission: 'fare_management',
 });
 
 registerRoute({
   router,
-  route: '/:carType/day/:day',
+  route: '/delete',
   admin_auth_enable: true,
-  patch_method: modifyDailyFare,
-  patch_permission: 'fare_management',
+  delete_method: deleteFareController,
+  delete_permission: 'fare_management',
 });
 
 export default router;

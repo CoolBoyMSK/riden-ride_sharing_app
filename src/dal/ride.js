@@ -361,13 +361,12 @@ export const saveDriverLocation = async (
     speed,
     heading,
   });
-  await redis().set(
-    key,
-    payload,
-    'EX',
-    parseInt(env.LOCATION_TTL_SECONDS || '60'),
-  );
+  await redis().set(key, payload);
   return true;
+};
+
+export const removeDriverLocation = async (driverId) => {
+  await redis().del(driverLocationKey(driverId));
 };
 
 export const getDriverLocation = async (driverId) => {

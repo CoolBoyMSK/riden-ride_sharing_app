@@ -1,106 +1,59 @@
 import {
-  createFareManagement,
-  getAllFareManagements,
-  getFareByCar,
-  updateFareManagement,
-  updateDailyFare,
-  deleteFareManagement,
+  addFare,
+  getAllFares,
+  updateFare,
+  deleteFare,
 } from '../../../services/Admin/fareManagement/index.js';
 import {
   createFareManagementValidation,
   updateFareManagementValidation,
-  updateDailyFareValidation,
 } from '../../../validations/admin/fareManagement.js';
 import { handleResponse } from '../../../utils/handleRespone.js';
 
-export function createFare(req, res) {
+export function addFareController(req, res) {
   return handleResponse(
     {
-      handler: createFareManagement,
-      // validationFn: () => createFareManagementValidation(req.body),
-      handlerParams: [
-        { carType: req.body.carType, dailyFares: req.body.dailyFares },
-      ],
-      successMessage: 'Fare management created',
+      handler: addFare,
+      validationFn: null,
+      handlerParams: [req.body],
+      successMessage: 'Fare added successfully',
     },
     req,
     res,
   );
 }
 
-export function listFares(req, res) {
+export function getAllFaresController(req, res) {
   return handleResponse(
     {
-      handler: getAllFareManagements,
-      handlerParams: [{}],
-      successMessage: 'Fare management list fetched',
+      handler: getAllFares,
+      handlerParams: [req.query],
+      successMessage: 'Fare list fetched successfully',
     },
     req,
     res,
   );
 }
 
-export function getFare(req, res) {
+export function updateFareController(req, res) {
   return handleResponse(
     {
-      handler: getFareByCar,
-      handlerParams: [{ carType: req.params.carType }],
-      successMessage: 'Fare fetched',
+      handler: updateFare,
+      // validationFn: null,
+      handlerParams: [req.params, req.query, req.body],
+      successMessage: 'Fare updated successfully',
     },
     req,
     res,
   );
 }
 
-export function replaceFare(req, res) {
+export function deleteFareController(req, res) {
   return handleResponse(
     {
-      handler: updateFareManagement,
-      // validationFn: () =>
-      //   updateFareManagementValidation({
-      //     carType: req.params.carType,
-      //     dailyFares: req.body.dailyFares,
-      //   }),
-      handlerParams: [
-        { carType: req.params.carType, dailyFares: req.body.dailyFares },
-      ],
-      successMessage: 'Fare management replaced',
-    },
-    req,
-    res,
-  );
-}
-
-export function modifyDailyFare(req, res) {
-  return handleResponse(
-    {
-      handler: updateDailyFare,
-      validationFn: () =>
-        updateDailyFareValidation({
-          carType: req.params.carType,
-          day: req.params.day,
-          partialDailyFare: req.body,
-        }),
-      handlerParams: [
-        {
-          carType: req.params.carType,
-          day: req.params.day,
-          partialDailyFare: req.body,
-        },
-      ],
-      successMessage: 'Daily fare updated',
-    },
-    req,
-    res,
-  );
-}
-
-export function removeFare(req, res) {
-  return handleResponse(
-    {
-      handler: deleteFareManagement,
-      handlerParams: [{ carType: req.params.carType }],
-      successMessage: 'Fare management deleted',
+      handler: deleteFare,
+      handlerParams: [req.query],
+      successMessage: 'Fare deleted successfully',
     },
     req,
     res,

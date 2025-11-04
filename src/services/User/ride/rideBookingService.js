@@ -16,7 +16,7 @@ import { getPassengerWallet } from '../../../dal/stripe.js';
 import { validatePromoCode } from '../../../dal/promo_code.js';
 import { calculateEstimatedFare } from './fareCalculationService.js';
 import { getNearbyDriversCount } from './driverMatchingService.js';
-// import { emitToUser } from '../../../realtime/socket.js';
+import { emitToUser } from '../../../realtime/socket.js';
 
 // Calculate distance using simple Haversine formula (for estimation)
 const calculateDistance = (pickup, dropoff) => {
@@ -281,7 +281,7 @@ export const bookRide = async (userId, rideData) => {
 
       return {
         success: true,
-        message: 'Ride requested successfully. Searching for drivers...',
+        message: 'Ride booked successfully. Searching for drivers...',
         data: newRide,
       };
     } else {

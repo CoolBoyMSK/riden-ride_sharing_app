@@ -398,6 +398,18 @@ export const approveRequestedDriver = async ({ id }, resp) => {
       return resp;
     }
 
+    const notify = await notifyUser({
+      userId: success.userId,
+      title: 'Account Approved',
+      message: `Congratulations! Your driver account has been approved Riden.`,
+      module: 'support',
+      metadata: success,
+      actionLink: '',
+    });
+    if (!notify) {
+      console.log('Failed to send notification');
+    }
+
     await session.commitTransaction();
 
     resp.data = success;

@@ -1,5 +1,6 @@
 import bookingModel from '../models/Ride.js';
 import Report from '../models/Report.js';
+import Feedback from '../models/Feedback.js';
 import RideReceipt from '../models/RideReceipt.js';
 import { generateUniqueId } from '../utils/auth.js';
 
@@ -208,6 +209,82 @@ export const createBookingReportByPassengerId = async (
   await report.save();
 
   return report;
+};
+
+export const createBookingPassengerRating = async (
+  passengerId,
+  bookingId,
+  rating,
+  feedback,
+) => {
+  const booking = await bookingModel.findOne({
+    _id: bookingId,
+    passengerId,
+  });
+
+  if (!booking.isRatingAllow) {
+    throw new Error('Feedback is not allowed after 24h');
+  } else if (booking.driverRating) {
+    throw new Error('Feedback already posted');
+  }
+
+  const newFeedback = await Feedback.create({
+    passengerId: booking.passengerId,
+    driverId: booking.driverId,
+    rideId: booking._id,
+    type: 'by_passenger',
+    rating,
+    feedback,
+  });
+
+  const result = await bookingModel.findOneAndUpdate(
+    {
+      _id: booking._id,
+      passengerId,
+    },
+    { driverRating: newFeedback },
+    { new: true },
+  );
+
+  return result;
+};
+
+export const createBookingDriverRating = async (
+  driverId,
+  bookingId,
+  rating,
+  feedback,
+) => {
+  const booking = await bookingModel.findOne({
+    _id: bookingId,
+    driverId,
+  });
+
+  if (!booking.isRatingAllow) {
+    throw new Error('Feedback is not allowed after 24h');
+  } else if (booking.passengerRating) {
+    throw new Error('Feedback already posted');
+  }
+
+  const newFeedback = await Feedback.create({
+    passengerId: booking.passengerId,
+    driverId: booking.driverId,
+    rideId: booking._id,
+    type: 'by_driver',
+    rating,
+    feedback,
+  });
+
+  const result = await bookingModel.findOneAndUpdate(
+    {
+      _id: booking._id,
+      driverId,
+    },
+    { passengerRating: newFeedback },
+    { new: true },
+  );
+
+  return result;
 };
 
 export const findReceipt = async (BookingId) =>

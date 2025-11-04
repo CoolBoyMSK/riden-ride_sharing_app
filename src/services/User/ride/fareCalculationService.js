@@ -1,4 +1,4 @@
-import { getFareByCarType } from '../../../dal/fareManagement.js';
+// import { getFareByCarType } from '../../../dal/fareManagement.js';
 import { validatePromoCode } from '../../../dal/promo_code.js';
 
 // Get current day of week

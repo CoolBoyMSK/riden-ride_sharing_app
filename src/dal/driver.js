@@ -15,8 +15,6 @@ import { notifyUser, createAdminNotification } from '../dal/notification.js';
 import env from '../config/envConfig.js';
 import Queue from 'bull';
 import Redis from 'ioredis';
-import User from '../models/User.js';
-import Ride from '../models/Ride.js';
 
 export const findDriverByUserId = (userId, { session } = {}) => {
   let query = DriverModel.findOne({ userId });
@@ -205,18 +203,43 @@ export const findDriver = async (driverId) => {
 export const findDriverById = async (id) =>
   DriverModel.findById(id).populate('userId').lean();
 
-export const addDriverSuspension = (driverId, reason, endDate) =>
-  DriverModel.findByIdAndUpdate(
+export const addDriverSuspension = async (driverId, reason, endDate) => {
+  const driver = await DriverModel.findByIdAndUpdate(
     driverId,
     {
-      status: 'suspended',
-      $push: {
-        suspensions: { reason, start: new Date(), end: new Date(endDate) },
+      $set: {
+        status: 'suspended',
+        isSuspended: true,
       },
-      $set: { isSuspended: true },
+      $push: {
+        suspensions: {
+          reason,
+          start: new Date(),
+          end: new Date(endDate),
+        },
+      },
     },
     { new: true },
-  ).lean();
+  )
+    .populate('userId')
+    .lean();
+
+  if (driver) {
+    const notify = await notifyUser({
+      userId: driver.userId?._id,
+      title: 'Account Suspended',
+      message: `Your account has been suspended till ${endDate}, due to ${reason}.`,
+      module: 'support',
+      metadata: driver,
+      actionLink: '',
+    });
+    if (!notify) {
+      console.log('Failed to send notification');
+    }
+  }
+
+  return driver;
+};
 
 export const removeDriverSuspension = (driverId) =>
   DriverModel.findByIdAndUpdate(
@@ -1033,23 +1056,6 @@ driverSearchQueue.process('search-drivers', 10, async (job) => {
     if (phase === 1) {
       await handlePhase1Search(rideId, currentRide);
     } else if (phase === 2) {
-      const ride = await RideModel.findById(rideId).populate('passengerId');
-      if (!ride) {
-        return;
-      }
-      const notify = await notifyUser({
-        userId: ride.passengerId?.userId,
-        title: 'Expanding Driver Search Radius',
-        message:
-          'No driver available in 5km radius of your location, We are expanding driver search radius to 10Km',
-        module: 'ride',
-        type: 'ALERT',
-        metadata: ride,
-        storeInDB: false,
-      });
-      if (!notify) {
-        console.log('Failed to send notification');
-      }
       await handlePhase2Search(rideId, currentRide);
     }
   } catch (error) {
@@ -1083,9 +1089,34 @@ const handlePhase1Search = async (rideId, ride) => {
   // Check if we should continue to next phase
   const searchCount = await redis.incr(`ride:${rideId}:phase1_searches`);
 
-  if (searchCount >= 12) {
-    // 2 minutes / 10 seconds = 12 searches
+  if (searchCount >= 24) {
+    // 2 minutes / 5 seconds = 24 searches
     // Schedule phase 2
+    const ride = await RideModel.findById(rideId).populate('passengerId');
+    if (!ride) {
+      return;
+    }
+    const notify = await notifyUser({
+      userId: ride.passengerId?.userId,
+      title: 'Expanding Driver Search Radius',
+      message:
+        'No driver available in 5km radius of your location, We are expanding driver search radius to 10Km',
+      module: 'ride',
+      type: 'ALERT',
+      metadata: ride,
+      storeInDB: false,
+    });
+    emitToRide(ride._id, 'ride:expanding_driver_searching_radius', {
+      success: true,
+      objectType: 'expanding-driver-searching-radius',
+      data: { searchRadius: 10 },
+      message:
+        'No driver available in 5km radius of your location, We are expanding driver search radius to 10Km',
+    });
+    if (!notify) {
+      console.log('Failed to send notification');
+    }
+
     await driverSearchQueue.add(
       'search-drivers',
       { rideId, phase: 2 },
@@ -1095,12 +1126,12 @@ const handlePhase1Search = async (rideId, ride) => {
     // Cleanup phase 1 counter
     await redis.del(`ride:${rideId}:phase1_searches`);
   } else {
-    // Schedule next phase 1 search in 10 seconds
+    // Schedule next phase 1 search in 5 seconds
     await driverSearchQueue.add(
       'search-drivers',
       { rideId, phase: 1 },
       {
-        delay: 10 * 1000, // 10 seconds
+        delay: 5 * 1000, // 5 seconds
         removeOnComplete: true,
       },
     );
@@ -1118,14 +1149,14 @@ const handlePhase2Search = async (rideId, ride) => {
   // Check if we should continue searching
   const searchCount = await redis.incr(`ride:${rideId}:phase2_searches`);
 
-  if (searchCount < 6) {
-    // 1 minute / 10 seconds = 6 searches
-    // Schedule next phase 2 search in 10 seconds
+  if (searchCount < 12) {
+    // 1 minute / 5 seconds = 12 searches
+    // Schedule next phase 2 search in 5 seconds
     await driverSearchQueue.add(
       'search-drivers',
       { rideId, phase: 2 },
       {
-        delay: 10 * 1000,
+        delay: 5 * 1000,
         removeOnComplete: true,
       },
     );
@@ -1208,7 +1239,7 @@ export const notifyDriversInRadius = async (ride, maxRadius, minRadius = 0) => {
           module: 'ride',
           metadata: ride,
           actionLink: 'ride:find',
-          isPush: true,
+          storeInDB: false,
         });
 
         if (!notify) {
@@ -1236,279 +1267,6 @@ export const notifyDriversInRadius = async (ride, maxRadius, minRadius = 0) => {
 };
 
 // NEW FUNCTIONS FOR DRIVER LOCATION TRACKING (NO EXISTING CODE MODIFIED)
-
-export const getDriversInRideRadiusPhase1 = async (ride) => {
-  try {
-    const ridePickUpLocation = ride.pickupLocation?.coordinates;
-    if (!ridePickUpLocation || ridePickUpLocation.length !== 2) {
-      console.log('Invalid ride pickup location for phase 1');
-      return [];
-    }
-
-    const radiusMeters = 5 * 1000; // 5km for phase 1
-
-    // Find drivers within 0-5km radius with detailed location info
-    const driversInRadius = await DriverLocation.aggregate([
-      {
-        $geoNear: {
-          near: {
-            type: 'Point',
-            coordinates: ridePickUpLocation,
-          },
-          distanceField: 'distance',
-          maxDistance: radiusMeters,
-          spherical: true,
-          key: 'location',
-          query: {
-            status: 'online',
-            isAvailable: true,
-            currentRideId: { $in: [null, undefined, ''] },
-          },
-        },
-      },
-      // Lookup driver details
-      {
-        $lookup: {
-          from: 'drivers',
-          localField: 'driverId',
-          foreignField: '_id',
-          as: 'driver',
-        },
-      },
-      {
-        $unwind: '$driver',
-      },
-      // Match driver criteria
-      {
-        $match: {
-          'driver.vehicle.type': ride.carType,
-          'driver.isBlocked': false,
-          'driver.isSuspended': false,
-          'driver.isActive': true,
-          'driver.backgroundCheckStatus': 'approved',
-        },
-      },
-      // Lookup user details
-      {
-        $lookup: {
-          from: 'users',
-          localField: 'driver.userId',
-          foreignField: '_id',
-          as: 'user',
-        },
-      },
-      {
-        $unwind: '$user',
-      },
-      // Ensure user is not blocked
-      {
-        $match: {
-          'user.isBlocked': { $ne: true },
-        },
-      },
-      // Project required fields
-      {
-        $project: {
-          driverId: 1,
-          userId: '$driver.userId',
-          location: 1,
-          distance: 1,
-          heading: 1,
-          speed: 1,
-          accuracy: 1,
-          lastUpdated: 1,
-          driverName: '$user.name',
-          vehicleType: '$driver.vehicle.type',
-          vehicleModel: '$driver.vehicle.model',
-          vehiclePlate: '$driver.vehicle.plateNumber',
-          status: 1,
-          isAvailable: 1,
-        },
-      },
-      // Sort by distance (closest first)
-      {
-        $sort: {
-          distance: 1,
-        },
-      },
-    ]);
-
-    console.log(
-      `📍 Phase 1: Found ${driversInRadius.length} drivers within 5km radius`,
-    );
-
-    // Store driver locations in Redis for real-time tracking (optional)
-    await storeDriverLocationsInRedis(ride._id, driversInRadius, 'phase1');
-
-    return driversInRadius;
-  } catch (error) {
-    console.error('Error in getDriversInRideRadiusPhase1:', error);
-    return [];
-  }
-};
-
-export const getDriversInRideRadiusPhase2 = async (ride) => {
-  try {
-    const ridePickUpLocation = ride.pickupLocation?.coordinates;
-    if (!ridePickUpLocation || ridePickUpLocation.length !== 2) {
-      console.log('Invalid ride pickup location for phase 2');
-      return [];
-    }
-
-    const minRadiusMeters = 5 * 1000; // 5km minimum
-    const maxRadiusMeters = 10 * 1000; // 10km maximum
-
-    // Find drivers within 6-10km radius with detailed location info
-    const driversInRadius = await DriverLocation.aggregate([
-      {
-        $geoNear: {
-          near: {
-            type: 'Point',
-            coordinates: ridePickUpLocation,
-          },
-          distanceField: 'distance',
-          maxDistance: maxRadiusMeters,
-          spherical: true,
-          key: 'location',
-          query: {
-            status: 'online',
-            isAvailable: true,
-            currentRideId: { $in: [null, undefined, ''] },
-          },
-        },
-      },
-      // Filter for expanded radius (6-10km)
-      {
-        $match: {
-          distance: { $gte: minRadiusMeters },
-        },
-      },
-      // Lookup driver details
-      {
-        $lookup: {
-          from: 'drivers',
-          localField: 'driverId',
-          foreignField: '_id',
-          as: 'driver',
-        },
-      },
-      {
-        $unwind: '$driver',
-      },
-      // Match driver criteria
-      {
-        $match: {
-          'driver.vehicle.type': ride.carType,
-          'driver.isBlocked': false,
-          'driver.isSuspended': false,
-          'driver.isActive': true,
-          'driver.backgroundCheckStatus': 'approved',
-        },
-      },
-      // Lookup user details
-      {
-        $lookup: {
-          from: 'users',
-          localField: 'driver.userId',
-          foreignField: '_id',
-          as: 'user',
-        },
-      },
-      {
-        $unwind: '$user',
-      },
-      // Ensure user is not blocked
-      {
-        $match: {
-          'user.isBlocked': { $ne: true },
-        },
-      },
-      // Project required fields
-      {
-        $project: {
-          driverId: 1,
-          userId: '$driver.userId',
-          location: 1,
-          distance: 1,
-          heading: 1,
-          speed: 1,
-          accuracy: 1,
-          lastUpdated: 1,
-          driverName: '$user.name',
-          vehicleType: '$driver.vehicle.type',
-          vehicleModel: '$driver.vehicle.model',
-          vehiclePlate: '$driver.vehicle.plateNumber',
-          status: 1,
-          isAvailable: 1,
-        },
-      },
-      // Sort by distance (closest first)
-      {
-        $sort: {
-          distance: 1,
-        },
-      },
-    ]);
-
-    console.log(
-      `📍 Phase 2: Found ${driversInRadius.length} drivers within 6-10km radius`,
-    );
-
-    // Store driver locations in Redis for real-time tracking (optional)
-    await storeDriverLocationsInRedis(ride._id, driversInRadius, 'phase2');
-
-    return driversInRadius;
-  } catch (error) {
-    console.error('Error in getDriversInRideRadiusPhase2:', error);
-    return [];
-  }
-};
-
-// Helper function to store driver locations in Redis (optional - for real-time tracking)
-const storeDriverLocationsInRedis = async (rideId, drivers, phase) => {
-  try {
-    const cacheKey = `ride:${rideId}:${phase}_driver_locations`;
-    const driverLocationsData = drivers.map((driver) => ({
-      driverId: driver.driverId?.toString(),
-      userId: driver.userId?.toString(),
-      coordinates: driver.location?.coordinates,
-      distance: driver.distance,
-      heading: driver.heading,
-      speed: driver.speed,
-      accuracy: driver.accuracy,
-      lastUpdated: driver.lastUpdated,
-      driverName: driver.driverName,
-      vehicleType: driver.vehicleType,
-      vehicleModel: driver.vehicleModel,
-      vehiclePlate: driver.vehiclePlate,
-    }));
-
-    await redis.setex(cacheKey, 30, JSON.stringify(driverLocationsData)); // 30 seconds TTL
-
-    console.log(
-      `💾 Stored ${driverLocationsData.length} driver locations in Redis for ${phase}`,
-    );
-  } catch (error) {
-    console.error('Error storing driver locations in Redis:', error);
-  }
-};
-
-// NEW: Function to get real-time driver locations from Redis
-export const getRealTimeDriverLocations = async (rideId, phase) => {
-  try {
-    const cacheKey = `ride:${rideId}:${phase}_driver_locations`;
-    const locationsData = await redis.get(cacheKey);
-
-    if (locationsData) {
-      return JSON.parse(locationsData);
-    }
-    return [];
-  } catch (error) {
-    console.error('Error getting real-time driver locations:', error);
-    return [];
-  }
-};
-
 // NEW: Function to start monitoring driver locations (optional - call this if you want continuous updates)
 export const startDriverLocationMonitoring = async (rideId) => {
   try {
@@ -1520,7 +1278,7 @@ export const startDriverLocationMonitoring = async (rideId) => {
 
     const ride = JSON.parse(rideData);
 
-    // Set up interval to refresh driver locations every 30 seconds
+    // Set up interval to refresh driver locations every 5 seconds
     const monitoringInterval = setInterval(async () => {
       try {
         const currentRide = await getRideById(rideId);
@@ -1535,12 +1293,12 @@ export const startDriverLocationMonitoring = async (rideId) => {
         // Check current phase and refresh locations
         const searchCount =
           (await redis.get(`ride:${rideId}:phase1_searches`)) || 0;
-        const currentPhase = parseInt(searchCount) >= 12 ? 'phase2' : 'phase1';
+        const currentPhase = parseInt(searchCount) >= 24 ? 'phase2' : 'phase1';
 
         if (currentPhase === 'phase1') {
-          await getDriversInRideRadiusPhase1(ride);
+          await getDriversInRideRadius(ride, 1);
         } else {
-          await getDriversInRideRadiusPhase2(ride);
+          await getDriversInRideRadius(ride, 2);
         }
 
         console.log(
@@ -1552,7 +1310,7 @@ export const startDriverLocationMonitoring = async (rideId) => {
           error,
         );
       }
-    }, 30000); // Every 30 seconds
+    }, 5000); // Every 5 seconds
 
     // Store interval reference for cleanup (optional)
     console.log(`🎯 Started location monitoring for ride ${rideId}`);
@@ -1561,9 +1319,135 @@ export const startDriverLocationMonitoring = async (rideId) => {
   }
 };
 
-// NEW: Optional - Call this in your existing startProgressiveDriverSearch if you want automatic monitoring
-// Add this line inside startProgressiveDriverSearch after storing ride in Redis:
-// await startDriverLocationMonitoring(ride._id);
+export const getDriversInRideRadius = async (ride, phase = 1) => {
+  try {
+    const ridePickUpLocation = ride.pickupLocation?.coordinates;
+    if (!ridePickUpLocation || ridePickUpLocation.length !== 2) {
+      console.log(`Invalid ride pickup location for phase ${phase}`);
+      return [];
+    }
+
+    let maxDistance, minDistance;
+    if (phase === 1) {
+      maxDistance = 5 * 1000; // 5km for phase 1
+      minDistance = null; // No minimum
+    } else if (phase === 2) {
+      maxDistance = 10 * 1000; // 10km maximum
+      minDistance = 5 * 1000; // 5km minimum
+    } else {
+      console.log(`Invalid phase: ${phase}`);
+      return [];
+    }
+
+    const pipeline = [
+      {
+        $geoNear: {
+          near: { type: 'Point', coordinates: ridePickUpLocation },
+          distanceField: 'distance',
+          maxDistance: maxDistance,
+          spherical: true,
+          key: 'location',
+          query: {
+            status: 'online',
+            isAvailable: true,
+            currentRideId: { $in: [null, undefined, ''] },
+          },
+        },
+      },
+    ];
+
+    if (phase === 2) {
+      pipeline.push({
+        $match: {
+          distance: { $gte: minDistance },
+        },
+      });
+    }
+
+    pipeline.push(
+      {
+        $lookup: {
+          from: 'drivers',
+          localField: 'driverId',
+          foreignField: '_id',
+          as: 'driver',
+        },
+      },
+      { $unwind: '$driver' },
+      {
+        $match: {
+          'driver.vehicle.type': ride.carType,
+          'driver.isBlocked': false,
+          'driver.isSuspended': false,
+          'driver.isActive': true,
+          'driver.backgroundCheckStatus': 'approved',
+        },
+      },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'driver.userId',
+          foreignField: '_id',
+          as: 'user',
+        },
+      },
+      { $unwind: '$user' },
+      {
+        $match: {
+          'user.isBlocked': { $ne: true },
+        },
+      },
+      {
+        $project: {
+          driverId: 1,
+          userId: '$driver.userId',
+          location: 1,
+          distance: 1,
+          heading: 1,
+          speed: 1,
+          accuracy: 1,
+          lastUpdated: 1,
+          driverName: '$user.name',
+          driverImage: '$user.profileImg',
+          vehicleType: '$driver.vehicle.type',
+          vehicleModel: '$driver.vehicle.model',
+          vehiclePlate: '$driver.vehicle.plateNumber',
+          status: 1,
+          isAvailable: 1,
+        },
+      },
+      { $sort: { distance: 1 } },
+    );
+
+    const driversInRadius = await DriverLocation.aggregate(pipeline);
+    const radiusMessage =
+      phase === 1 ? 'within 5km radius' : 'within 6-10km radius';
+
+    console.log(
+      `📍 Phase ${phase}: Found ${driversInRadius.length} drivers ${radiusMessage}`,
+    );
+
+    if (driversInRadius && driversInRadius.length > 0) {
+      emitToRide(ride._id, 'ride:nearby_drivers', {
+        success: true,
+        objectType: 'nearby-drivers',
+        data: driversInRadius,
+        message: "Nearby driver's location fetched successfully",
+      });
+    }
+
+    // await storeDriverLocationsInRedis(
+    //   ride._id,
+    //   driversInRadius,
+    //   `phase${phase}`,
+    // );
+
+    return driversInRadius;
+  } catch (error) {
+    console.error(`Error in getDriversInRideRadius phase ${phase}:`, error);
+    return [];
+  }
+};
 
 // Cleanup when ride is accepted or cancelled
 export const stopDriverSearch = async (rideId) => {
@@ -1742,6 +1626,7 @@ const updateRideStatus = async (
   }).populate('passengerId');
 };
 
+// Surge Logic
 export const checkSurgePricing = async (
   pickupCoordinates,
   carType,
@@ -1838,7 +1723,7 @@ export const checkSurgePricing = async (
         `❌ No surge configuration found for ${carType} on ${currentDay}`,
       );
       return getNoSurgeResponse(
-        effectiveRidesCount,
+        effectiveRideCount,
         availableDriversCount,
         rideToDriverRatio,
         'No surge configuration available',
