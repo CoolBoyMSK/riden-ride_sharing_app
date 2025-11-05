@@ -7,7 +7,6 @@ import {
 import { findPassengerByUserId } from '../../../dal/passenger.js';
 import { isRideInRestrictedArea } from '../../../dal/ride.js';
 import {
-  findNearbyDriverUserIds,
   checkSurgePricing,
   startProgressiveDriverSearch,
   updateExistingRidesSurgePricing,
@@ -16,7 +15,6 @@ import { getPassengerWallet } from '../../../dal/stripe.js';
 import { validatePromoCode } from '../../../dal/promo_code.js';
 import { calculateEstimatedFare } from './fareCalculationService.js';
 import { getNearbyDriversCount } from './driverMatchingService.js';
-import { emitToUser } from '../../../realtime/socket.js';
 
 // Calculate distance using simple Haversine formula (for estimation)
 const calculateDistance = (pickup, dropoff) => {
@@ -194,6 +192,7 @@ export const bookRide = async (userId, rideData) => {
     // Calculate fare with promo code
     const fareResult = await calculateEstimatedFare(
       carType,
+      pickupLocation.coordinates,
       distance,
       duration,
       promoCode,

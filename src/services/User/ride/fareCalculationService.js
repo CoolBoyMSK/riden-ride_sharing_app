@@ -1,4 +1,4 @@
-// import { getFareByCarType } from '../../../dal/fareManagement.js';
+import { getFareForLocation } from '../../../dal/fareManagement.js';
 import { validatePromoCode } from '../../../dal/promo_code.js';
 
 // Get current day of week
@@ -44,6 +44,7 @@ const isPeakHour = () => {
 // Calculate estimated fare
 export const calculateEstimatedFare = async (
   carType,
+  { lng, lat },
   distance,
   duration,
   promoCode = null,
@@ -52,7 +53,7 @@ export const calculateEstimatedFare = async (
 ) => {
   try {
     // Get fare configuration for the car type
-    const fareConfig = await getFareByCarType(carType);
+    const fareConfig = await getFareForLocation(lng, lat, carType);
     if (!fareConfig) {
       throw new Error(`Fare configuration not found for car type: ${carType}`);
     }
@@ -141,105 +142,6 @@ export const calculateEstimatedFare = async (
     };
   }
 };
-
-// Calculate actual fare (during/after ride completion)
-// export const calculateActualFare = async (rideData) => {
-//   try {
-//     const {
-//       carType,
-//       actualDistance,
-//       actualDuration,
-//       waitingTime = 0,
-//       promoCode,
-//       rideStartedAt,
-//       rideCompletedAt,
-//     } = rideData;
-
-//     // Get fare configuration
-//     const fareConfig = await getFareByCarType(carType);
-//     if (!fareConfig) {
-//       throw new Error(`Fare configuration not found for car type: ${carType}`);
-//     }
-
-//     // Determine the day based on ride start time
-//     const rideDate = new Date(rideStartedAt);
-//     const days = [
-//       'Sunday',
-//       'Monday',
-//       'Tuesday',
-//       'Wednesday',
-//       'Thursday',
-//       'Friday',
-//       'Saturday',
-//     ];
-//     const rideDay = days[rideDate.getDay()];
-
-//     const dayFare = fareConfig.dailyFares.find((fare) => fare.day === rideDay);
-
-//     // Calculate components
-//     const baseFare = dayFare.baseFare;
-//     const distanceFare = actualDistance * dayFare.perKmFare;
-//     const timeFare = actualDuration
-//       ? (actualDuration / 60) * (dayFare.perKmFare * 0.1)
-//       : 0;
-
-//     // Night charge based on ride start time
-//     const nightCharge = isNightTimeForDate(rideDate, dayFare.nightTime)
-//       ? dayFare.nightCharge
-//       : 0;
-
-//     // Peak charge based on ride start time
-//     const peakCharge = isPeakHourForDate(rideDate) ? dayFare.peakCharge : 0;
-
-//     // Waiting charge
-//     const waitingCharge =
-//       waitingTime > dayFare.waiting.minutes
-//         ? ((waitingTime - dayFare.waiting.minutes) / 60) *
-//           dayFare.waiting.charge
-//         : 0;
-
-//     const subtotal =
-//       baseFare +
-//       distanceFare +
-//       timeFare +
-//       nightCharge +
-//       peakCharge +
-//       waitingCharge;
-
-//     // Apply promo code
-//     let promoDiscount = 0;
-//     let promoDetails = null;
-
-//     if (promoCode?.code && promoCode?.isApplied) {
-//       promoDiscount = (subtotal * promoCode.discount) / 100;
-//       promoDetails = promoCode;
-//     }
-
-//     const finalAmount = Math.max(0, subtotal - promoDiscount);
-
-//     return {
-//       success: true,
-//       fareBreakdown: {
-//         baseFare,
-//         distanceFare,
-//         timeFare,
-//         nightCharge,
-//         peakCharge,
-//         waitingCharge,
-//         subtotal,
-//         promoDiscount,
-//         finalAmount,
-//       },
-//       actualFare: finalAmount,
-//       promoDetails,
-//     };
-//   } catch (error) {
-//     return {
-//       success: false,
-//       error: error.message,
-//     };
-//   }
-// };
 
 export const calculateActualFare = async (rideData) => {
   try {

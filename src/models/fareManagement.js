@@ -128,7 +128,6 @@ const zoneSchema = new Schema(
   {
     name: {
       type: String,
-      index: true,
     },
     city: {
       type: String,

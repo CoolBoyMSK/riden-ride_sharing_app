@@ -1,6 +1,7 @@
 import {
   addFare,
   getAllFares,
+  getAllFareById,
   updateFare,
   deleteFare,
 } from '../../../services/Admin/fareManagement/index.js';
@@ -28,6 +29,18 @@ export function getAllFaresController(req, res) {
     {
       handler: getAllFares,
       handlerParams: [req.query],
+      successMessage: 'Fare list fetched successfully',
+    },
+    req,
+    res,
+  );
+}
+
+export function getAllFareByIdController(req, res) {
+  return handleResponse(
+    {
+      handler: getAllFareById,
+      handlerParams: [req.params],
       successMessage: 'Fare list fetched successfully',
     },
     req,

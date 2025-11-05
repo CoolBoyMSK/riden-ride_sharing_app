@@ -1,21 +1,21 @@
 import {
-  // getFareByCarType,
   createFareConfiguration,
   getFareConfigurations,
+  getFareConfigurationById,
   updateFareByZoneNameAndCarType,
   deleteFareConfiguration,
 } from '../../../dal/fareManagement.js';
 
 export async function addFare(body, resp) {
   try {
-    const success = await createFareConfiguration(body);
-    if (!success) {
+    const data = await createFareConfiguration(body);
+    if (!data || !data.success) {
       resp.error = true;
       resp.error_message = 'Failed to configure fare';
       return resp;
     }
 
-    resp.data = success;
+    resp.data = data;
     return resp;
   } catch (error) {
     console.error('API ERROR: ', error);
@@ -36,7 +36,26 @@ export async function getAllFares(
     );
     if (!success) {
       resp.error = true;
-      resp.error_message = 'Failed to configure fare';
+      resp.error_message = 'Failed to fetch fares';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error('API ERROR: ', error);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
+    return resp;
+  }
+}
+
+export async function getAllFareById({ id }, resp) {
+  try {
+    const success = await getFareConfigurationById(id);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch fare';
       return resp;
     }
 
