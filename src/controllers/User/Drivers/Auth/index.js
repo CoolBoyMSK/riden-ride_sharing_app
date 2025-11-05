@@ -1,7 +1,7 @@
 import { handleResponse } from '../../../../utils/handleRespone.js';
 import {
-  signUpDriverwithEmail,
-  signUpDriverwithPhone,
+  signUpDriverWithEmail,
+  signUpDriverWithPhone,
   loginUser,
   socialLoginUser,
   otpVerification,
@@ -14,10 +14,10 @@ import {
   updateFCMToken,
 } from '../../../../services/User/driver/Auth/index.js';
 
-export const signUpDriverwithEmailController = (req, res) =>
+export const signUpDriverWithEmailController = (req, res) =>
   handleResponse(
     {
-      handler: signUpDriverwithEmail,
+      handler: signUpDriverWithEmail,
       validationFn: null,
       handlerParams: [req.body],
       successMessage: 'Verify your email to complete registration',
@@ -26,10 +26,10 @@ export const signUpDriverwithEmailController = (req, res) =>
     res,
   );
 
-export const signUpDriverwithPhoneController = (req, res) =>
+export const signUpDriverWithPhoneController = (req, res) =>
   handleResponse(
     {
-      handler: signUpDriverwithPhone,
+      handler: signUpDriverWithPhone,
       validationFn: null,
       handlerParams: [req.body],
       successMessage: 'Verify your phone number to complete registration',

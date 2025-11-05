@@ -1,10 +1,12 @@
 import express from 'express';
 import { registerRoute } from '../../../../utils/registerRoute.js';
 import {
-  signUpPassengerController,
+  signUpPassengerWithEmailController,
+  signUpPassengerWithPhoneController,
   loginUserController,
   otpVerificationController,
   sendPassengerPhoneOtpController,
+  sendPassengerEmailOtpController,
   socialLoginUserController,
   forgotPasswordController,
   resetUserPasswordController,
@@ -17,8 +19,14 @@ const router = express.Router();
 
 registerRoute({
   router,
-  route: '/signup',
-  post_method: signUpPassengerController,
+  route: '/email-signup',
+  post_method: signUpPassengerWithEmailController,
+});
+
+registerRoute({
+  router,
+  route: '/phone-signup',
+  post_method: signUpPassengerWithPhoneController,
 });
 
 registerRoute({
@@ -43,6 +51,12 @@ registerRoute({
   router,
   route: '/phone',
   post_method: sendPassengerPhoneOtpController,
+});
+
+registerRoute({
+  router,
+  route: '/email',
+  post_method: sendPassengerEmailOtpController,
 });
 
 registerRoute({

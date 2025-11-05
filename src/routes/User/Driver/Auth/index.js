@@ -1,8 +1,8 @@
 import express from 'express';
 import { registerRoute } from '../../../../utils/registerRoute.js';
 import {
-  signUpDriverwithEmailController,
-  signUpDriverwithPhoneController,
+  signUpDriverWithEmailController,
+  signUpDriverWithPhoneController,
   loginUserController,
   otpVerificationController,
   sendDriverPhoneOtpController,
@@ -20,13 +20,13 @@ const router = express.Router();
 registerRoute({
   router,
   route: '/email-signup',
-  post_method: signUpDriverwithEmailController,
+  post_method: signUpDriverWithEmailController,
 });
 
 registerRoute({
   router,
   route: '/phone-signup',
-  post_method: signUpDriverwithPhoneController,
+  post_method: signUpDriverWithPhoneController,
 });
 
 registerRoute({

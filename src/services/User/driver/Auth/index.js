@@ -52,7 +52,7 @@ import {
 } from '../../../../validations/user/authValidations.js';
 import { verifyGoogleToken } from '../../../../utils/verifySocials.js';
 
-export const signUpDriverwithEmail = async (
+export const signUpDriverWithEmail = async (
   { name, email, gender, password, confirmPassword },
   resp,
 ) => {
@@ -78,7 +78,7 @@ export const signUpDriverwithEmail = async (
     }
 
     let user = await findUserByEmail(email);
-    if (user && user.roles.includes('driver')) {
+    if (user) {
       resp.error = true;
       resp.error_message = 'Email already in use';
       return resp;
@@ -119,7 +119,7 @@ export const signUpDriverwithEmail = async (
   }
 };
 
-export const signUpDriverwithPhone = async (
+export const signUpDriverWithPhone = async (
   { name, phoneNumber, gender, password, confirmPassword },
   resp,
 ) => {
@@ -145,7 +145,7 @@ export const signUpDriverwithPhone = async (
     }
 
     let user = await findUserByPhone(phoneNumber);
-    if (user && user.roles.includes('driver')) {
+    if (user) {
       resp.error = true;
       resp.error_message = 'Phone number already in use';
       return resp;

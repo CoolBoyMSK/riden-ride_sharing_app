@@ -1,10 +1,12 @@
 import { handleResponse } from '../../../../utils/handleRespone.js';
 import {
-  signUpPassenger,
+  signUpPassengerWithEmail,
+  signUpPassengerWithPhone,
   loginUser,
   socialLoginUser,
   otpVerification,
   sendPassengerPhoneOtp,
+  sendPassengerEmailOtp,
   forgotPassword,
   resetUserPassword,
   resendOtp,
@@ -12,13 +14,25 @@ import {
   updateFCMToken,
 } from '../../../../services/User/passenger/Auth/index.js';
 
-export const signUpPassengerController = (req, res) =>
+export const signUpPassengerWithEmailController = (req, res) =>
   handleResponse(
     {
-      handler: signUpPassenger,
+      handler: signUpPassengerWithEmail,
       validationFn: null,
       handlerParams: [req.body],
       successMessage: 'Verify your email to complete registration',
+    },
+    req,
+    res,
+  );
+
+export const signUpPassengerWithPhoneController = (req, res) =>
+  handleResponse(
+    {
+      handler: signUpPassengerWithPhone,
+      validationFn: null,
+      handlerParams: [req.body],
+      successMessage: 'Verify your phone number to complete registration',
     },
     req,
     res,
@@ -67,6 +81,18 @@ export const sendPassengerPhoneOtpController = (req, res) =>
       validationFn: null,
       handlerParams: [req.body],
       successMessage: 'OTP sent to your phone number successfully',
+    },
+    req,
+    res,
+  );
+
+export const sendPassengerEmailOtpController = (req, res) =>
+  handleResponse(
+    {
+      handler: sendPassengerEmailOtp,
+      validationFn: null,
+      handlerParams: [req.body],
+      successMessage: 'OTP sent to your email successfully',
     },
     req,
     res,
