@@ -4,4 +4,5 @@ export const ZONE_TYPES = [
   'suburban',
   'airport',
   'commercial',
+  'downtown',
 ];

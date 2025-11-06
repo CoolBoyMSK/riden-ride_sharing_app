@@ -15,6 +15,7 @@ import cmsRouter from './CMS/index.js';
 import commissionRouter from './Commission/index.js';
 import alertRouter from './Alert/index.js';
 import notificationRouter from './Notification/index.js';
+import zoneRouter from './Zones/index.js';
 
 const adminRouter = express.Router();
 
@@ -34,5 +35,6 @@ adminRouter.use('/cms', cmsRouter);
 adminRouter.use('/commission', commissionRouter);
 adminRouter.use('/alert', alertRouter);
 adminRouter.use('/notification', notificationRouter);
+adminRouter.use('/zone', zoneRouter);
 
 export default adminRouter;
