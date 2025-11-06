@@ -29,10 +29,6 @@ const fareBreakdownSchema = new mongoose.Schema(
       required: true,
       min: 0,
     },
-    airportRideFee: {
-      type: Number,
-      min: 0,
-    },
     baseFare: {
       type: Number,
       required: true,
@@ -49,11 +45,6 @@ const fareBreakdownSchema = new mongoose.Schema(
       min: 0,
     },
     nightCharge: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
-    peakCharge: {
       type: Number,
       default: 0,
       min: 0,

@@ -22,7 +22,7 @@ registerRoute({
 
 registerRoute({
   router,
-  route: '/:id',
+  route: '/get',
   admin_auth_enable: true,
   get_method: getAllFareByIdController,
   get_permission: 'fare_management',
@@ -30,7 +30,7 @@ registerRoute({
 
 registerRoute({
   router,
-  route: '/:carType',
+  route: '/update',
   admin_auth_enable: true,
   put_method: updateFareController,
   put_permission: 'fare_management',

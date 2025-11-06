@@ -9,8 +9,6 @@ const emailTransporter = nodemailer.createTransport({
     user: env.EMAIL_USER,
     pass: env.EMAIL_PASS,
   },
-  logger: true,
-  debug: true,
 });
 
 export default emailTransporter;

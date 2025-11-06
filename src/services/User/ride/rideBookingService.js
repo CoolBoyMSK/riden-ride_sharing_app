@@ -192,7 +192,10 @@ export const bookRide = async (userId, rideData) => {
     // Calculate fare with promo code
     const fareResult = await calculateEstimatedFare(
       carType,
-      pickupLocation.coordinates,
+      {
+        lng: pickupLocation.coordinates[0],
+        lat: pickupLocation.coordinates[1],
+      },
       distance,
       duration,
       promoCode,
