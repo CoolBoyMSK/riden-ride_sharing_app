@@ -93,9 +93,9 @@ export async function updateFare({ carType, zone, city }, body, resp) {
   }
 }
 
-export async function deleteFare({ deleteId }, resp) {
+export async function deleteFare({ id }, resp) {
   try {
-    const success = await deleteFareConfiguration(deleteId);
+    const success = await deleteFareConfiguration(id);
     if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to configure fare';

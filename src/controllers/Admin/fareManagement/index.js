@@ -61,7 +61,7 @@ export const deleteFareController = (req, res) => {
   return handleResponse(
     {
       handler: deleteFare,
-      handlerParams: [req.params],
+      handlerParams: [req.query],
       successMessage: 'Fare deleted successfully',
     },
     req,

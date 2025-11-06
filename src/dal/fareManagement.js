@@ -447,6 +447,7 @@ export const updateFareByZoneNameAndCarType = async (
 
 export const deleteFareConfiguration = async (zoneId) => {
   const result = await FareManagement.findByIdAndDelete(zoneId);
+  console.log(result);
   if (!result) {
     throw new Error('Fare configuration not found');
   }
