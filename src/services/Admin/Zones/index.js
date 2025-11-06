@@ -105,9 +105,9 @@ export const removeZone = async ({ id }, resp) => {
   }
 };
 
-export const fetchZoneTypes = async (resp) => {
+export const fetchZoneTypes = (resp) => {
   try {
-    const success = await getZoneTypes();
+    const success = getZoneTypes();
     if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to fetch zone types';

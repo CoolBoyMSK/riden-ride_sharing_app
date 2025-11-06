@@ -2,6 +2,14 @@ import mongoose from 'mongoose';
 import FareManagement from '../models/fareManagement.js';
 import { CAR_TYPES } from '../enums/carType.js';
 
+// Helper functions
+const getNestedValue = (obj, path) => {
+  return path.split('.').reduce((current, key) => {
+    return current ? current[key] : undefined;
+  }, obj);
+};
+
+// Main functions
 export const createFareConfiguration = async (fareData) => {
   const requiredFields = ['zone', 'dailyFares'];
   for (const field of requiredFields) {
@@ -219,11 +227,7 @@ export const createFareConfiguration = async (fareData) => {
   });
 
   await fareManagement.save();
-  return {
-    success: true,
-    data: fareManagement,
-    message: 'Fare configuration created successfully with all car types',
-  };
+  return fareManagement;
 };
 
 export const getFareConfigurations = async (filters = {}, pagination = {}) => {
@@ -438,11 +442,7 @@ export const updateFareByZoneNameAndCarType = async (
   });
 
   await fareManagement.save();
-  return {
-    success: true,
-    data: fareManagement,
-    message: `Fare for ${carType} in zone '${zoneName}' updated successfully`,
-  };
+  return fareManagement;
 };
 
 export const deleteFareConfiguration = async (zoneId) => {
@@ -455,6 +455,433 @@ export const deleteFareConfiguration = async (zoneId) => {
     success: true,
     message: 'Fare configuration deleted successfully',
   };
+};
+
+export const createDefaultFareConfiguration = async (payload) => {
+  // Validate that payload has dailyFares
+  if (!payload.dailyFares || !Array.isArray(payload.dailyFares)) {
+    throw new Error('dailyFares array is required and must be an array');
+  }
+
+  // Validate that all car types are provided
+  const providedCarTypes = payload.dailyFares.map((fare) => fare.carType);
+  const missingCarTypes = CAR_TYPES.filter(
+    (carType) => !providedCarTypes.includes(carType),
+  );
+
+  if (missingCarTypes.length > 0) {
+    throw new Error(
+      `Missing fare configuration for car types: ${missingCarTypes.join(', ')}. All car types must be configured.`,
+    );
+  }
+
+  // Validate for duplicate car types
+  const carTypeSet = new Set();
+  const duplicateCarTypes = [];
+
+  for (const fare of payload.dailyFares) {
+    if (carTypeSet.has(fare.carType)) {
+      duplicateCarTypes.push(fare.carType);
+    } else {
+      carTypeSet.add(fare.carType);
+    }
+  }
+
+  if (duplicateCarTypes.length > 0) {
+    throw new Error(
+      `Duplicate fare configuration for car types: ${duplicateCarTypes.join(', ')}`,
+    );
+  }
+
+  // Validate each dailyFare entry has all required fields
+  const requiredFields = [
+    'carType',
+    'rideSetupFee',
+    'baseFare',
+    'perMinuteFare',
+    'perKmFare',
+    'waiting',
+    'discount',
+    'nightTime',
+    'nightCharge',
+  ];
+
+  const requiredWaitingFields = ['seconds', 'charge'];
+  const requiredDiscountFields = ['minutes', 'distance', 'charge'];
+  const requiredNightTimeFields = ['from', 'to'];
+
+  for (const dailyFare of payload.dailyFares) {
+    // Check top-level required fields
+    for (const field of requiredFields) {
+      if (dailyFare[field] === undefined || dailyFare[field] === null) {
+        throw new Error(
+          `Missing required field '${field}' for carType ${dailyFare.carType}`,
+        );
+      }
+    }
+
+    // Validate waiting object
+    if (!dailyFare.waiting || typeof dailyFare.waiting !== 'object') {
+      throw new Error(
+        `Invalid waiting object for carType ${dailyFare.carType}`,
+      );
+    }
+    for (const field of requiredWaitingFields) {
+      if (
+        dailyFare.waiting[field] === undefined ||
+        dailyFare.waiting[field] === null
+      ) {
+        throw new Error(
+          `Missing waiting.${field} for carType ${dailyFare.carType}`,
+        );
+      }
+    }
+
+    // Validate discount object
+    if (!dailyFare.discount || typeof dailyFare.discount !== 'object') {
+      throw new Error(
+        `Invalid discount object for carType ${dailyFare.carType}`,
+      );
+    }
+    for (const field of requiredDiscountFields) {
+      if (
+        dailyFare.discount[field] === undefined ||
+        dailyFare.discount[field] === null
+      ) {
+        throw new Error(
+          `Missing discount.${field} for carType ${dailyFare.carType}`,
+        );
+      }
+    }
+
+    // Validate nightTime object
+    if (!dailyFare.nightTime || typeof dailyFare.nightTime !== 'object') {
+      throw new Error(
+        `Invalid nightTime object for carType ${dailyFare.carType}`,
+      );
+    }
+    for (const field of requiredNightTimeFields) {
+      if (!dailyFare.nightTime[field]) {
+        throw new Error(
+          `Missing nightTime.${field} for carType ${dailyFare.carType}`,
+        );
+      }
+    }
+
+    // Validate numeric fields are numbers and positive
+    const numericFields = [
+      'rideSetupFee',
+      'baseFare',
+      'perMinuteFare',
+      'perKmFare',
+      'nightCharge',
+      'waiting.seconds',
+      'waiting.charge',
+      'discount.minutes',
+      'discount.distance',
+      'discount.charge',
+    ];
+
+    for (const fieldPath of numericFields) {
+      const value = getNestedValue(dailyFare, fieldPath);
+      if (typeof value !== 'number' || value < 0) {
+        throw new Error(
+          `Field ${fieldPath} must be a positive number for carType ${dailyFare.carType}. Got: ${value}`,
+        );
+      }
+    }
+
+    // Validate time format for nightTime
+    const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+    if (!timeRegex.test(dailyFare.nightTime.from)) {
+      throw new Error(
+        `Invalid nightTime.from format for carType ${dailyFare.carType}. Must be HH:MM format`,
+      );
+    }
+    if (!timeRegex.test(dailyFare.nightTime.to)) {
+      throw new Error(
+        `Invalid nightTime.to format for carType ${dailyFare.carType}. Must be HH:MM format`,
+      );
+    }
+
+    // Validate surge array if provided
+    if (dailyFare.surge && Array.isArray(dailyFare.surge)) {
+      for (const surgeLevel of dailyFare.surge) {
+        if (surgeLevel.level === undefined || surgeLevel.level === null) {
+          throw new Error(
+            `Surge level requires 'level' field for carType ${dailyFare.carType}`,
+          );
+        }
+        if (!surgeLevel.ratio) {
+          throw new Error(
+            `Surge level requires 'ratio' field for carType ${dailyFare.carType}`,
+          );
+        }
+        if (
+          surgeLevel.multiplier === undefined ||
+          surgeLevel.multiplier === null
+        ) {
+          throw new Error(
+            `Surge level requires 'multiplier' field for carType ${dailyFare.carType}`,
+          );
+        }
+        if (
+          typeof surgeLevel.multiplier !== 'number' ||
+          surgeLevel.multiplier < 0
+        ) {
+          throw new Error(
+            `Surge multiplier must be a positive number for carType ${dailyFare.carType}`,
+          );
+        }
+      }
+    }
+  }
+
+  // Check if default fare already exists for the same regions
+  if (payload.applicableRegions && payload.applicableRegions.length > 0) {
+    const existingDefault = await FareManagement.findOne({
+      isDefault: true,
+      applicableRegions: { $in: payload.applicableRegions },
+    });
+
+    if (existingDefault) {
+      throw new Error(
+        `Default fare configuration already exists for regions: ${payload.applicableRegions.join(', ')}`,
+      );
+    }
+  } else {
+    // Check if global default already exists
+    const existingGlobalDefault = await FareManagement.findOne({
+      isDefault: true,
+      applicableRegions: { $size: 0 }, // Empty array means global
+    });
+
+    if (existingGlobalDefault) {
+      throw new Error('Global default fare configuration already exists');
+    }
+  }
+
+  const defaultFare = await FareManagement.create({
+    ...payload,
+    isDefault: true,
+    zone: null, // Explicitly set zone to null for default fares
+  });
+
+  return defaultFare;
+};
+
+export const getDefaultFareConfigurations = async () => {
+  const defaultFares = await FareManagement.find({
+    isDefault: true,
+  });
+
+  if (!defaultFares) {
+    throw new Error('No Default fare configurations found');
+  }
+
+  return defaultFares;
+};
+
+export const updateDefaultFareConfiguration = async (updates) => {
+  // Validate input exists
+  if (!updates || typeof updates !== 'object') {
+    throw new Error('Updates object is required');
+  }
+
+  if (!updates.carType) {
+    throw new Error('carType is required for updating default fare');
+  }
+
+  // Validate carType is a string
+  if (typeof updates.carType !== 'string') {
+    throw new Error('carType must be a string');
+  }
+
+  // Validate carType is from allowed enum values
+  if (!CAR_TYPES.includes(updates.carType)) {
+    throw new Error(`Invalid carType. Must be one of: ${CAR_TYPES.join(', ')}`);
+  }
+
+  // Find the default fare
+  const defaultFare = await FareManagement.findOne({
+    isDefault: true,
+  });
+
+  if (!defaultFare) {
+    throw new Error('No default fare configuration found');
+  }
+
+  const { carType, ...updateData } = updates;
+
+  // Validate that updateData is not empty
+  if (Object.keys(updateData).length === 0) {
+    throw new Error('No update fields provided');
+  }
+
+  // Find the index of the carType in dailyFares array
+  const carTypeIndex = defaultFare.dailyFares.findIndex(
+    (fare) => fare.carType === carType,
+  );
+
+  if (carTypeIndex === -1) {
+    throw new Error(
+      `Car type '${carType}' not found in default fare configuration`,
+    );
+  }
+
+  // Validate update fields against schema
+  const allowedFields = [
+    'rideSetupFee',
+    'baseFare',
+    'perMinuteFare',
+    'perKmFare',
+    'waiting',
+    'discount',
+    'nightTime',
+    'nightCharge',
+    'surge',
+  ];
+
+  const invalidFields = Object.keys(updateData).filter(
+    (field) => !allowedFields.includes(field),
+  );
+
+  if (invalidFields.length > 0) {
+    throw new Error(
+      `Invalid fields: ${invalidFields.join(', ')}. Allowed fields: ${allowedFields.join(', ')}`,
+    );
+  }
+
+  // Type validations for numeric fields
+  const numericFields = [
+    'rideSetupFee',
+    'baseFare',
+    'perMinuteFare',
+    'perKmFare',
+    'nightCharge',
+  ];
+  for (const field of numericFields) {
+    if (
+      updateData[field] !== undefined &&
+      typeof updateData[field] !== 'number'
+    ) {
+      throw new Error(`${field} must be a number`);
+    }
+    if (updateData[field] !== undefined && updateData[field] < 0) {
+      throw new Error(`${field} cannot be negative`);
+    }
+  }
+
+  // Validate waiting object structure if provided
+  if (updateData.waiting) {
+    if (typeof updateData.waiting !== 'object') {
+      throw new Error('waiting must be an object');
+    }
+    if (
+      updateData.waiting.seconds !== undefined &&
+      (typeof updateData.waiting.seconds !== 'number' ||
+        updateData.waiting.seconds < 0)
+    ) {
+      throw new Error('waiting.seconds must be a non-negative number');
+    }
+    if (
+      updateData.waiting.charge !== undefined &&
+      (typeof updateData.waiting.charge !== 'number' ||
+        updateData.waiting.charge < 0)
+    ) {
+      throw new Error('waiting.charge must be a non-negative number');
+    }
+  }
+
+  // Validate discount object structure if provided
+  if (updateData.discount) {
+    if (typeof updateData.discount !== 'object') {
+      throw new Error('discount must be an object');
+    }
+    if (
+      updateData.discount.minutes !== undefined &&
+      (typeof updateData.discount.minutes !== 'number' ||
+        updateData.discount.minutes < 0)
+    ) {
+      throw new Error('discount.minutes must be a non-negative number');
+    }
+    if (
+      updateData.discount.distance !== undefined &&
+      (typeof updateData.discount.distance !== 'number' ||
+        updateData.discount.distance < 0)
+    ) {
+      throw new Error('discount.distance must be a non-negative number');
+    }
+    if (
+      updateData.discount.charge !== undefined &&
+      (typeof updateData.discount.charge !== 'number' ||
+        updateData.discount.charge < 0)
+    ) {
+      throw new Error('discount.charge must be a non-negative number');
+    }
+  }
+
+  // Validate nightTime object structure if provided
+  if (updateData.nightTime) {
+    if (typeof updateData.nightTime !== 'object') {
+      throw new Error('nightTime must be an object');
+    }
+    if (
+      updateData.nightTime.from !== undefined &&
+      typeof updateData.nightTime.from !== 'string'
+    ) {
+      throw new Error('nightTime.from must be a string');
+    }
+    if (
+      updateData.nightTime.to !== undefined &&
+      typeof updateData.nightTime.to !== 'string'
+    ) {
+      throw new Error('nightTime.to must be a string');
+    }
+  }
+
+  // Validate surge array if provided
+  if (updateData.surge) {
+    if (!Array.isArray(updateData.surge)) {
+      throw new Error('surge must be an array');
+    }
+    for (const surgeItem of updateData.surge) {
+      if (typeof surgeItem !== 'object') {
+        throw new Error('Each surge item must be an object');
+      }
+      if (
+        surgeItem.level !== undefined &&
+        typeof surgeItem.level !== 'number'
+      ) {
+        throw new Error('surge.level must be a number');
+      }
+      if (
+        surgeItem.ratio !== undefined &&
+        typeof surgeItem.ratio !== 'string'
+      ) {
+        throw new Error('surge.ratio must be a string');
+      }
+      if (
+        surgeItem.multiplier !== undefined &&
+        (typeof surgeItem.multiplier !== 'number' || surgeItem.multiplier < 0)
+      ) {
+        throw new Error('surge.multiplier must be a non-negative number');
+      }
+    }
+  }
+
+  // Create updated fare object
+  const updatedFareObject = {
+    ...defaultFare.dailyFares[carTypeIndex].toObject(),
+    ...updateData,
+  };
+
+  // Update the specific carType fare
+  defaultFare.dailyFares[carTypeIndex] = updatedFareObject;
+
+  // Save the updated document - this will trigger mongoose schema validations
+  const updatedFare = await defaultFare.save();
+  return updatedFare;
 };
 
 export const findZoneByLocation = async (lng, lat) => {
@@ -488,4 +915,8 @@ export const getFareForLocation = async (lng, lat, carType) => {
   });
 
   return fareManagement;
+};
+
+export const getCarTypes = () => {
+  return CAR_TYPES;
 };

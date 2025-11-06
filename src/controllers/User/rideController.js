@@ -78,7 +78,6 @@ export const bookRideController = async (req, res) => {
         success: true,
         message: result.message,
         data: result.ride,
-        driverSearchInfo: result.driverSearchInfo,
       });
     } else {
       return res.status(400).json({
@@ -88,10 +87,10 @@ export const bookRideController = async (req, res) => {
       });
     }
   } catch (error) {
-    console.error('Book ride error:', error);
+    console.error(`API ERROR: ${error}`);
     return res.status(500).json({
       success: false,
-      message: 'Failed to book ride',
+      message: error.message || 'Something went wrong',
     });
   }
 };

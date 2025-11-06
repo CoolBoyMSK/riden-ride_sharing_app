@@ -123,6 +123,7 @@ const FareManagementSchema = new Schema(
   {
     zone: {
       type: zoneSchema,
+      // ✅ Make zone optional for default/fallback fares
     },
     dailyFares: {
       type: [DailyFareSchema],
@@ -136,28 +137,57 @@ const FareManagementSchema = new Schema(
         message: 'Duplicate car types found in dailyFares array',
       },
     },
+    isDefault: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    applicableRegions: {
+      type: [String], // e.g., ['New York', 'California'], empty means global
+      default: [],
+    },
   },
   {
     timestamps: true,
   },
 );
 
-// Index for zone name uniqueness
+// ✅ UPDATED: Make zone name uniqueness conditional (only for zoned fares)
 FareManagementSchema.index(
   {
     'zone.name': 1,
   },
   {
     unique: true,
-    partialFilterExpression: { 'zone.isActive': true },
+    partialFilterExpression: {
+      'zone.isActive': true,
+      'zone.name': { $exists: true }, // Only enforce uniqueness when zone name exists
+    },
   },
 );
 
-// Geo-spatial index for efficient queries
-FareManagementSchema.index({ 'zone.boundaries': '2dsphere' });
-FareManagementSchema.index({ 'zone.city': 1, 'zone.isActive': 1 });
+// ✅ NEW: Ensure only one default fare configuration per region
+FareManagementSchema.index(
+  {
+    isDefault: 1,
+    applicableRegions: 1,
+  },
+  {
+    partialFilterExpression: { isDefault: true },
+  },
+);
 
-// Index for efficient car type queries
+// Geo-spatial index for efficient queries (only for zoned fares)
+FareManagementSchema.index(
+  {
+    'zone.boundaries': '2dsphere',
+  },
+  {
+    partialFilterExpression: { 'zone.boundaries': { $exists: true } },
+  },
+);
+
+FareManagementSchema.index({ 'zone.city': 1, 'zone.isActive': 1 });
 FareManagementSchema.index({ 'dailyFares.carType': 1 });
 
 export default model('FareManagement', FareManagementSchema);

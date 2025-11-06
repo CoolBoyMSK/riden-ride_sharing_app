@@ -256,6 +256,6 @@ export const getZoneByLocation = async (lng, lat) => {
   return zone;
 };
 
-export const getZoneTypes = async () => {
+export const getZoneTypes = () => {
   return ZONE_TYPES;
 };
