@@ -3,6 +3,7 @@ export const ZONE_TYPES = [
   'standard',
   'suburban',
   'airport',
+  'airport-parking',
   'commercial',
   'downtown',
 ];

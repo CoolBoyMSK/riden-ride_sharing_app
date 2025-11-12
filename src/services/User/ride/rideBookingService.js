@@ -5,11 +5,13 @@ import {
   findRideByRideId,
 } from '../../../dal/ride.js';
 import { findPassengerByUserId } from '../../../dal/passenger.js';
-import { isRideInRestrictedArea } from '../../../dal/ride.js';
 import {
-  checkSurgePricing,
+  // checkSurgePricing,
+  analyzeSurgePricing,
   startProgressiveDriverSearch,
   updateExistingRidesSurgePricing,
+  findFareConfigurationForLocation,
+  isAirportRide,
 } from '../../../dal/driver.js';
 import { getPassengerWallet } from '../../../dal/stripe.js';
 import { validatePromoCode } from '../../../dal/promo_code.js';
@@ -17,7 +19,39 @@ import { calculateEstimatedFare } from './fareCalculationService.js';
 import { getNearbyDriversCount } from './driverMatchingService.js';
 
 // Calculate distance using simple Haversine formula (for estimation)
-const calculateDistance = (pickup, dropoff) => {
+const calculateDistance = async (pickup, dropoff) => {
+  try {
+    const response = await fetch(
+      `http://router.project-osrm.org/route/v1/driving/${pickup.coordinates[0]},${pickup.coordinates[1]};${dropoff.coordinates[0]},${dropoff.coordinates[1]}?overview=false`,
+    );
+
+    const data = await response.json();
+
+    if (data.code === 'Ok' && data.routes.length > 0) {
+      const distanceInMeters = data.routes[0].distance;
+      const distanceInKm = distanceInMeters / 1000;
+      return distanceInKm;
+    } else {
+      throw new Error('Failed to calculate distance from OSRM');
+    }
+  } catch (error) {
+    console.error('OSRM API error:', error);
+    const straightDistance = calculateHaversineDistance(pickup, dropoff);
+    let multiplier = 1.3;
+
+    // You can enhance this by detecting if coordinates are in urban area
+    // For now, using a conservative multiplier
+    if (straightDistance > 20) {
+      multiplier = 1.2; // Longer distances tend to be more direct
+    } else if (straightDistance < 5) {
+      multiplier = 1.4; // Short distances in cities have more detours
+    }
+
+    return straightDistance * multiplier;
+  }
+};
+
+const calculateHaversineDistance = (pickup, dropoff) => {
   const R = 6371; // Earth's radius in kilometers
   const dLat =
     ((dropoff.coordinates[1] - pickup.coordinates[1]) * Math.PI) / 180;
@@ -52,8 +86,15 @@ export const getFareEstimate = async (
 ) => {
   try {
     // Calculate distance and duration
-    const distance = calculateDistance(pickupLocation, dropoffLocation);
+    const distance = await calculateDistance(pickupLocation, dropoffLocation);
     const duration = estimateDuration(distance);
+
+    const fareConfig = await findFareConfigurationForLocation(
+      pickupLocation.coordinates,
+      carType,
+    );
+
+    const surgeMultiplier = 1;
 
     // Calculate fare
     const fareResult = await calculateEstimatedFare(
@@ -61,6 +102,8 @@ export const getFareEstimate = async (
       distance,
       duration,
       promoCode,
+      surgeMultiplier,
+      fareConfig,
     );
 
     if (!fareResult.success) {
@@ -96,6 +139,9 @@ export const getFareEstimate = async (
 };
 
 export const bookRide = async (userId, rideData) => {
+  const startTime = Date.now();
+  let ride = null;
+
   try {
     const {
       pickupLocation,
@@ -107,6 +153,10 @@ export const bookRide = async (userId, rideData) => {
       specialRequests,
     } = rideData;
 
+    // Input validation
+    const validationError = validateRideInput(rideData);
+    if (validationError) return validationError;
+
     // Find passenger profile
     const passenger = await findPassengerByUserId(userId);
     if (!passenger) {
@@ -116,7 +166,7 @@ export const bookRide = async (userId, rideData) => {
       };
     }
 
-    // Check if passenger has any active rides
+    // Check for active rides
     const activeRide = await findActiveRideByPassenger(passenger._id);
     if (activeRide) {
       return {
@@ -126,183 +176,316 @@ export const bookRide = async (userId, rideData) => {
       };
     }
 
-    const isAirport = isRideInRestrictedArea(pickupLocation.coordinates, 10);
+    // Parallel execution for better performance
+    const [distance, airport, surgeAnalysis] = await Promise.all([
+      calculateDistance(pickupLocation, dropoffLocation),
+      isAirportRide(pickupLocation.coordinates),
+      analyzeSurgePricing(pickupLocation.coordinates, carType),
+    ]);
 
-    // Calculate distance and duration
-    const distance = calculateDistance(pickupLocation, dropoffLocation);
-    const duration = estimateDuration(distance);
-
-    const surgeDataWithCurrentRide = await checkSurgePricing(
-      pickupLocation.coordinates,
-      carType,
-      true, // Include current ride in calculation
-    );
-
-    // Check current surge level WITHOUT current ride
-    const currentSurgeData = await checkSurgePricing(
-      pickupLocation.coordinates,
-      carType,
-      false, // Don't include current ride
-    );
-
-    let surgeMultiplier = 1.0;
-    let isSurgeApplied = false;
-    let shouldUpdateExistingRides = false;
-
-    // Determine if surge applies or level increases due to current ride
-    if (surgeDataWithCurrentRide.isSurge) {
-      surgeMultiplier = surgeDataWithCurrentRide.surgeMultiplier;
-      isSurgeApplied = true;
-
-      // Check if surge level increased due to current ride
-      const surgeLevelIncreased =
-        surgeDataWithCurrentRide.surgeLevel > currentSurgeData.surgeLevel;
-      const newSurgeActivated =
-        !currentSurgeData.isSurge && surgeDataWithCurrentRide.isSurge;
-
-      if (newSurgeActivated || surgeLevelIncreased) {
-        shouldUpdateExistingRides = true;
-        console.log(
-          `🚨 SURGE ${newSurgeActivated ? 'ACTIVATED' : 'LEVEL INCREASED'} by current ride: ${surgeDataWithCurrentRide.message}`,
-        );
-      } else {
-        console.log(
-          `🚨 SURGE APPLIED (existing level): ${surgeDataWithCurrentRide.message}`,
-        );
-      }
-    }
-
-    // Validate and apply promo code if provided
-    let promoDetails = null;
-    if (promoCode) {
-      const validPromo = await validatePromoCode(promoCode);
-      if (!validPromo) {
-        return {
-          success: false,
-          message: 'Invalid or expired promo code',
-        };
-      }
-      promoDetails = {
-        code: validPromo.code,
-        discount: validPromo.discount,
-        isApplied: true,
+    // Validate calculations
+    if (distance <= 0) {
+      return {
+        success: false,
+        message: 'Invalid distance calculated. Please check locations.',
       };
     }
 
-    // Calculate fare with promo code
+    const duration = estimateDuration(distance);
+
+    const {
+      surgeDataWithCurrentRide,
+      currentSurgeData,
+      shouldUpdateExistingRides,
+      surgeMultiplier,
+      isSurgeApplied,
+    } = surgeAnalysis;
+
+    // Log surge analysis results
+    if (isSurgeApplied) {
+      console.log(
+        shouldUpdateExistingRides
+          ? `SURGE ${!currentSurgeData.isSurge ? 'ACTIVATED' : 'LEVEL INCREASED'} by current ride`
+          : `SURGE APPLIED (existing level)`,
+      );
+    }
+
+    // Validate and apply promo code
+    const promoValidation = await validateAndApplyPromoCode(promoCode);
+    if (!promoValidation.success) return promoValidation;
+    const { promoDetails, promoDiscount } = promoValidation;
+
+    // Get fare configuration (reuse from surge analysis if available, otherwise fetch)
+    // const fareConfig =
+    //   surgeAnalysis.fareConfigType === 'default'
+    //     ? await findFareConfigurationForLocation(
+    //         pickupLocation.coordinates,
+    //         carType,
+    //       )
+    //     : {
+    //         zone: surgeAnalysis.zoneName
+    //           ? { name: surgeAnalysis.zoneName }
+    //           : null,
+    //       };
+
+    const fareConfig = await findFareConfigurationForLocation(
+      pickupLocation.coordinates,
+      carType,
+    );
+    if (!fareConfig) {
+      return {
+        success: false,
+        message: 'No fare configuration found for this location and car type',
+      };
+    }
+
+    // Calculate fare
     const fareResult = await calculateEstimatedFare(
       carType,
-      {
-        lng: pickupLocation.coordinates[0],
-        lat: pickupLocation.coordinates[1],
-      },
       distance,
       duration,
       promoCode,
-      isAirport,
-      surgeMultiplier, // Pass the surge multiplier
-      surgeDataWithCurrentRide,
+      surgeMultiplier,
+      fareConfig,
     );
 
     if (!fareResult.success) {
       return {
         success: false,
-        message: fareResult.error,
+        message: fareResult.error || 'Failed to calculate fare',
       };
     }
 
-    // Validate payment method exists in passenger profile
-    let wallet;
-    if (paymentMethod === 'CARD') {
-      if (passenger.paymentMethodIds.length <= 0) {
-        return {
-          success: false,
-          message: 'Card(s) not available. Please add a card.',
-        };
-      } else if (!passenger.defaultCardId) {
-        return {
-          success: false,
-          message: 'Please add a default payment method',
-        };
-      }
-    } else if (paymentMethod === 'WALLET') {
-      wallet = await getPassengerWallet(passenger._id);
-      if (!wallet) {
-        return {
-          success: false,
-          message: 'Wallet not available',
-        };
-      } else if (wallet.balance < fareResult.estimatedFare) {
-        return {
-          success: false,
-          message: 'Insufficient wallet funds',
-        };
-      }
-    }
+    // Validate payment method
+    const paymentValidation = await validatePaymentMethod(
+      passenger,
+      paymentMethod,
+      fareResult.estimatedFare,
+    );
+    if (!paymentValidation.success) return paymentValidation;
+    const { wallet } = paymentValidation;
 
-    // Create ride record with search tracking
-    const ridePayload = {
-      passengerId: passenger._id,
+    // Create ride record
+    ride = await createRideRecord({
+      passenger,
       pickupLocation,
       dropoffLocation,
       carType,
       paymentMethod,
-      ...(paymentMethod === 'WALLET' && { walletId: wallet._id }),
-      promoCode: promoDetails,
-      scheduledTime: scheduledTime ? new Date(scheduledTime) : new Date(),
+      promoDetails,
+      scheduledTime,
       specialRequests,
-      estimatedDistance: distance,
-      estimatedDuration: duration,
-      estimatedFare: fareResult.estimatedFare,
-      fareBreakdown: fareResult.fareBreakdown,
-      status: 'REQUESTED',
-      isAirport,
-      searchRadius: 5, // Current search radius in km
-      searchStartTime: new Date(),
-      expiryTime: new Date(Date.now() + 3 * 60 * 1000), // 5 minutes total
-      surgeMultiplier: surgeMultiplier,
-      isSurgeApplied: isSurgeApplied,
-      surgeLevel: surgeDataWithCurrentRide.surgeLevel,
+      distance,
+      duration,
+      isAirport: airport ? true : false,
+      airport: airport ? airport : {},
+      fareResult,
+      surgeMultiplier,
+      isSurgeApplied,
       surgeData: surgeDataWithCurrentRide,
-    };
+      fareConfig,
+      wallet,
+    });
 
-    const newRide = await createRide(ridePayload);
-    if (newRide) {
-      // Update existing rides if surge was activated or level increased
-      if (shouldUpdateExistingRides) {
-        await updateExistingRidesSurgePricing(
-          pickupLocation.coordinates,
-          carType,
-          surgeMultiplier,
-          surgeDataWithCurrentRide.surgeLevel,
-        );
-      }
-
-      // Start the progressive search immediately
-      await startProgressiveDriverSearch(newRide);
-
-      return {
-        success: true,
-        message: 'Ride booked successfully. Searching for drivers...',
-        data: newRide,
-      };
-    } else {
+    if (!ride) {
       return {
         success: false,
-        message: 'Failed to book a ride',
+        message: 'Failed to create ride record',
       };
     }
+
+    // Update existing rides if surge was activated/increased (non-blocking)
+    if (shouldUpdateExistingRides) {
+      updateExistingRidesSurgePricing(
+        pickupLocation.coordinates,
+        carType,
+        surgeMultiplier,
+        surgeDataWithCurrentRide.surgeLevel,
+      ).catch((error) => {
+        console.error('Background surge update failed:', error);
+      });
+    }
+
+    // Start driver search (non-blocking)
+    startProgressiveDriverSearch(ride).catch((error) => {
+      console.error('Background driver search failed:', error);
+    });
+
+    const processingTime = Date.now() - startTime;
+    console.log(`Ride ${ride._id} booked successfully in ${processingTime}ms`);
+
+    return {
+      success: true,
+      message: 'Ride booked successfully. Searching for drivers...',
+      data: ride,
+      metadata: {
+        processingTime: `${processingTime}ms`,
+        surgeApplied: isSurgeApplied,
+        surgeLevel: surgeDataWithCurrentRide.surgeLevel,
+        searchRadius: '5km',
+      },
+    };
   } catch (error) {
     console.error('Ride booking error:', error);
+
+    // Cleanup on error
+    if (ride?._id) {
+      await cleanupFailedRide(ride._id).catch((cleanupError) => {
+        console.error('Cleanup failed:', cleanupError);
+      });
+    }
+
     return {
       success: false,
       message: 'Failed to book ride. Please try again.',
-      error: error.message,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
     };
   }
 };
 
-// Cancel ride
+// Helper functions for better organization
+const validateRideInput = (rideData) => {
+  const { pickupLocation, dropoffLocation, carType, paymentMethod } = rideData;
+
+  if (!pickupLocation || !dropoffLocation || !carType || !paymentMethod) {
+    return {
+      success: false,
+      message:
+        'Missing required fields: pickupLocation, dropoffLocation, carType, paymentMethod',
+    };
+  }
+
+  return null;
+};
+
+const validateAndApplyPromoCode = async (promoCode) => {
+  if (!promoCode) {
+    return { success: true, promoDetails: null, promoDiscount: 0 };
+  }
+
+  const validPromo = await validatePromoCode(promoCode);
+  if (!validPromo) {
+    return {
+      success: false,
+      message: 'Invalid or expired promo code',
+    };
+  }
+
+  return {
+    success: true,
+    promoDetails: {
+      code: validPromo.code,
+      discount: validPromo.discount,
+      isApplied: true,
+    },
+    promoDiscount: validPromo.discount,
+  };
+};
+
+const validatePaymentMethod = async (passenger, paymentMethod, fareAmount) => {
+  if (paymentMethod === 'CARD') {
+    if (!passenger.paymentMethodIds?.length) {
+      return {
+        success: false,
+        message: 'Card(s) not available. Please add a card.',
+      };
+    }
+    if (!passenger.defaultCardId) {
+      return {
+        success: false,
+        message: 'Please add a default payment method',
+      };
+    }
+  } else if (paymentMethod === 'WALLET') {
+    const wallet = await getPassengerWallet(passenger._id);
+    if (!wallet) {
+      return {
+        success: false,
+        message: 'Wallet not available',
+      };
+    }
+    if (wallet.balance < fareAmount) {
+      return {
+        success: false,
+        message: 'Insufficient wallet funds',
+      };
+    }
+    return { success: true, wallet };
+  } else {
+    return {
+      success: false,
+      message: 'Invalid payment method',
+    };
+  }
+
+  return { success: true, wallet: null };
+};
+
+const createRideRecord = async (params) => {
+  const {
+    passenger,
+    pickupLocation,
+    dropoffLocation,
+    carType,
+    paymentMethod,
+    promoDetails,
+    scheduledTime,
+    specialRequests,
+    distance,
+    duration,
+    isAirport,
+    airport,
+    fareResult,
+    surgeMultiplier,
+    isSurgeApplied,
+    surgeData,
+    fareConfig,
+    wallet,
+  } = params;
+
+  const ridePayload = {
+    passengerId: passenger._id,
+    pickupLocation,
+    dropoffLocation,
+    carType,
+    paymentMethod,
+    ...(paymentMethod === 'WALLET' && { walletId: wallet?._id }),
+    ...(promoDetails && { promoCode: promoDetails }),
+    scheduledTime: scheduledTime ? new Date(scheduledTime) : new Date(),
+    ...(specialRequests && { specialRequests }),
+    estimatedDistance: distance,
+    estimatedDuration: duration,
+    estimatedFare: fareResult.estimatedFare,
+    fareBreakdown: fareResult.fareBreakdown,
+    status: 'REQUESTED',
+    isAirport,
+    airport,
+    searchRadius: 5,
+    searchStartTime: new Date(),
+    expiryTime: new Date(Date.now() + 5 * 60 * 1000),
+    surgeMultiplier,
+    isSurgeApplied,
+    surgeLevel: surgeData.surgeLevel,
+    surgeData,
+    fareConfig: fareResult.fareConfig,
+    fareConfigType: fareConfig.zone ? 'zone' : 'default',
+    zoneName: fareConfig.zone?.name || 'default',
+    createdAt: new Date(),
+  };
+
+  return await createRide(ridePayload);
+};
+
+const cleanupFailedRide = async (rideId) => {
+  try {
+    await RideModel.findByIdAndDelete(rideId);
+    await stopDriverSearch(rideId);
+    console.log(`Cleaned up failed ride: ${rideId}`);
+  } catch (error) {
+    console.error(`Failed to cleanup ride ${rideId}:`, error);
+  }
+};
+
 export const cancelRide = async (rideId, userId, reason = null) => {
   try {
     // Find the ride

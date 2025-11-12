@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import Zone from '../models/Zone.js';
+import ParkingQueue from '../models/ParkingQueue.js';
 import { ZONE_TYPES } from '../enums/zoneTypes.js';
 
 export const createZone = async (payload) => {
@@ -115,6 +116,30 @@ export const createZone = async (payload) => {
     description: payload.description,
     metadata: payload.metadata || {},
   });
+
+  if (payload.type === 'airport-parking') {
+    try {
+      const airportId = await findNearestAirport(
+        payload.boundaries.coordinates,
+      );
+      if (!airportId) {
+        console.log('No airport found within 500km radius');
+        return zone;
+      }
+
+      // Create parking queue entry
+      await ParkingQueue.create({
+        parkingLotId: zone._id,
+        airportId,
+      });
+
+      console.log(
+        `Created parking queue for airport-parking zone ${zone.name} linked to airport`,
+      );
+    } catch (error) {
+      console.error('Error creating parking queue:', error);
+    }
+  }
 
   return zone;
 };
@@ -258,4 +283,133 @@ export const getZoneByLocation = async (lng, lat) => {
 
 export const getZoneTypes = () => {
   return ZONE_TYPES;
+};
+
+export const findNearestAirport = async (zoneCoordinates) => {
+  // Validate zone coordinates
+  if (
+    !zoneCoordinates ||
+    !Array.isArray(zoneCoordinates) ||
+    zoneCoordinates.length === 0
+  ) {
+    throw new Error('Invalid zone coordinates provided.');
+  }
+
+  try {
+    const zoneCenter = getZoneCenter(zoneCoordinates);
+
+    const result = await Zone.aggregate([
+      {
+        $geoNear: {
+          near: {
+            type: 'Point',
+            coordinates: zoneCenter,
+          },
+          distanceField: 'distance',
+          spherical: true,
+          key: 'boundaries',
+          maxDistance: 500000, // 500km maximum search distance in meters
+        },
+      },
+      {
+        $match: {
+          type: 'airport',
+          isActive: true,
+        },
+      },
+      {
+        $project: {
+          _id: 1,
+          name: 1,
+          type: 1,
+          boundaries: 1,
+          distance: 1,
+          distanceKm: { $divide: ['$distance', 1000] },
+          minSearchRadius: 1,
+          maxSearchRadius: 1,
+          isActive: 1,
+        },
+      },
+      {
+        $sort: {
+          distance: 1, // Sort by distance to get the nearest
+        },
+      },
+      {
+        $limit: 1,
+      },
+    ]);
+
+    if (result.length === 0) {
+      console.log('No airports found within 500km radius');
+      return null;
+    }
+
+    const nearestAirport = result[0];
+    console.log(
+      `📍 Nearest airport: ${nearestAirport.name}, Distance: ${nearestAirport.distanceKm.toFixed(2)}km`,
+    );
+
+    return nearestAirport._id;
+  } catch (error) {
+    console.error('Error finding nearest airport:', error);
+    throw new Error(`Failed to find nearest airport: ${error.message}`);
+  }
+};
+
+const getZoneCenter = (coordinates) => {
+  if (!coordinates || !coordinates[0] || !Array.isArray(coordinates[0])) {
+    throw new Error(
+      'Invalid coordinates structure for zone center calculation',
+    );
+  }
+
+  const polygonRing = coordinates[0];
+
+  if (!polygonRing || polygonRing.length === 0) {
+    throw new Error('Empty polygon ring provided');
+  }
+
+  let sumLng = 0;
+  let sumLat = 0;
+  let count = 0;
+
+  for (const coord of polygonRing) {
+    if (Array.isArray(coord) && coord.length >= 2) {
+      const [lng, lat] = coord;
+      // Skip if coordinates are invalid
+      if (
+        typeof lng === 'number' &&
+        typeof lat === 'number' &&
+        !isNaN(lng) &&
+        !isNaN(lat) &&
+        lng >= -180 &&
+        lng <= 180 &&
+        lat >= -90 &&
+        lat <= 90
+      ) {
+        sumLng += lng;
+        sumLat += lat;
+        count++;
+      }
+    }
+  }
+
+  if (count === 0) {
+    // Fallback to first valid coordinate
+    for (const coord of polygonRing) {
+      if (Array.isArray(coord) && coord.length >= 2) {
+        const [lng, lat] = coord;
+        if (typeof lng === 'number' && typeof lat === 'number') {
+          console.log('⚠️ Using fallback coordinate for zone center');
+          return [lng, lat];
+        }
+      }
+    }
+    throw new Error('No valid coordinates found for center calculation');
+  }
+
+  const center = [sumLng / count, sumLat / count];
+  console.log(`📍 Calculated zone center: [${center[0]}, ${center[1]}]`);
+  return center;
 };

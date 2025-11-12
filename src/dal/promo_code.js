@@ -45,7 +45,7 @@ export const validatePromoCode = async (code) => {
   const currentDate = new Date();
 
   return await PromoCodeModel.findOne({
-    code: code.toUpperCase(),
+    code: code,
     isActive: true,
     startsAt: { $lte: currentDate },
     endsAt: { $gte: currentDate },

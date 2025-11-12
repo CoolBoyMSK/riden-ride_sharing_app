@@ -4,16 +4,17 @@ import DriverModel from '../models/Driver.js';
 import ChatRoomModel from '../models/ChatRoom.js';
 import { generateUniqueId } from '../utils/auth.js';
 import redisClient from '../config/redisConfig.js';
-import env from '../config/envConfig.js';
 import { RESTRICTED_AREA } from '../enums/restrictedArea.js';
 import ParkingQueue from '../models/ParkingQueue.js';
-import mongoose from 'mongoose';
+import mongoose, { Error } from 'mongoose';
 import Feedback from '../models/Feedback.js';
 import Commission from '../models/Commission.js';
 import AdminCommission from '../models/AdminCommission.js';
 import RideTransaction from '../models/RideTransaction.js';
 import moment from 'moment';
 import Ride from '../models/Ride.js';
+import Fare from '../models/fareManagement.js';
+import Zone from '../models/Zone.js';
 
 // Ride Operations
 export const createRide = async (rideData) => {
@@ -84,7 +85,6 @@ export const updateRideByRideId = async (rideId, updateData) => {
   );
 };
 
-// Find rides by passenger
 export const findRidesByPassenger = async (passengerId, options = {}) => {
   const { page = 1, limit = 10, status } = options;
   const skip = (page - 1) * limit;
@@ -102,7 +102,6 @@ export const findRidesByPassenger = async (passengerId, options = {}) => {
     .lean();
 };
 
-// Find rides by driver
 export const findRidesByDriver = async (driverId, options = {}) => {
   const { page = 1, limit = 10, status } = options;
   const skip = (page - 1) * limit;
@@ -120,7 +119,6 @@ export const findRidesByDriver = async (driverId, options = {}) => {
     .lean();
 };
 
-// Find current active ride for passenger
 export const findActiveRideByPassenger = async (passengerId) => {
   return await RideModel.findOne({
     passengerId,
@@ -139,7 +137,6 @@ export const findActiveRideByPassenger = async (passengerId) => {
     .lean();
 };
 
-// Find current active ride for driver
 export const findActiveRideByDriver = async (driverId) => {
   return await RideModel.findOne({
     driverId,
@@ -157,7 +154,101 @@ export const findActiveRideByDriver = async (driverId) => {
     .lean();
 };
 
-// Find pending rides (for driver matching)
+export const findPendingAirportRides = async (
+  carType,
+  parkingLotId,
+  { excludeIds = [], projection = null, limit = 20, session = null } = {},
+) => {
+  // Get the parking queue and airport zone with proper validation
+  const queue = await ParkingQueue.findOne({
+    parkingLotId,
+    isActive: true,
+  })
+    .populate({
+      path: 'airportId',
+      match: {
+        type: 'airport',
+        isActive: true,
+        boundaries: { $exists: true, $ne: null },
+      },
+    })
+    .populate('parkingLotId')
+    .session(session || null)
+    .lean();
+
+  console.log('Parking Queue: ', queue);
+
+  if (!queue) {
+    throw new Error(`Parking queue not found or inactive`);
+  }
+
+  if (!queue.airportId) {
+    throw new Error(`Associated airport not found for parking queue`);
+  }
+
+  const airport = queue.airportId;
+
+  // Validate airport boundaries structure
+  if (
+    !airport.boundaries ||
+    !airport.boundaries.coordinates ||
+    !Array.isArray(airport.boundaries.coordinates) ||
+    airport.boundaries.coordinates.length === 0
+  ) {
+    throw new Error('Invalid airport boundaries structure');
+  }
+
+  const query = {
+    status: 'REQUESTED',
+    carType,
+    'pickupLocation.coordinates': {
+      $geoWithin: {
+        $geometry: {
+          type: 'Polygon',
+          coordinates: airport.boundaries.coordinates,
+        },
+      },
+    },
+    isAirport: true,
+  };
+
+  if (excludeIds.length > 0) {
+    query._id = { $nin: excludeIds };
+  }
+
+  console.log(
+    `Searching for rides within airport: ${airport.name}, carType: ${carType}`,
+  );
+
+  let q = RideModel.find(query)
+    .limit(limit)
+    .populate([
+      {
+        path: 'driverId',
+        populate: { path: 'userId' },
+      },
+      {
+        path: 'passengerId',
+        populate: { path: 'userId' },
+      },
+      { path: 'chatRoomId' },
+    ])
+    .sort({ requestedAt: 1 }); // Oldest requests first
+
+  if (projection) {
+    q = q.select(projection);
+  }
+
+  if (session) {
+    q = q.session(session);
+  }
+
+  const rides = await q;
+
+  console.log(`Found ${rides.length} pending rides within airport boundaries`);
+  return rides;
+};
+
 export const findPendingRides = async (
   carType,
   location,
@@ -173,6 +264,7 @@ export const findPendingRides = async (
         $maxDistance: radius,
       },
     },
+    isAirport: false,
   };
 
   if (excludeIds.length) {
@@ -197,7 +289,6 @@ export const findPendingRides = async (
   return q;
 };
 
-// Driver Location Operations
 export const upsertDriverLocation = async (
   driverId,
   locationData,
@@ -229,7 +320,6 @@ export const findDriverLocation = async (driverId, { session = null } = {}) => {
   return await query.lean();
 };
 
-// Find available drivers near pickup location
 export const findAvailableDriversNearby = async (
   pickupLocation,
   carType,
@@ -261,7 +351,6 @@ export const findAvailableDriversNearby = async (
     .lean();
 };
 
-// Update driver availability
 export const updateDriverAvailability = async (
   driverId,
   isAvailable,
@@ -279,7 +368,6 @@ export const updateDriverAvailability = async (
   );
 };
 
-// Get ride statistics
 export const getRideStats = async (passengerId, startDate, endDate) => {
   const matchStage = { passengerId };
 
@@ -351,12 +439,13 @@ const driverLocationKey = (driverId) => `driver:${driverId}:location`;
 
 export const saveDriverLocation = async (
   driverId,
-  { lng, lat, isAvailable = true, speed, heading },
+  { lng, lat, parkingQueueId, isAvailable = true, speed, heading },
 ) => {
   const key = driverLocationKey(driverId);
   const payload = JSON.stringify({
     coordinates: [lng, lat],
     updatedAt: Date.now(),
+    parkingQueueId,
     isAvailable,
     speed,
     heading,
@@ -383,6 +472,7 @@ export const persistDriverLocationToDB = async (driverId, { session } = {}) => {
     driverId,
     {
       location: { type: 'Point', coordinates: data.coordinates },
+      parkingQueueId: data.parkingQueueId,
       speed: data.speed,
       heading: data.heading,
     },
@@ -447,22 +537,74 @@ export const haversineDistance = (coord1, coord2) => {
   return R * c;
 };
 
-export const isDriverInParkingLot = (driverCoords, parkingRadiusKm = 1) => {
-  for (const area of RESTRICTED_AREA) {
-    for (const lot of area.parkingLots) {
-      const distance = haversineDistance(driverCoords, lot.coordinates);
-      if (distance <= parkingRadiusKm) return true;
-    }
+// export const isDriverInParkingLot = (driverCoords, parkingRadiusKm = 1) => {
+//   for (const area of RESTRICTED_AREA) {
+//     for (const lot of area.parkingLots) {
+//       const distance = haversineDistance(driverCoords, lot.coordinates);
+//       if (distance <= parkingRadiusKm) return true;
+//     }
+//   }
+//   return false;
+// };
+
+export const isDriverInParkingLot = async (coords) => {
+  if (
+    !Array.isArray(coords) ||
+    coords.length !== 2 ||
+    typeof coords[0] !== 'number' ||
+    typeof coords[1] !== 'number'
+  ) {
+    throw new Error(`Invalid coordinates provided: ${JSON.stringify(coords)}`);
   }
-  return false;
+
+  const zone = await Zone.findOne({
+    boundaries: {
+      $geoIntersects: {
+        $geometry: {
+          type: 'Point',
+          coordinates: coords,
+        },
+      },
+    },
+    isActive: true,
+    type: 'airport-parking',
+  }).lean();
+
+  if (zone) {
+    return zone;
+  } else {
+    return false;
+  }
 };
 
-export const isRideInRestrictedArea = (rideCoords, restrictedRadiusKm = 10) => {
-  for (const area of RESTRICTED_AREA) {
-    const distance = haversineDistance(rideCoords, area.airportCoordinates);
-    if (distance <= restrictedRadiusKm) return true;
+export const isRideInRestrictedArea = async (coords) => {
+  if (
+    !Array.isArray(coords) ||
+    coords.length !== 2 ||
+    typeof coords[0] !== 'number' ||
+    typeof coords[1] !== 'number'
+  ) {
+    throw new Error(`Invalid coordinates provided: ${JSON.stringify(coords)}`);
   }
-  return false;
+
+  const zone = await Zone.findOne({
+    boundaries: {
+      $geoIntersects: {
+        $geometry: {
+          type: 'Point',
+          coordinates: coords,
+        },
+      },
+    },
+    isActive: true,
+    type: 'airport',
+  }).lean();
+
+  if (zone) {
+    return true;
+  } else {
+    return false;
+  }
 };
 
 export const filterRidesForDriver = (
@@ -487,53 +629,102 @@ export const filterRidesForDriver = (
   });
 };
 
-export const findNearestParkingForPickup = (userCoords, radiusKm = 10) => {
-  // Normalize coordinates
-  if (Array.isArray(userCoords) && userCoords.length === 2) {
-    userCoords = {
-      latitude: Number(userCoords[1]),
-      longitude: Number(userCoords[0]),
-    };
-  }
-
-  // Validate coordinates
-  if (
-    !userCoords ||
-    typeof userCoords.latitude !== 'number' ||
-    typeof userCoords.longitude !== 'number'
-  ) {
-    throw new Error('Invalid user coordinates.');
-  }
-
-  let nearest = null;
-
-  for (const airport of RESTRICTED_AREA) {
-    for (const lot of airport.parkingLots) {
-      const distance = haversineDistance(userCoords, lot.coordinates);
-
-      if (distance <= radiusKm) {
-        if (!nearest || distance < nearest.distanceKm) {
-          nearest = {
-            airportName: airport.name,
-            parkingLotName: lot.name,
-            parkingLotId: lot.id,
-            coordinates: lot.coordinates,
-            distanceKm: Number(distance.toFixed(3)),
-          };
-        }
-      }
+export const findNearestParkingForPickup = async (userCoords) => {
+  try {
+    if (Array.isArray(userCoords) && userCoords.length === 2) {
+      userCoords = {
+        latitude: Number(userCoords[1]),
+        longitude: Number(userCoords[0]),
+      };
     }
+
+    // Validate coordinates
+    if (
+      !userCoords ||
+      typeof userCoords.latitude !== 'number' ||
+      typeof userCoords.longitude !== 'number'
+    ) {
+      throw new Error('Invalid user coordinates.');
+    }
+
+    // Use aggregation to get the distance calculated by MongoDB
+    const result = await Zone.aggregate([
+      {
+        $geoNear: {
+          near: {
+            type: 'Point',
+            coordinates: [userCoords.longitude, userCoords.latitude],
+          },
+          distanceField: 'distance',
+          spherical: true,
+          key: 'boundaries',
+        },
+      },
+      {
+        $match: {
+          type: 'airport-parking',
+          isActive: true,
+        },
+      },
+      {
+        $sort: {
+          distance: 1, // Sort by distance to get the nearest
+        },
+      },
+      {
+        $limit: 1,
+      },
+    ]);
+
+    if (result.length === 0) {
+      return null;
+    }
+
+    const nearestZone = result[0];
+    const representativePoint = nearestZone.boundaries.coordinates[0][0][0];
+
+    const nearest = {
+      zoneId: nearestZone._id,
+      zoneName: nearestZone.name,
+      zoneType: nearestZone.type,
+      coordinates: {
+        latitude: representativePoint[1],
+        longitude: representativePoint[0],
+      },
+      distanceKm: Number((nearestZone.distance / 1000).toFixed(3)), // Convert meters to km
+      boundaries: nearestZone.boundaries,
+      metadata: nearestZone.metadata || {},
+      description: nearestZone.description,
+      minSearchRadius: nearestZone.minSearchRadius || 5,
+      maxSearchRadius: nearestZone.maxSearchRadius || 10,
+      isActive: nearestZone.isActive,
+    };
+
+    // Generate navigation URLs
+    const { latitude, longitude } = nearest.coordinates;
+
+    return {
+      ...nearest,
+      googleMapsUrl: `https://www.google.com/maps/dir/?api=1&origin=${userCoords.latitude},${userCoords.longitude}&destination=${latitude},${longitude}&travelmode=driving`,
+      appleMapsUrl: `http://maps.apple.com/?saddr=${userCoords.latitude},${userCoords.longitude}&daddr=${latitude},${longitude}`,
+    };
+  } catch (error) {
+    console.error('Error finding nearest airport parking zone:', error);
+    throw error;
   }
+};
 
-  if (!nearest) return null;
+export const findDriverParkingQueue = async (parkingLotId) => {
+  const queue = await ParkingQueue.findOne({
+    parkingLotId,
+    isActive: true,
+  });
 
-  const { latitude, longitude } = nearest.coordinates;
-
-  return {
-    ...nearest,
-    googleMapsUrl: `https://www.google.com/maps/dir/?api=1&origin=${userCoords.latitude},${userCoords.longitude}&destination=${latitude},${longitude}&travelmode=driving`,
-    appleMapsUrl: `http://maps.apple.com/?saddr=${userCoords.latitude},${userCoords.longitude}&daddr=${latitude},${longitude}`,
-  };
+  if (!queue) {
+    throw new Error('Airport parking queue not found');
+  } else {
+    return queue;
+  }
 };
 
 export const addDriverToQueue = async (parkingLotId, driverId) => {
@@ -541,21 +732,67 @@ export const addDriverToQueue = async (parkingLotId, driverId) => {
   session.startTransaction();
 
   try {
-    // Atomically add driverId only if not already in the array
+    // First check if parking queue exists and has capacity
+    const parkingQueue = await ParkingQueue.findOne({
+      parkingLotId,
+      isActive: true,
+    }).session(session);
+
+    if (!parkingQueue) {
+      throw new Error(
+        `Parking lot with ID ${parkingLotId} not found or inactive.`,
+      );
+    }
+
+    // Check capacity
+    if (parkingQueue.driverQueue.length >= parkingQueue.maxQueueSize) {
+      throw new Error(
+        `Parking queue is at maximum capacity (${parkingQueue.maxQueueSize}).`,
+      );
+    }
+
+    // Check if driver is already in queue
+    if (
+      parkingQueue.driverQueue.find((driver) =>
+        driver.driverId.equals(driverId),
+      )
+    ) {
+      await session.commitTransaction();
+      return {
+        message: `Driver already in parking lot queue ${parkingLotId}.`,
+        driverQueue: parkingQueue.driverQueue,
+        queueSize: parkingQueue.driverQueue.length,
+      };
+    }
+
+    // Atomically add driverId to the queue
     const updated = await ParkingQueue.findOneAndUpdate(
-      { parkingLotId },
-      { $addToSet: { driverIds: driverId } }, // $addToSet ensures no duplicates
+      {
+        parkingLotId,
+        isActive: true,
+        'driverQueue.driverId': { $ne: driverId },
+      },
+      {
+        $addToSet: {
+          driverQueue: {
+            driverId: driverId,
+          },
+        },
+      },
       { new: true, session },
     );
-
     if (!updated) {
-      throw new Error(`Parking lot with ID ${parkingLotId} not found.`);
+      throw new Error(
+        `Failed to add driver to queue - possible race condition.`,
+      );
     }
 
     await session.commitTransaction();
     return {
-      message: `Driver successfully added to parking lot queue ${parkingLotId} (or already present).`,
-      driverIds: updated.driverIds,
+      message: `Driver successfully added to parking lot queue ${parkingLotId}.`,
+      driverQueue: updated.driverQueue,
+      queueSize: updated.driverQueue.length,
+      position: updated.driverQueue.indexOf(driverId) + 1, // Driver's position in queue
     };
   } catch (err) {
     await session.abortTransaction();
@@ -570,20 +807,35 @@ export const removeDriverFromQueue = async (driverId, session = null) => {
   if (!session) useSession.startTransaction();
 
   try {
-    const driverObjectId =
-      typeof driverId === 'string'
-        ? mongoose.Types.ObjectId(driverId)
-        : driverId;
+    // First find all queues that contain this driver
+    const queuesWithDriver = await ParkingQueue.find({
+      'driverQueue.driverId': driverId,
+    }).session(useSession);
 
     // Remove driver from all queues
     const result = await ParkingQueue.updateMany(
-      {}, // empty filter → all documents
-      { $pull: { driverIds: driverObjectId } },
+      { 'driverQueue.driverId': driverId },
+      {
+        $pull: {
+          driverQueue: { driverId: driverId },
+        },
+      },
       { session: useSession },
     );
 
+    // Optional: Update positions for remaining drivers in affected queues
+    for (const queue of queuesWithDriver) {
+      await updateQueuePositions(queue.parkingLotId, useSession);
+    }
+
     if (!session) await useSession.commitTransaction();
-    return result;
+
+    return {
+      message: `Driver ${driverId} removed from ${result.modifiedCount} parking queue(s)`,
+      modifiedCount: result.modifiedCount,
+      matchedCount: result.matchedCount,
+      affectedQueues: queuesWithDriver.map((q) => q.parkingLotId),
+    };
   } catch (err) {
     if (!session) await useSession.abortTransaction();
     throw new Error(`Failed to remove driver from queues: ${err.message}`);
@@ -855,3 +1107,82 @@ export const getPayoutWeek = (date = new Date()) => {
   const weekStart = moment(date).startOf('isoWeek');
   return weekStart.format('DD-MM-YYYY');
 };
+
+const updateQueuePositions = async (parkingLotId, session = null) => {
+  try {
+    const parkingQueue = await ParkingQueue.findOne({ parkingLotId }).session(
+      session || null,
+    );
+
+    if (!parkingQueue) return;
+
+    // Update positions based on joinedAt timestamp
+    const sortedDrivers = parkingQueue.driverQueue
+      .sort((a, b) => a.joinedAt - b.joinedAt)
+      .map((driver, index) => ({
+        ...driver.toObject(),
+        position: index + 1,
+      }));
+
+    console.log(
+      `🔄 Updated positions for ${sortedDrivers.length} drivers in queue ${parkingLotId}`,
+    );
+  } catch (error) {
+    console.error('Error updating queue positions:', error);
+  }
+};
+
+// const getNextDriverFromQueue = async (parkingQueueId) => {
+//   try {
+//     const parkingQueue = await ParkingQueue.findById(parkingQueueId).populate(
+//       'driverQueue.driverId',
+//     );
+
+//     if (!parkingQueue) return null;
+
+//     const waitingDrivers = parkingQueue.driverQueue
+//       .filter((driver) => driver.status === 'waiting')
+//       .sort((a, b) => a.joinedAt - b.joinedAt);
+
+//     return waitingDrivers.length > 0 ? waitingDrivers[0] : null;
+//   } catch (error) {
+//     console.error('Error getting next driver from queue:', error);
+//     return null;
+//   }
+// };
+
+// const moveDriverToEndOfQueue = async (parkingQueueId, driverId, session) => {
+//   // Get current driver data
+//   const parkingQueue =
+//     await ParkingQueue.findById(parkingQueueId).session(session);
+//   const driverData = parkingQueue.driverQueue.find(
+//     (d) => d.driverId.toString() === driverId.toString(),
+//   );
+
+//   if (!driverData) return;
+
+//   // Remove driver from current position
+//   await ParkingQueue.findByIdAndUpdate(
+//     parkingQueueId,
+//     {
+//       $pull: { driverQueue: { driverId: driverId } },
+//     },
+//     { session },
+//   );
+
+//   // Add driver to end with updated joinedAt
+//   await ParkingQueue.findByIdAndUpdate(
+//     parkingQueueId,
+//     {
+//       $push: {
+//         driverQueue: {
+//           driverId: driverId,
+//           joinedAt: new Date(), // This puts them at the end when sorted by joinedAt
+//           status: 'waiting',
+//           currentOfferId: null,
+//         },
+//       },
+//     },
+//     { session },
+//   );
+// };

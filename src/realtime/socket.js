@@ -22,6 +22,7 @@ import {
   findRideByRideId,
   findDriverLocation,
   findPendingRides,
+  findPendingAirportRides,
   updateRideById,
   findRideById,
   saveDriverLocation,
@@ -44,6 +45,8 @@ import {
   createRideTransaction,
   getPayoutWeek,
   haversineDistance,
+  findDriverParkingQueue,
+  getDriverLocation,
 } from '../dal/ride.js';
 import {
   findDriverByUserId,
@@ -54,6 +57,7 @@ import {
   onRideAccepted,
   onRideCancelled,
   findDriverData,
+  handleDriverRideResponse,
 } from '../dal/driver.js';
 import { calculateActualFare } from '../services/User/ride/fareCalculationService.js';
 import { findPassengerByUserId, findPassengerById } from '../dal/passenger.js';
@@ -83,6 +87,8 @@ export const initSocket = (server) => {
   if (ioInstance) return ioInstance;
 
   const io = new Server(server, {
+    pingTimeout: 60000, 
+    pingInterval: 25000,
     cors: {
       origin: env.FRONTEND_URL || '*',
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
@@ -361,7 +367,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'FORBIDDEN',
+              code: 'NOT_FOUND',
               message: 'Driver not found',
             });
           }
@@ -372,7 +378,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'FORBIDDEN',
+              code: 'NOT_FOUND',
               message: 'Passenger not found',
             });
           }
@@ -408,7 +414,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'FORBIDDEN',
+            code: 'NOT_FOUND',
             message: 'Driver not found',
           });
         } else if (!driver.isActive) {
@@ -455,7 +461,7 @@ export const initSocket = (server) => {
           });
         }
 
-        const driverLocation = await findDriverLocation(driver._id);
+        const driverLocation = await getDriverLocation(driver._id);
         if (!driverLocation) {
           return socket.emit('error', {
             success: false,
@@ -467,51 +473,146 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'LOCATION_UNAVAILABLE',
+            code: 'FORBIDDEN',
             message: 'Driver not available',
           });
         }
 
-        const [lng, lat] = driverLocation.location.coordinates;
-        const driverCoords = { latitude: lat, longitude: lng };
-
-        const driverInParkingLot = isDriverInParkingLot(driverCoords);
-        let restrictedRides = [];
-        if (driverInParkingLot) {
-          restrictedRides = await findPendingRides(
-            driver.vehicle.type,
-            driverLocation.location.coordinates,
-            10000,
-            { limit: 5 },
-          );
-
-          restrictedRides.forEach((ride) => offerRideToParkingQueue(ride, io));
-        }
-
         const availableRides = await findPendingRides(
           driver.vehicle.type,
-          driverLocation.location.coordinates,
+          driverLocation.coordinates,
           10000,
-          { limit: 10 },
-        );
-
-        // Exclude restricted rides already offered
-        const restrictedRideIds = restrictedRides.map((r) => r._id.toString());
-        const filteredRides = filterRidesForDriver(
-          availableRides.filter(
-            (r) => !restrictedRideIds.includes(r._id.toString()),
-          ),
-          driverCoords,
-          10,
-          1,
         );
 
         socket.emit('ride:find', {
           success: true,
           objectType,
-          rides: filteredRides,
-          message: `${filteredRides.length} available rides found`,
+          data: availableRides,
+          message: `${availableRides.length} available rides found`,
         });
+      } catch (error) {
+        console.error(`SOCKET ERROR: ${error}`);
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: error.code || 'SOCKET_ERROR',
+          message: `SOCKET ERROR: ${error.message}`,
+        });
+      }
+    });
+
+    socket.on('ride:find_airport_ride', async () => {
+      const objectType = 'find-airport-ride';
+      try {
+        const driver = await findDriverByUserId(userId);
+        if (!driver) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'NOT_FOUND',
+            message: 'Driver not found',
+          });
+        } else if (!driver.isActive) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver is not active',
+          });
+        } else if (driver.isRestricted) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver in restricted area',
+          });
+        } else if (driver.isBlocked) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver is blocked',
+          });
+        } else if (driver.isSuspended) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver is suspended',
+          });
+        } else if (driver.backgroundCheckStatus !== 'approved') {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver background not verified',
+          });
+        } else if (driver.status !== 'online') {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver is not online',
+          });
+        }
+
+        const driverLocation = await getDriverLocation(driver._id);
+        if (!driverLocation) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'NOT_FOUND',
+            message: 'Driver location not found',
+          });
+        } else if (!driverLocation.isAvailable) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver not available',
+          });
+        }
+
+        // const [lng, lat] = driverLocation.coordinates;
+        // const driverCoords = { latitude: lat, longitude: lng };
+
+        const parkingLot = await isDriverInParkingLot(
+          driverLocation.coordinates,
+        );
+        console.log('Parking Log: ', parkingLot);
+        if (parkingLot) {
+          const availableRides = await findPendingAirportRides(
+            driver.vehicle.type,
+            parkingLot._id,
+          );
+
+          console.log('Available Rides: ', availableRides);
+
+          if (availableRides.length <= 0) {
+            socket.emit('ride:find_airport_ride', {
+              success: true,
+              objectType,
+              code: 'NOT_FOUND',
+              message: `No airport ride available`,
+            });
+          }
+
+          availableRides.forEach((ride) => offerRideToParkingQueue(ride, io));
+
+          socket.emit('ride:find_airport_ride', {
+            success: true,
+            objectType,
+            data: availableRides,
+            message: `${availableRides.length} airport ride(s) available`,
+          });
+        } else {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: `Driver not in airport parking`,
+          });
+        }
       } catch (error) {
         console.error(`SOCKET ERROR: ${error}`);
         return socket.emit('error', {
@@ -570,7 +671,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'FORBIDDEN',
+            code: 'NOT_FOUND',
             message: 'Driver not found',
           });
         } else if (driver.isRestricted) {
@@ -610,19 +711,19 @@ export const initSocket = (server) => {
           });
         }
 
-        const driverLocation = await findDriverLocation(driver._id);
+        const driverLocation = await getDriverLocation(driver._id);
         if (!driverLocation) {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'LOCATION_UNAVAILABLE',
+            code: 'NOT_FOUND',
             message: 'Driver location not found',
           });
         } else if (!driverLocation.isAvailable) {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'LOCATION_UNAVAILABLE',
+            code: 'FORBIDDEN',
             message: 'Driver not available',
           });
         }
@@ -639,15 +740,24 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'ALREADY_ASSIGNED',
+            code: 'FORBIDDEN',
             message: 'Cannot decline a ride already assigned to you',
           });
+        }
+
+        if (ride.isAirport) {
+          await handleDriverRideResponse(
+            driver._id,
+            rideId,
+            false,
+            driverLocation.parkingQueueId,
+          );
         }
 
         // Fetch replacement rides
         const replacementRides = await findPendingRides(
           driver.vehicle.type,
-          driverLocation.location.coordinates,
+          driverLocation.coordinates,
           10000,
           { excludeIds: [rideId], limit: 10 },
         );
@@ -677,7 +787,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'FORBIDDEN',
+            code: 'NOT_FOUND',
             message: 'Driver not found',
           });
         } else if (!driver.isActive) {
@@ -756,7 +866,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'ALREADY_ASSIGNED',
+            code: 'FORBIDDEN',
             message: 'Ride already assigned to another driver',
           });
         } else if (ride.status !== 'REQUESTED') {
@@ -780,14 +890,14 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'NOT_AVAILABLE',
+            code: 'FORBIDDEN',
             message: 'Driver not available',
           });
         } else if (availability.currentRideId) {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'NOT_AVAILABLE',
+            code: 'FORBIDDEN',
             message: 'Driver on another ride',
           });
         }
@@ -813,7 +923,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'INVALID_DISTANCE',
+            code: 'FORBIDDEN',
             message: 'Driver distance is not valid with in the search radius',
           });
         }
@@ -829,7 +939,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'UPDATE_FAILED',
+            code: 'FORBIDDEN',
             message: 'Failed to update ride with driver assignment',
           });
         }
@@ -862,15 +972,29 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'UPDATE_FAILED',
+            code: 'FORBIDDEN',
             message: 'Failed to accept ride',
           });
         }
 
+        if (ride.isAirport) {
+          await handleDriverRideResponse(
+            updatedDriver._id,
+            ride._id,
+            true,
+            updateAvailability.parkingQueueId,
+          );
+        }
+
         const [newDriver, newPassenger] = await Promise.all([
-          findUserById(ride.driverId?.userId),
-          findUserById(ride.passengerId?.userId),
+          findUserById(updatedRide.driverId?.userId),
+          findUserById(updatedRide.passengerId?.userId),
         ]);
+
+        console.log("DriverId", updatedRide.driverId?.userId)
+        console.log("Driver", newDriver)
+        console.log("PassengerId", updatedRide.passengerId?.userId)
+        console.log("Passenger", newPassenger)
 
         const notifyDriver = await notifyUser({
           userId: newDriver.userId?._id,
@@ -921,7 +1045,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'FORBIDDEN',
+            code: 'NOT_FOUND',
             message: 'Driver not found',
           });
         } else if (driver.status !== 'on_ride') {
@@ -946,42 +1070,42 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'NOT_ASSIGNED',
+            code: 'FORBIDDEN',
             message: 'Cannot cancel a ride not assigned to you',
           });
         } else if (ride.status === 'CANCELLED_BY_PASSENGER') {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'ALREADY_CANCELLED',
+            code: 'FORBIDDEN',
             message: 'Ride already cancelled by passenger',
           });
         } else if (ride.status === 'CANCELLED_BY_DRIVER') {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'ALREADY_CANCELLED',
+            code: 'FORBIDDEN',
             message: 'You have already cancelled this ride',
           });
         } else if (ride.status === 'CANCELLED_BY_SYSTEM') {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'ALREADY_CANCELLED',
+            code: 'FORBIDDEN',
             message: 'Ride already cancelled by system',
           });
         } else if (ride.status === 'RIDE_COMPLETED') {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'ALREADY_COMPLETED',
+            code: 'FORBIDDEN',
             message: 'Cannot cancel a completed ride',
           });
         } else if (!ride.passengerId) {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'NO_PASSENGER_AVAILABLE',
+            code: 'FORBIDDEN',
             message: 'Cannot cancel ride. No passenger available',
           });
         }
@@ -998,7 +1122,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'CANNOT_CANCEL',
+            code: 'FORBIDDEN',
             message: `Cannot cancel ride. Current status: ${ride.status}`,
           });
         }
@@ -1007,7 +1131,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'INVALID_REASON',
+            code: 'FORBIDDEN',
             message: 'Cancellation reason must be between 3 and 500 characters',
           });
         }
@@ -1025,7 +1149,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'DRIVER AVAILABILITY_FAILED',
+            code: 'FORBIDDEN',
             message: 'Failed to update driver availability',
           });
         }
@@ -1042,7 +1166,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'DRIVER_UPDATE_FAILED',
+            code: 'FORBIDDEN',
             message: 'Failed to update driver status',
           });
         }
@@ -1062,7 +1186,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'CANCELLATION_FAILED',
+            code: 'FORBIDDEN',
             message: 'Failed to cancel ride',
           });
         } else if (updatedRide.status !== 'CANCELLED_BY_DRIVER') {
@@ -1070,7 +1194,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'RIDE_UPDATE_FAILED',
+            code: 'FORBIDDEN',
             message: 'Failed to update ride status',
           });
         }
@@ -1172,7 +1296,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'FORBIDDEN',
+            code: 'NOT_FOUND',
             message: 'Driver not found',
           });
         } else if (driver.status !== 'on_ride') {
@@ -1197,7 +1321,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'NOT_ASSIGNED',
+            code: 'FORBIDDEN',
             message: 'Cannot update a ride not assigned to you',
           });
         }
@@ -1206,7 +1330,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'INVALID_STATUS',
+            code: 'FORBIDDEN',
             message: `Cannot mark as arriving. Current status: ${ride.status}`,
           });
         }
@@ -1219,7 +1343,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'RIDE_UPDATE_FAILED',
+            code: 'FORBIDDEN',
             message: 'Failed to update ride status',
           });
         }
@@ -1238,7 +1362,7 @@ export const initSocket = (server) => {
           actionLink: 'ride:driver_arriving',
           storeInDB: false,
         });
-        if (!notifyDriver || !notifyPassenger) {
+        if (!notifyPassenger) {
           console.log('Failed to send notification');
         }
 
@@ -1268,7 +1392,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'FORBIDDEN',
+            code: 'NOT_FOUND',
             message: 'Driver not found',
           });
         } else if (driver.status !== 'on_ride') {
@@ -1294,7 +1418,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'NOT_ASSIGNED',
+            code: 'FORBIDDEN',
             message: 'Cannot update a ride not assigned to you',
           });
         }
@@ -1303,7 +1427,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'INVALID_STATUS',
+            code: 'FORBIDDEN',
             message: `Cannot mark as arrived. Current status: ${ride.status}`,
           });
         }
@@ -1316,7 +1440,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'RIDE_UPDATE_FAILED',
+            code: 'FORBIDDEN',
             message: 'Failed to update ride status',
           });
         }
@@ -1374,7 +1498,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'FORBIDDEN',
+            code: 'NOT_FOUND',
             message: 'Driver not found',
           });
         } else if (driver.status !== 'on_ride') {
@@ -1399,7 +1523,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'NOT_ASSIGNED',
+            code: 'FORBIDDEN',
             message: 'Cannot update a ride not assigned to you',
           });
         }
@@ -1408,7 +1532,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'INVALID_STATUS',
+            code: 'FORBIDDEN',
             message: `Cannot start ride. Current status: ${ride.status}`,
           });
         }
@@ -1421,7 +1545,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'RIDE_UPDATE_FAILED',
+            code: 'FORBIDDEN',
             message: 'Failed to update ride status',
           });
         }
@@ -1481,7 +1605,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'FORBIDDEN',
+              code: 'NOT_FOUND',
               message: 'Driver not found',
             });
           } else if (
@@ -1498,7 +1622,7 @@ export const initSocket = (server) => {
 
           if (earlyCompleteReason) {
             earlyCompleteReason = earlyCompleteReason.trim();
-            if (earlyCompleteReason === '' || earlyCompleteReason.length > 3) {
+            if (earlyCompleteReason === '' || earlyCompleteReason.length <= 3) {
               return socket.emit('error', {
                 success: false,
                 objectType,
@@ -1522,7 +1646,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'NOT_ASSIGNED',
+              code: 'FORBIDDEN',
               message: 'Cannot update a ride not assigned to you',
             });
           } else if (
@@ -1532,7 +1656,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'INVALID_STATUS',
+              code: 'FORBIDDEN',
               message: `Cannot complete ride. Current status: ${ride.status}`,
             });
           }
@@ -1541,7 +1665,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'INVALID_DISTANCE',
+              code: 'FORBIDDEN',
               message: `Invalid Distance, Distance must be greater than 0 and positive`,
             });
           }
@@ -1570,6 +1694,7 @@ export const initSocket = (server) => {
             rideCompletedAt: Date.now(),
             isAirportRide: ride.isAirport,
             surgeMultiplier: ride.fareBreakdown?.surgeMultiplier,
+            fareConfig: ride.fareConfig,
           });
 
           const updatedRide = await updateRideById(ride._id, {
@@ -1589,7 +1714,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'RIDE_UPDATE_FAILED',
+              code: 'FORBIDDEN',
               message: 'Failed to update ride status',
             });
           }
@@ -1603,7 +1728,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'DRIVER AVAILABILITY_FAILED',
+              code: 'FORBIDDEN',
               message: 'Failed to update driver availability',
             });
           }
@@ -1621,7 +1746,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'DRIVER_UPDATE_FAILED',
+              code: 'FORBIDDEN',
               message: 'Failed to update driver status',
             });
           }
@@ -1634,7 +1759,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'DRIVER_UPDATE_FAILED',
+              code: 'FORBIDDEN',
               message: 'Failed to update driver History',
             });
           }
@@ -1709,7 +1834,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'FORBIDDEN',
+              code: 'NOT_FOUND',
               message: 'Driver not found',
             });
           } else if (!['online', 'on_ride'].includes(driver.status)) {
@@ -1736,7 +1861,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'NOT_ASSIGNED',
+              code: 'FORBIDDEN',
               message: 'Cannot rate passenger for a ride not assigned to you',
             });
           }
@@ -1745,7 +1870,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'INVALID_STATUS',
+              code: 'FORBIDDEN',
               message: `Cannot rate passenger. Current ride status: ${ride.status}`,
             });
           }
@@ -1754,7 +1879,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'ALREADY_RATED',
+              code: 'FORBIDDEN',
               message: 'You have already rated this passenger for this ride',
             });
           }
@@ -1763,7 +1888,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'INVALID_RATING',
+              code: 'FORBIDDEN',
               message: 'Rating must be a number between 1 and 5',
             });
           }
@@ -1772,7 +1897,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'INVALID_FEEDBACK',
+              code: 'FORBIDDEN',
               message: 'Feedback must be between 3 and 500 characters',
             });
           }
@@ -1790,7 +1915,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'FEEDBACK_FAILED',
+              code: 'FORBIDDEN',
               message: 'Driver failed to send feedback for passenger',
             });
           }
@@ -1803,7 +1928,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'RIDE_UPDATE_FAILED',
+              code: 'FORBIDDEN',
               message: 'Failed to save passenger rating',
             });
           }
@@ -1878,7 +2003,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'INVALID_LOCATION',
+              code: 'FORBIDDEN',
               message:
                 'Location must be a GeoJSON Point [lng, lat] with valid numbers',
             });
@@ -1891,7 +2016,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'INVALID_SPEED',
+              code: 'FORBIDDEN',
               message: 'Speed must be greater 0 and less than 100',
             });
           } else if (
@@ -1903,14 +2028,14 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'INVALID_HEADING',
+              code: 'FORBIDDEN',
               message: 'Heading must be greater 0 and less than 360',
             });
           } else if (typeof isAvailable !== 'boolean') {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'INVALID_AVAILABILITY',
+              code: 'FORBIDDEN',
               message: 'isAvailable must be a boolean',
             });
           }
@@ -1971,83 +2096,124 @@ export const initSocket = (server) => {
             isAvailable = false;
           }
 
-          const [lng, lat] = location.coordinates;
-          const coordsObj = { latitude: lat, longitude: lng };
-
-          const isRestricted = isRideInRestrictedArea(coordsObj); // returns boolean
-          const isParkingLot = isDriverInParkingLot(coordsObj);
+          const isRestricted = await isRideInRestrictedArea(
+            location.coordinates,
+          ); // returns boolean
+          const isParkingLot = await isDriverInParkingLot(location.coordinates);
 
           if (isRestricted && !isParkingLot) {
             await updateDriverByUserId(userId, { isRestricted });
-            const parkingLot = findNearestParkingForPickup(coordsObj);
-            if (parkingLot?.parkingLotId) {
-              await removeDriverFromQueue(driver._id);
-            }
+            const parkingLot = await findNearestParkingForPickup(
+              location.coordinates,
+            );
 
-            io.to(`user:${userId}`).emit('ride:driver_update_location', {
-              success: true,
-              objectType,
-              code: 'RESTRICTED_AREA',
-              message:
-                "You are inside the restricted area, and you can't pick ride in this area, reach to nearby parking lot in order to be able to pick rides",
-              data: parkingLot,
+            await saveDriverLocation(driver._id, {
+              lng: location.coordinates[0],
+              lat: location.coordinates[1],
+              parkingQueueId: null,
+              isAvailable,
+              speed,
+              heading,
             });
-          } else if (isRestricted && isParkingLot) {
-            const parkingLot = findNearestParkingForPickup(coordsObj);
-            if (parkingLot?.parkingLotId) {
-              await addDriverToQueue(parkingLot.parkingLotId, driver._id);
+
+            const driverLocation = await persistDriverLocationToDB(
+              driver._id.toString(),
+            ).catch((err) =>
+              console.error(
+                `Failed to persist driver location for driver ${driver._id}:`,
+                err,
+              ),
+            );
+
+            if (driverLocation) {
+              socket.emit('ride:driver_update_location', {
+                success: true,
+                objectType,
+                data: parkingLot,
+                code: 'RESTRICTED_AREA',
+                message:
+                  'You are inside the restricted area, and you are not allowed to pick ride in this area, reach to nearby parking lot to pick rides',
+              });
+            }
+          } else if (isParkingLot) {
+            let queue;
+            const parkingQueue = await findDriverParkingQueue(isParkingLot._id);
+            if (parkingQueue) {
+              queue = await addDriverToQueue(isParkingLot._id, driver._id);
             }
 
             await updateDriverByUserId(userId, { isRestricted: false });
 
-            io.to(`user:${userId}`).emit('ride:driver_update_location', {
-              success: true,
-              objectType,
-              code: 'SAFE_AREA',
-              message:
-                'You are within the premises of safe aree, You can pick-up rides now',
+            await saveDriverLocation(driver._id, {
+              lng: location.coordinates[0],
+              lat: location.coordinates[1],
+              parkingQueueId: parkingQueue ? parkingQueue._id : null,
+              isAvailable,
+              speed,
+              heading,
             });
+
+            const driverLocation = await persistDriverLocationToDB(
+              driver._id.toString(),
+            ).catch((err) =>
+              console.error(
+                `Failed to persist driver location for driver ${driver._id}:`,
+                err,
+              ),
+            );
+
+            if (driverLocation) {
+              socket.emit('ride:driver_update_location', {
+                success: true,
+                objectType,
+                data: queue,
+                code: 'PARKING_LOT',
+                message:
+                  'You are within the premises of airport parking lot, You can pick rides now',
+              });
+            }
           } else {
             await removeDriverFromQueue(driver._id);
 
             await updateDriverByUserId(userId, { isRestricted: false });
-          }
 
-          await saveDriverLocation(driver._id, {
-            lng: location.coordinates[0],
-            lat: location.coordinates[1],
-            isAvailable,
-            speed,
-            heading,
-          });
-
-          const driverLocation = await persistDriverLocationToDB(
-            driver._id.toString(),
-          ).catch((err) =>
-            console.error(
-              `Failed to persist driver location for driver ${driver._id}:`,
-              err,
-            ),
-          );
-
-          if (driverLocation.currentRideId) {
-            io.to(`ride:${driverLocation.currentRideId}`).emit(
-              'ride:driver_update_location',
-              {
-                success: true,
-                objectType,
-                data: driverLocation.location,
-                message: 'Location updated successfully',
-              },
+            const driverLocation = await persistDriverLocationToDB(
+              driver._id.toString(),
+            ).catch((err) =>
+              console.error(
+                `Failed to persist driver location for driver ${driver._id}:`,
+                err,
+              ),
             );
-          }
 
-          socket.emit('ride:driver_update_location', {
-            success: true,
-            objectType,
-            data: driverLocation.location,
-            message: 'Location updated successfully',
-          });
+            await saveDriverLocation(driver._id, {
+              lng: location.coordinates[0],
+              lat: location.coordinates[1],
+              parkingQueueId: null,
+              isAvailable,
+              speed,
+              heading,
+            });
+
+            if (driverLocation.currentRideId) {
+              io.to(`ride:${driverLocation.currentRideId}`).emit(
+                'ride:driver_update_location',
+                {
+                  success: true,
+                  objectType,
+                  data: driverLocation.location,
+                  message: 'Location updated successfully',
+                },
+              );
+            }
+
+            socket.emit('ride:driver_update_location', {
+              success: true,
+              objectType,
+              data: driverLocation.location,
+              message: 'Location updated successfully',
+            });
+          }
         } catch (error) {
           console.error(`SOCKET ERROR (driver:${userId}):`, error);
           socket.emit('error', {
@@ -2072,7 +2238,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'FORBIDDEN',
+            code: 'NOT_FOUND',
             message: 'Driver not found',
           });
         } else if (driver.isRestricted) {
@@ -2114,14 +2280,14 @@ export const initSocket = (server) => {
 
         const [destination, driverLocation] = await Promise.all([
           findAllDestination(driver._id),
-          findDriverLocation(driver._id),
+          getDriverLocation(driver._id),
         ]);
 
         if (!destination) {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'NO_DESTINATION',
+            code: 'FORBIDDEN',
             message: 'You have no destination enabled',
           });
         }
@@ -2130,13 +2296,13 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'LOCATION_UNAVAILABLE',
+            code: 'FORBIDDEN',
             message: "Driver's location is not available",
           });
         }
 
         const destCoords = destination.location.coordinates;
-        const driverCoords = driverLocation.location.coordinates;
+        const driverCoords = driverLocation.coordinates;
         const rides = await findNearbyRideRequests(
           destCoords,
           driverCoords,
@@ -2191,7 +2357,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'FORBIDDEN',
+            code: 'NOT_FOUND',
             message: 'Driver not found',
           });
         } else if (driver.status !== 'on_ride') {
@@ -2216,28 +2382,28 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'NOT_OWNED',
+            code: 'FORBIDDEN',
             message: 'Cannot join a ride not booked by you',
           });
         } else if (ride.status === 'CANCELLED_BY_PASSENGER') {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'ALREADY_CANCELLED',
+            code: 'FORBIDDEN',
             message: 'Ride already cancelled by you',
           });
         } else if (ride.status === 'CANCELLED_BY_DRIVER') {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'CANCELLED_BY_DRIVER',
+            code: 'FORBIDDEN',
             message: 'Ride already cancelled by the driver',
           });
         } else if (ride.status === 'CANCELLED_BY_SYSTEM') {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'ALREADY_CANCELLED',
+            code: 'FORBIDDEN',
             message: 'Ride already cancelled by system',
           });
         } else if (
@@ -2247,21 +2413,21 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'RIDE_COMPLETED',
+            code: 'FORBIDDEN',
             message: 'Cannot join a completed ride',
           });
         } else if (!ride.driverId) {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'NO_DRIVER_FOUND',
+            code: 'FORBIDDEN',
             message: 'Cannot join ride. No driver found',
           });
         } else if (ride.status === 'REQUESTED') {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'DRIVER_NOT_ASSIGNED',
+            code: 'FORBIDDEN',
             message: 'Cannot join ride. Driver not assigned yet',
           });
         }
@@ -2294,7 +2460,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'FORBIDDEN',
+            code: 'NOT_FOUND',
             message: 'Passenger not found',
           });
         }
@@ -2312,28 +2478,28 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'NOT_OWNED',
+            code: 'FORBIDDEN',
             message: 'Cannot join a ride not booked by you',
           });
         } else if (ride.status === 'CANCELLED_BY_PASSENGER') {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'ALREADY_CANCELLED',
+            code: 'FORBIDDEN',
             message: 'Ride already cancelled by you',
           });
         } else if (ride.status === 'CANCELLED_BY_DRIVER') {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'CANCELLED_BY_DRIVER',
+            code: 'FORBIDDEN',
             message: 'Ride already cancelled by the driver',
           });
         } else if (ride.status === 'CANCELLED_BY_SYSTEM') {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'ALREADY_CANCELLED',
+            code: 'FORBIDDEN',
             message: 'Ride already cancelled by system',
           });
         } else if (
@@ -2343,21 +2509,21 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'RIDE_COMPLETED',
+            code: 'FORBIDDEN',
             message: 'Cannot join a completed ride',
           });
         } else if (!ride.driverId) {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'NO_DRIVER_ASSIGNED',
+            code: 'FORBIDDEN',
             message: 'Cannot join ride. No driver assigned yet',
           });
         } else if (ride.status === 'REQUESTED') {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'DRIVER_NOT_ASSIGNED',
+            code: 'FORBIDDEN',
             message: 'Cannot join ride. Driver not yet assigned',
           });
         }
@@ -2390,7 +2556,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'FORBIDDEN',
+            code: 'NOT_FOUND',
             message: 'Passenger not found',
           });
         }
@@ -2408,35 +2574,35 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'NOT_OWNED',
+            code: 'FORBIDDEN',
             message: 'Cannot cancel a ride not booked by you',
           });
         } else if (ride.status === 'CANCELLED_BY_PASSENGER') {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'ALREADY_CANCELLED',
+            code: 'FORBIDDEN',
             message: 'Ride already cancelled by you',
           });
         } else if (ride.status === 'CANCELLED_BY_DRIVER') {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'CANCELLED_BY_DRIVER',
+            code: 'FORBIDDEN',
             message: 'Ride already cancelled by the driver',
           });
         } else if (ride.status === 'CANCELLED_BY_SYSTEM') {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'ALREADY_CANCELLED',
+            code: 'FORBIDDEN',
             message: 'Ride already cancelled by system',
           });
         } else if (ride.status === 'RIDE_COMPLETED') {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'RIDE_COMPLETED',
+            code: 'FORBIDDEN',
             message: 'Cannot cancel a completed ride',
           });
         }
@@ -2451,7 +2617,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'CANNOT_CANCEL',
+            code: 'FORBIDDEN',
             message: `Cannot cancel ride. Current status: ${ride.status}`,
           });
         }
@@ -2460,7 +2626,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'INVALID_REASON',
+            code: 'FORBIDDEN',
             message: 'Cancellation reason must be between 3 and 500 characters',
           });
         }
@@ -2479,7 +2645,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'DRIVER_AVAILABILITY_FAILED',
+              code: 'FORBIDDEN',
               message: 'Failed to update driver availability',
             });
           }
@@ -2496,7 +2662,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'DRIVER_UPDATE_FAILED',
+              code: 'FORBIDDEN',
               message: 'Failed to update driver status',
             });
           }
@@ -2517,7 +2683,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'CANCELLATION_FAILED',
+            code: 'FORBIDDEN',
             message: 'Failed to cancel ride',
           });
         } else if (updatedRide.status !== 'CANCELLED_BY_PASSENGER') {
@@ -2525,7 +2691,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'RIDE_UPDATE_FAILED',
+            code: 'FORBIDDEN',
             message: 'Failed to update ride status',
           });
         }
@@ -2623,7 +2789,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'FORBIDDEN',
+              code: 'NOT_FOUND',
               message: 'Passenger not found',
             });
           }
@@ -2641,21 +2807,21 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'INVALID_STATUS',
+              code: 'FORBIDDEN',
               message: `Cannot rate driver. Current ride status: ${ride.status}`,
             });
           } else if (ride.driverRating) {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'ALREADY_RATED',
+              code: 'FORBIDDEN',
               message: 'You have already rated this driver for this ride',
             });
           } else if (typeof rating !== 'number' || rating < 1 || rating > 5) {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'INVALID_RATING',
+              code: 'FORBIDDEN',
               message: 'Rating must be a number between 1 and 5',
             });
           } else if (
@@ -2665,14 +2831,14 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'INVALID_FEEDBACK',
+              code: 'FORBIDDEN',
               message: 'Feedback must be between 3 and 500 characters',
             });
           } else if (passengerId.toString() !== passenger._id.toString()) {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'NOT_OWNED',
+              code: 'FORBIDDEN',
               message: 'Cannot rate driver for a ride not booked by you',
             });
           }
@@ -2690,7 +2856,7 @@ export const initSocket = (server) => {
             return socket.emit('ride:driver_rate_passenger', {
               success: false,
               objectType,
-              code: 'FEEDBACK_FAILED',
+              code: 'FORBIDDEN',
               message: 'Passenger failed to send feedback for driver',
             });
           }
@@ -2703,7 +2869,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'RIDE_UPDATE_FAILED',
+              code: 'FORBIDDEN',
               message: 'Failed to save driver rating',
             });
           }
@@ -2767,21 +2933,21 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'INVALID_STATUS',
+            code: 'FORBIDDEN',
             message: `Cannot rate driver. Current ride status: ${ride.status}`,
           });
         } else if (ride.tipBreakdown?.isApplied) {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'ALLREADY_PAID',
+            code: 'FORBIDDEN',
             message: `You have already paid $${ride.tipBreakdown?.amount} which is ${ride.tipBreakdown?.percent}% of fare`,
           });
         } else if (isApplied !== true || amount <= 0 || percent <= 0) {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'INVALID_AMOUNT',
+            code: 'FORBIDDEN',
             message: `Tip amount and percentage must be greter than 0`,
           });
         }
@@ -2812,7 +2978,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'PAYMENT_FAILED',
+              code: 'FORBIDDEN',
               message: tip.error,
             });
           }
@@ -2842,7 +3008,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'PAYMENT_FAILED',
+              code: 'FORBIDDEN',
               message: `Failed to send tip t driver's account`,
             });
           }
@@ -2884,21 +3050,21 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'INVALID_STATUS',
+            code: 'FORBIDDEN',
             message: `Cannot rate driver. Current ride status: ${ride.status}`,
           });
         } else if (!ride.actualFare || ride.actualFare <= 0) {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'INVALID_AMOUNT',
+            code: 'FORBIDDEN',
             message: `Actual fare must be greter than 0`,
           });
         } else if (ride.paymentStatus === 'COMPLETED') {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'ALLREADY_PAID',
+            code: 'FORBIDDEN',
             message: `You have already paid $${ride.actualFare} of fare`,
           });
         }
@@ -2936,7 +3102,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'PAYMENT_FAILED',
+              code: 'FORBIDDEN',
               message: fare.error,
             });
           } else if (fare.success) {
@@ -2964,7 +3130,7 @@ export const initSocket = (server) => {
               return socket.emit('error', {
                 success: false,
                 objectType,
-                code: 'RECEIPT_FAILED',
+                code: 'FORBIDDEN',
                 message: 'Failed to generate the receipt',
               });
             }
@@ -3011,7 +3177,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'PAYMENT_ERROR',
+              code: 'FORBIDDEN',
               message: fare.error || 'something went wrong',
             });
           }
@@ -3038,7 +3204,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'PAYMENT_FAILED',
+              code: 'FORBIDDEN',
               message: fare.error,
             });
           } else if (fare.success) {
@@ -3066,7 +3232,7 @@ export const initSocket = (server) => {
               return socket.emit('error', {
                 success: false,
                 objectType,
-                code: 'RECEIPT_FAILED',
+                code: 'FORBIDDEN',
                 message: 'Failed to generate the receipt',
               });
             }
@@ -3114,7 +3280,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'PAYMENT_ERROR',
+              code: 'FORBIDDEN',
               message: fare.error || 'something went wrong',
             });
           }
@@ -3148,7 +3314,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'INVALID_CHAT',
+            code: 'FORBIDDEN',
             message: 'This chat is not eligible',
           });
         }
@@ -3193,7 +3359,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'FETCH_FAILED',
+            code: 'FORBIDDEN',
             message: 'Failed to fetch chat',
           });
         }
@@ -3227,30 +3393,66 @@ export const initSocket = (server) => {
             sender = await findDriverByUserId(userId);
             role = 'driver';
 
-            if (
-              !sender ||
-              sender.isBlocked ||
-              sender.isSuspended ||
-              sender.backgroundCheckStatus !== 'approved' ||
-              !['online', 'on_ride'].includes(sender.status)
-            ) {
+            if (!sender) {
+              return socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'NOT_FOUND',
+                message: 'Driver not found',
+              });
+            } else if (sender.isBlocked) {
               return socket.emit('error', {
                 success: false,
                 objectType,
                 code: 'FORBIDDEN',
-                message: 'Forbidden: Driver not eligible',
+                message: 'Driver is blocked',
+              });
+            } else if (sender.isSuspended) {
+              return socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'FORBIDDEN',
+                message: 'Driver is suspended',
+              });
+            } else if (sender.backgroundCheckStatus !== 'approved') {
+              return socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'FORBIDDEN',
+                message: 'Driver background not verified',
+              });
+            } else if (!['online', 'on_ride'].includes(sender.status)) {
+              return socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'FORBIDDEN',
+                message: 'Invalid driver status',
               });
             }
           } else if (socket.user.roles.includes('passenger')) {
             sender = await findPassengerByUserId(userId);
             role = 'passenger';
 
-            if (!sender || sender.isBlocked || sender.isSuspended) {
+            if (!sender) {
+              return socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'NOT_FOUND',
+                message: 'Passenger not found',
+              });
+            } else if (sender.isBlocked) {
               return socket.emit('error', {
                 success: false,
                 objectType,
                 code: 'FORBIDDEN',
-                message: 'Forbidden: Passenger not eligible',
+                message: 'Passenger is blocked',
+              });
+            } else if (sender.isSuspended) {
+              return socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'FORBIDDEN',
+                message: 'Passenger is suspended',
               });
             }
           }
@@ -3299,7 +3501,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'MESSAGE_FAILED',
+              code: 'FORBIDDEN',
               message: 'Failed to send message',
             });
           }
@@ -3353,29 +3555,65 @@ export const initSocket = (server) => {
         if (socket.user.roles.includes('driver')) {
           reader = await findDriverByUserId(userId);
 
-          if (
-            !reader ||
-            reader.isBlocked ||
-            reader.isSuspended ||
-            reader.backgroundCheckStatus !== 'approved' ||
-            !['online', 'on_ride'].includes(reader.status)
-          ) {
+          if (!reader) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'NOT_FOUND',
+              message: 'Driver not found',
+            });
+          } else if (reader.isBlocked) {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Driver not eligible',
+              message: 'Driver is blocked',
+            });
+          } else if (reader.isSuspended) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Driver is suspended',
+            });
+          } else if (reader.backgroundCheckStatus !== 'approved') {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Driver background not verified',
+            });
+          } else if (!['online', 'on_ride'].includes(reader.status)) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Invalid driver status',
             });
           }
         } else if (socket.user.roles.includes('passenger')) {
           reader = await findPassengerByUserId(userId);
 
-          if (!reader || reader.isBlocked || reader.isSuspended) {
+          if (!reader) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'NOT_FOUND',
+              message: 'Passenger not found',
+            });
+          } else if (reader.isBlocked) {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Passenger not eligible',
+              message: 'Passenger is blocked',
+            });
+          } else if (reader.isSuspended) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Passenger is suspended',
             });
           }
         }
@@ -3385,7 +3623,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'FAILED_TO_READ',
+            code: 'FORBIDDEN',
             message: `Failed to mark messages as read`,
           });
         }
@@ -3415,31 +3653,68 @@ export const initSocket = (server) => {
         if (socket.user.roles.includes('driver')) {
           sender = await findDriverByUserId(userId);
 
-          if (
-            !sender ||
-            sender.isBlocked ||
-            sender.isSuspended ||
-            sender.backgroundCheckStatus !== 'approved' ||
-            !['online', 'on_ride'].includes(sender.status)
-          ) {
+          if (!sender) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'NOT_FOUND',
+              message: 'Driver not found',
+            });
+          } else if (sender.isBlocked) {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Driver not eligible',
+              message: 'Driver is blocked',
+            });
+          } else if (sender.isSuspended) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Driver is suspended',
+            });
+          } else if (sender.backgroundCheckStatus !== 'approved') {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Driver background not verified',
+            });
+          } else if (!['online', 'on_ride'].includes(sender.status)) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Invalid driver status',
             });
           }
         } else if (socket.user.roles.includes('passenger')) {
           sender = await findPassengerByUserId(userId);
 
-          if (!sender || sender.isBlocked || sender.isSuspended) {
+          if (!sender) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'NOT_FOUND',
+              message: 'Passenger not found',
+            });
+          } else if (sender.isBlocked) {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Passenger not eligible',
+              message: 'Passenger is blocked',
+            });
+          } else if (sender.isSuspended) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Passenger is suspended',
             });
           }
+          as;
         }
 
         const updatedMsg = await editMessage(messageId, sender.userId, text);
@@ -3447,7 +3722,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'EDIT_FAILED',
+            code: 'FORBIDDEN',
             message: 'Failed to edit message',
           });
         }
@@ -3484,29 +3759,65 @@ export const initSocket = (server) => {
           if (socket.user.roles.includes('driver')) {
             sender = await findDriverByUserId(userId);
 
-            if (
-              !sender ||
-              sender.isBlocked ||
-              sender.isSuspended ||
-              sender.backgroundCheckStatus !== 'approved' ||
-              !['online', 'on_ride'].includes(sender.status)
-            ) {
+            if (!sender) {
+              return socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'NOT_FOUND',
+                message: 'Driver not found',
+              });
+            } else if (sender.isBlocked) {
               return socket.emit('error', {
                 success: false,
                 objectType,
                 code: 'FORBIDDEN',
-                message: 'Forbidden: Driver not eligible',
+                message: 'Driver is blocked',
+              });
+            } else if (sender.isSuspended) {
+              return socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'FORBIDDEN',
+                message: 'Driver is suspended',
+              });
+            } else if (sender.backgroundCheckStatus !== 'approved') {
+              return socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'FORBIDDEN',
+                message: 'Driver background not verified',
+              });
+            } else if (!['online', 'on_ride'].includes(sender.status)) {
+              return socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'FORBIDDEN',
+                message: 'Invalid driver status',
               });
             }
           } else if (socket.user.roles.includes('passenger')) {
             sender = await findPassengerByUserId(userId);
 
-            if (!sender || sender.isBlocked || sender.isSuspended) {
+            if (!sender) {
+              return socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'NOT_FOUND',
+                message: 'Passenger not found',
+              });
+            } else if (sender.isBlocked) {
               return socket.emit('error', {
                 success: false,
                 objectType,
                 code: 'FORBIDDEN',
-                message: 'Forbidden: Passenger not eligible',
+                message: 'Passenger is blocked',
+              });
+            } else if (sender.isSuspended) {
+              return socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'FORBIDDEN',
+                message: 'Passenger is suspended',
               });
             }
           }
@@ -3515,14 +3826,14 @@ export const initSocket = (server) => {
             socket.emit('error', {
               success: false,
               objectType,
-              code: 'INVALID_RIDE',
+              code: 'FORBIDDEN',
               message: 'Ride Id is required',
             });
           } else if (!text || text.trim().length === 0) {
             socket.emit('error', {
               success: false,
               objectType,
-              code: 'INVALID_TEXT',
+              code: 'FORBIDDEN',
               message: 'Empty message is not allowed',
             });
           } else if (
@@ -3531,7 +3842,7 @@ export const initSocket = (server) => {
             socket.emit('error', {
               success: false,
               objectType,
-              code: 'INVALID_TYPE',
+              code: 'FORBIDDEN',
               message: 'Invalid message type',
             });
           }
@@ -3551,7 +3862,7 @@ export const initSocket = (server) => {
             socket.emit('error', {
               success: false,
               objectType,
-              code: 'MESSAGE_FAILED',
+              code: 'NOT_FOUND',
               message: 'Chat not found',
             });
           }
@@ -3573,7 +3884,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'MESSAGE_FAILED',
+              code: 'FORBIDDEN',
               message: 'Failed to send message',
             });
           }
@@ -3604,29 +3915,65 @@ export const initSocket = (server) => {
         if (socket.user.roles.includes('driver')) {
           sender = await findDriverByUserId(userId);
 
-          if (
-            !sender ||
-            sender.isBlocked ||
-            sender.isSuspended ||
-            sender.backgroundCheckStatus !== 'approved' ||
-            !['online', 'on_ride'].includes(sender.status)
-          ) {
-            return socket.emit('ride:delete_message', {
+          if (!sender) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'NOT_FOUND',
+              message: 'Driver not found',
+            });
+          } else if (sender.isBlocked) {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Driver not eligible',
+              message: 'Driver is blocked',
+            });
+          } else if (sender.isSuspended) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Driver is suspended',
+            });
+          } else if (sender.backgroundCheckStatus !== 'approved') {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Driver background not verified',
+            });
+          } else if (!['online', 'on_ride'].includes(sender.status)) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Invalid driver status',
             });
           }
         } else if (socket.user.roles.includes('passenger')) {
           sender = await findPassengerByUserId(userId);
 
-          if (!sender || sender.isBlocked || sender.isSuspended) {
-            return socket.emit('ride:delete_message', {
+          if (!sender) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'NOT_FOUND',
+              message: 'Passenger not found',
+            });
+          } else if (sender.isBlocked) {
+            return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Passenger not eligible',
+              message: 'Passenger is blocked',
+            });
+          } else if (sender.isSuspended) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Passenger is suspended',
             });
           }
         }
@@ -3636,7 +3983,7 @@ export const initSocket = (server) => {
           return socket.emit('ride:delete_message', {
             success: false,
             objectType,
-            code: 'DELETE_FAILED',
+            code: 'FORBIDDEN',
             message: 'Failed to delete message',
           });
         }
@@ -3670,30 +4017,66 @@ export const initSocket = (server) => {
             caller = await findDriverByUserId(userId);
             role = 'driver';
 
-            if (
-              !caller ||
-              caller.isBlocked ||
-              caller.isSuspended ||
-              caller.backgroundCheckStatus !== 'approved' ||
-              !['online', 'on_ride'].includes(caller.status)
-            ) {
+            if (!caller) {
+              return socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'NOT_FOUND',
+                message: 'Driver not found',
+              });
+            } else if (caller.isBlocked) {
               return socket.emit('error', {
                 success: false,
                 objectType,
                 code: 'FORBIDDEN',
-                message: 'Forbidden: Driver not eligible',
+                message: 'Driver is blocked',
+              });
+            } else if (caller.isSuspended) {
+              return socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'FORBIDDEN',
+                message: 'Driver is suspended',
+              });
+            } else if (caller.backgroundCheckStatus !== 'approved') {
+              return socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'FORBIDDEN',
+                message: 'Driver background not verified',
+              });
+            } else if (!['online', 'on_ride'].includes(caller.status)) {
+              return socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'FORBIDDEN',
+                message: 'Invalid driver status',
               });
             }
           } else if (socket.user.roles.includes('passenger')) {
             caller = await findPassengerByUserId(userId);
             role = 'passenger';
 
-            if (!caller || caller.isBlocked || caller.isSuspended) {
+            if (!caller) {
+              return socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'NOT_FOUND',
+                message: 'Passenger not found',
+              });
+            } else if (caller.isBlocked) {
               return socket.emit('error', {
                 success: false,
                 objectType,
                 code: 'FORBIDDEN',
-                message: 'Forbidden: Passenger not eligible',
+                message: 'Passenger is blocked',
+              });
+            } else if (caller.isSuspended) {
+              return socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'FORBIDDEN',
+                message: 'Passenger is suspended',
               });
             }
           }
@@ -3714,7 +4097,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'INVALID_CALL',
+              code: 'FORBIDDEN',
               message: 'This call is not eligible',
             });
           }
@@ -3726,7 +4109,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: `INVALID_USER`,
+              code: `FORBIDDEN`,
               message: `You are not allowed to start the call`,
             });
           }
@@ -3795,7 +4178,7 @@ export const initSocket = (server) => {
               socket.emit('error', {
                 success: false,
                 objectType,
-                code: 'NOTIFICATION_FAILED',
+                code: 'FORBIDDEN',
                 message: 'Failed to send notification',
               });
             }
@@ -3821,7 +4204,7 @@ export const initSocket = (server) => {
               socket.emit('error', {
                 success: false,
                 objectType,
-                code: 'NOTIFICATION_FAILED',
+                code: 'FORBIDDEN',
                 message: 'Failed to send notification',
               });
             }
@@ -3854,30 +4237,66 @@ export const initSocket = (server) => {
           receiver = await findDriverByUserId(userId);
           role = 'driver';
 
-          if (
-            !receiver ||
-            receiver.isBlocked ||
-            receiver.isSuspended ||
-            receiver.backgroundCheckStatus !== 'approved' ||
-            !['online', 'on_ride'].includes(receiver.status)
-          ) {
+          if (!receiver) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'NOT_FOUND',
+              message: 'Driver not found',
+            });
+          } else if (receiver.isBlocked) {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Driver not eligible',
+              message: 'Driver is blocked',
+            });
+          } else if (receiver.isSuspended) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Driver is suspended',
+            });
+          } else if (receiver.backgroundCheckStatus !== 'approved') {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Driver background not verified',
+            });
+          } else if (!['online', 'on_ride'].includes(receiver.status)) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Invalid driver status',
             });
           }
         } else if (socket.user.roles.includes('passenger')) {
           receiver = await findPassengerByUserId(userId);
           role = 'passenger';
 
-          if (!receiver || receiver.isBlocked || receiver.isSuspended) {
+          if (!receiver) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'NOT_FOUND',
+              message: 'Passenger not found',
+            });
+          } else if (receiver.isBlocked) {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Passenger not eligible',
+              message: 'Passenger is blocked',
+            });
+          } else if (receiver.isSuspended) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Passenger is suspended',
             });
           }
         }
@@ -3896,7 +4315,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: `INVALID_USER`,
+            code: `FORBIDDEN`,
             message: `You are not allowed to receive the call`,
           });
         }
@@ -3917,7 +4336,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'INVALID_CALL',
+            code: 'FORBIDDEN',
             message: 'This call is not eligible',
           });
         }
@@ -3930,7 +4349,7 @@ export const initSocket = (server) => {
           socket.emit('ride:decline_call', {
             success: false,
             objectType,
-            code: 'FAILED_UPDATE',
+            code: 'FORBIDDEN',
             message: `Failed to update the call log`,
           });
         }
@@ -3972,30 +4391,66 @@ export const initSocket = (server) => {
           receiver = await findDriverByUserId(userId);
           role = 'driver';
 
-          if (
-            !receiver ||
-            receiver.isBlocked ||
-            receiver.isSuspended ||
-            receiver.backgroundCheckStatus !== 'approved' ||
-            !['online', 'on_ride'].includes(receiver.status)
-          ) {
+          if (!receiver) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'NOT_FOUND',
+              message: 'Driver not found',
+            });
+          } else if (receiver.isBlocked) {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Driver not eligible',
+              message: 'Driver is blocked',
+            });
+          } else if (receiver.isSuspended) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Driver is suspended',
+            });
+          } else if (receiver.backgroundCheckStatus !== 'approved') {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Driver background not verified',
+            });
+          } else if (!['online', 'on_ride'].includes(receiver.status)) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Invalid driver status',
             });
           }
         } else if (socket.user.roles.includes('passenger')) {
           receiver = await findPassengerByUserId(userId);
           role = 'passenger';
 
-          if (!receiver || receiver.isBlocked || receiver.isSuspended) {
+          if (!receiver) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'NOT_FOUND',
+              message: 'Passenger not found',
+            });
+          } else if (receiver.isBlocked) {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Passenger not eligible',
+              message: 'Passenger is blocked',
+            });
+          } else if (receiver.isSuspended) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Passenger is suspended',
             });
           }
         }
@@ -4014,7 +4469,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: `INVALID_USER`,
+            code: `FORBIDDEN`,
             message: `You are not allowed to receive the call`,
           });
         }
@@ -4035,7 +4490,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'INVALID_CALL',
+            code: 'FORBIDDEN',
             message: 'This call is not eligible',
           });
         }
@@ -4048,7 +4503,7 @@ export const initSocket = (server) => {
           socket.emit('error', {
             success: false,
             objectType,
-            code: 'FAILED_UPDATE',
+            code: 'FORBIDDEN',
             message: `Failed to update the call log`,
           });
         }
@@ -4075,7 +4530,7 @@ export const initSocket = (server) => {
           socket.emit('error', {
             success: false,
             objectType,
-            code: 'NOTIFICATION_FAILED',
+            code: 'FORBIDDEN',
             message: 'Failed to send notification',
           });
         }
@@ -4106,30 +4561,66 @@ export const initSocket = (server) => {
           caller = await findDriverByUserId(userId);
           role = 'driver';
 
-          if (
-            !caller ||
-            caller.isBlocked ||
-            caller.isSuspended ||
-            caller.backgroundCheckStatus !== 'approved' ||
-            !['online', 'on_ride'].includes(caller.status)
-          ) {
+          if (!caller) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'NOT_FOUND',
+              message: 'Driver not found',
+            });
+          } else if (caller.isBlocked) {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Driver not eligible',
+              message: 'Driver is blocked',
+            });
+          } else if (caller.isSuspended) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Driver is suspended',
+            });
+          } else if (caller.backgroundCheckStatus !== 'approved') {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Driver background not verified',
+            });
+          } else if (!['online', 'on_ride'].includes(caller.status)) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Invalid driver status',
             });
           }
         } else if (socket.user.roles.includes('passenger')) {
           caller = await findPassengerByUserId(userId);
           role = 'passenger';
 
-          if (!caller || caller.isBlocked || caller.isSuspended) {
+          if (!caller) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'NOT_FOUND',
+              message: 'Passenger not found',
+            });
+          } else if (caller.isBlocked) {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Passenger not eligible',
+              message: 'Passenger is blocked',
+            });
+          } else if (caller.isSuspended) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Passenger is suspended',
             });
           }
         }
@@ -4148,7 +4639,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: `INVALID_USER`,
+            code: `FORBIDDEN`,
             message: `You are not allowed to receive the call`,
           });
         }
@@ -4169,7 +4660,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'INVALID_CALL',
+            code: 'FORBIDDEN',
             message: 'This call is not eligible',
           });
         }
@@ -4182,7 +4673,7 @@ export const initSocket = (server) => {
           socket.emit('error', {
             success: false,
             objectType,
-            code: 'FAILED_UPDATE',
+            code: 'FORBIDDEN',
             message: `Failed to update the call log`,
           });
         }
@@ -4209,7 +4700,7 @@ export const initSocket = (server) => {
           socket.emit('error', {
             success: false,
             objectType,
-            code: 'NOTIFICATION_FAILED',
+            code: 'FORBIDDEN',
             message: 'Failed to send notification',
           });
         }
@@ -4240,30 +4731,66 @@ export const initSocket = (server) => {
           member = await findDriverByUserId(userId);
           role = 'driver';
 
-          if (
-            !member ||
-            member.isBlocked ||
-            member.isSuspended ||
-            member.backgroundCheckStatus !== 'approved' ||
-            !['online', 'on_ride'].includes(member.status)
-          ) {
+          if (!member) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'NOT_FOUND',
+              message: 'Driver not found',
+            });
+          } else if (member.isBlocked) {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Driver not eligible',
+              message: 'Driver is blocked',
+            });
+          } else if (member.isSuspended) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Driver is suspended',
+            });
+          } else if (member.backgroundCheckStatus !== 'approved') {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Driver background not verified',
+            });
+          } else if (!['online', 'on_ride'].includes(member.status)) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Invalid driver status',
             });
           }
         } else if (socket.user.roles.includes('passenger')) {
           member = await findPassengerByUserId(userId);
           role = 'passenger';
 
-          if (!member || member.isBlocked || member.isSuspended) {
+          if (!member) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'NOT_FOUND',
+              message: 'Passenger not found',
+            });
+          } else if (member.isBlocked) {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Passenger not eligible',
+              message: 'Passenger is blocked',
+            });
+          } else if (member.isSuspended) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Passenger is suspended',
             });
           }
         }
@@ -4285,7 +4812,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: `INVALID_USER`,
+            code: `FORBIDDEN`,
             message: `You are not allowed to receive the call`,
           });
         }
@@ -4306,7 +4833,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'INVALID_CALL',
+            code: 'FORBIDDEN',
             message: 'This call is not eligible',
           });
         }
@@ -4319,7 +4846,7 @@ export const initSocket = (server) => {
           socket.emit('error', {
             success: false,
             objectType,
-            code: 'FAILED_UPDATE',
+            code: 'FORBIDDEN',
             message: `Failed to update the call log`,
           });
         }
@@ -4367,30 +4894,66 @@ export const initSocket = (server) => {
           member = await findDriverByUserId(userId);
           role = 'driver';
 
-          if (
-            !member ||
-            member.isBlocked ||
-            member.isSuspended ||
-            member.backgroundCheckStatus !== 'approved' ||
-            !['online', 'on_ride'].includes(member.status)
-          ) {
+          if (!member) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'NOT_FOUND',
+              message: 'Driver not found',
+            });
+          } else if (member.isBlocked) {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Driver not eligible',
+              message: 'Driver is blocked',
+            });
+          } else if (member.isSuspended) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Driver is suspended',
+            });
+          } else if (member.backgroundCheckStatus !== 'approved') {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Driver background not verified',
+            });
+          } else if (!['online', 'on_ride'].includes(member.status)) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Invalid driver status',
             });
           }
         } else if (socket.user.roles.includes('passenger')) {
           member = await findPassengerByUserId(userId);
           role = 'passenger';
 
-          if (!member || member.isBlocked || member.isSuspended) {
+          if (!member) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'NOT_FOUND',
+              message: 'Passenger not found',
+            });
+          } else if (member.isBlocked) {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Passenger not eligible',
+              message: 'Passenger is blocked',
+            });
+          } else if (member.isSuspended) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Passenger is suspended',
             });
           }
         }
@@ -4407,7 +4970,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: `CALL_ENDED`,
+            code: `FORBIDDEN`,
             message: `This call is ended`,
           });
         }
@@ -4428,7 +4991,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'INVALID_CALL',
+            code: 'FORBIDDEN',
             message: 'This call is not eligible',
           });
         }
@@ -4440,7 +5003,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: `INVALID_USER`,
+            code: `FORBIDDEN`,
             message: `You are not allowed to receive the call`,
           });
         }
@@ -4472,30 +5035,66 @@ export const initSocket = (server) => {
           member = await findDriverByUserId(userId);
           role = 'driver';
 
-          if (
-            !member ||
-            member.isBlocked ||
-            member.isSuspended ||
-            member.backgroundCheckStatus !== 'approved' ||
-            !['online', 'on_ride'].includes(member.status)
-          ) {
+          if (!member) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'NOT_FOUND',
+              message: 'Driver not found',
+            });
+          } else if (member.isBlocked) {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Driver not eligible',
+              message: 'Driver is blocked',
+            });
+          } else if (member.isSuspended) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Driver is suspended',
+            });
+          } else if (member.backgroundCheckStatus !== 'approved') {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Driver background not verified',
+            });
+          } else if (!['online', 'on_ride'].includes(member.status)) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Invalid driver status',
             });
           }
         } else if (socket.user.roles.includes('passenger')) {
           member = await findPassengerByUserId(userId);
           role = 'passenger';
 
-          if (!member || member.isBlocked || member.isSuspended) {
+          if (!member) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'NOT_FOUND',
+              message: 'Passenger not found',
+            });
+          } else if (member.isBlocked) {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: 'Forbidden: Passenger not eligible',
+              message: 'Passenger is blocked',
+            });
+          } else if (member.isSuspended) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Passenger is suspended',
             });
           }
         }
@@ -4526,7 +5125,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'INVALID_CALL',
+            code: 'FORBIDDEN',
             message: 'This call is not eligible',
           });
         }
@@ -4538,7 +5137,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: `INVALID_USER`,
+            code: `FORBIDDEN`,
             message: `You are not allowed to receive the call`,
           });
         }
@@ -4570,7 +5169,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'NOT_FOUND',
+            code: 'FORBIDDEN',
             message: 'Failed to fetch rides data',
           });
         }
@@ -4600,7 +5199,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'NOT_FOUND',
+            code: 'FORBIDDEN',
             message: 'Failed to fetch notifications',
           });
         }
@@ -4635,7 +5234,7 @@ export const initSocket = (server) => {
             return socket.emit('error', {
               success: false,
               objectType,
-              code: 'UPDATE_FAILED',
+              code: 'FORBIDDEN',
               message: 'Failed to update notification status',
             });
           }
@@ -4666,7 +5265,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'UPDATE_FAILED',
+            code: 'FORBIDDEN',
             message: 'Failed to real all notifications',
           });
         }
@@ -4696,7 +5295,7 @@ export const initSocket = (server) => {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'NOT_FOUND',
+            code: 'FORBIDDEN',
             message: 'Failed to count unread notifications',
           });
         }

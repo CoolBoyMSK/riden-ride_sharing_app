@@ -221,7 +221,6 @@ const rideSchema = new mongoose.Schema(
       },
       isApplied: {
         type: Boolean,
-        default: false,
       },
     },
 
@@ -363,6 +362,14 @@ const rideSchema = new mongoose.Schema(
     },
 
     // Metadata
+    fareConfig: {
+      type: Object,
+      required: true,
+    },
+    airport: {
+      type: Object,
+      default: {},
+    },
     notifiedDrivers: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -391,6 +398,12 @@ const rideSchema = new mongoose.Schema(
         },
       },
     ],
+    zoneName: {
+      type: String,
+    },
+    fareConfigType: {
+      type: String,
+    },
     expiryTime: {
       type: Date,
     },
