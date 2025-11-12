@@ -629,89 +629,219 @@ export const filterRidesForDriver = (
   });
 };
 
-export const findNearestParkingForPickup = async (userCoords) => {
+// export const findNearestParkingForPickup = async (userCoords) => {
+//   try {
+//     if (Array.isArray(userCoords) && userCoords.length === 2) {
+//       userCoords = {
+//         latitude: Number(userCoords[1]),
+//         longitude: Number(userCoords[0]),
+//       };
+//     }
+
+//     // Validate coordinates
+//     if (
+//       !userCoords ||
+//       typeof userCoords.latitude !== 'number' ||
+//       typeof userCoords.longitude !== 'number'
+//     ) {
+//       throw new Error('Invalid user coordinates.');
+//     }
+
+//     // Use aggregation to get the distance calculated by MongoDB
+//     const result = await Zone.aggregate([
+//       {
+//         $geoNear: {
+//           near: {
+//             type: 'Point',
+//             coordinates: [userCoords.longitude, userCoords.latitude],
+//           },
+//           distanceField: 'distance',
+//           spherical: true,
+//           key: 'boundaries',
+//         },
+//       },
+//       {
+//         $match: {
+//           type: 'airport-parking',
+//           isActive: true,
+//         },
+//       },
+//       {
+//         $sort: {
+//           distance: 1, // Sort by distance to get the nearest
+//         },
+//       },
+//       {
+//         $limit: 1,
+//       },
+//     ]);
+
+//     if (result.length === 0) {
+//       return null;
+//     }
+
+//     const nearestZone = result[0];
+//     const representativePoint = nearestZone.boundaries.coordinates[0][0][0];
+
+//     const nearest = {
+//       zoneId: nearestZone._id,
+//       zoneName: nearestZone.name,
+//       zoneType: nearestZone.type,
+//       coordinates: {
+//         latitude: representativePoint[1],
+//         longitude: representativePoint[0],
+//       },
+//       distanceKm: Number((nearestZone.distance / 1000).toFixed(3)), // Convert meters to km
+//       boundaries: nearestZone.boundaries,
+//       metadata: nearestZone.metadata || {},
+//       description: nearestZone.description,
+//       minSearchRadius: nearestZone.minSearchRadius || 5,
+//       maxSearchRadius: nearestZone.maxSearchRadius || 10,
+//       isActive: nearestZone.isActive,
+//     };
+
+//     // Generate navigation URLs
+//     const { latitude, longitude } = nearest.coordinates;
+
+//     return {
+//       ...nearest,
+//       googleMapsUrl: `https://www.google.com/maps/dir/?api=1&origin=${userCoords.latitude},${userCoords.longitude}&destination=${latitude},${longitude}&travelmode=driving`,
+//       appleMapsUrl: `http://maps.apple.com/?saddr=${userCoords.latitude},${userCoords.longitude}&daddr=${latitude},${longitude}`,
+//     };
+//   } catch (error) {
+//     console.error('Error finding nearest airport parking zone:', error);
+//     throw error;
+//   }
+// };
+
+const calculatePolygonCentroid = (coordinates) => {
   try {
-    if (Array.isArray(userCoords) && userCoords.length === 2) {
-      userCoords = {
-        latitude: Number(userCoords[1]),
-        longitude: Number(userCoords[0]),
-      };
+    const polygonRing = coordinates[0]; // Outer ring
+    if (!polygonRing || polygonRing.length < 3) {
+      throw new Error('Invalid polygon - not enough points');
     }
 
-    // Validate coordinates
-    if (
-      !userCoords ||
-      typeof userCoords.latitude !== 'number' ||
-      typeof userCoords.longitude !== 'number'
-    ) {
-      throw new Error('Invalid user coordinates.');
+    let signedArea = 0;
+    let centroidLng = 0;
+    let centroidLat = 0;
+
+    // Use the shoelace formula for more accurate centroid calculation
+    for (let i = 0; i < polygonRing.length - 1; i++) {
+      const [x1, y1] = polygonRing[i];
+      const [x2, y2] = polygonRing[i + 1];
+
+      const crossProduct = x1 * y2 - x2 * y1;
+      signedArea += crossProduct;
+
+      centroidLng += (x1 + x2) * crossProduct;
+      centroidLat += (y1 + y2) * crossProduct;
     }
 
-    // Use aggregation to get the distance calculated by MongoDB
-    const result = await Zone.aggregate([
-      {
-        $geoNear: {
-          near: {
-            type: 'Point',
-            coordinates: [userCoords.longitude, userCoords.latitude],
-          },
-          distanceField: 'distance',
-          spherical: true,
-          key: 'boundaries',
-        },
-      },
-      {
-        $match: {
-          type: 'airport-parking',
-          isActive: true,
-        },
-      },
-      {
-        $sort: {
-          distance: 1, // Sort by distance to get the nearest
-        },
-      },
-      {
-        $limit: 1,
-      },
-    ]);
+    signedArea *= 0.5;
 
-    if (result.length === 0) {
-      return null;
+    if (Math.abs(signedArea) < 0.0001) {
+      // Very small area, fallback to simple average
+      return calculatePolygonCenter(coordinates);
     }
 
-    const nearestZone = result[0];
-    const representativePoint = nearestZone.boundaries.coordinates[0][0][0];
+    centroidLng = centroidLng / (6 * signedArea);
+    centroidLat = centroidLat / (6 * signedArea);
 
-    const nearest = {
-      zoneId: nearestZone._id,
-      zoneName: nearestZone.name,
-      zoneType: nearestZone.type,
-      coordinates: {
-        latitude: representativePoint[1],
-        longitude: representativePoint[0],
-      },
-      distanceKm: Number((nearestZone.distance / 1000).toFixed(3)), // Convert meters to km
-      boundaries: nearestZone.boundaries,
-      metadata: nearestZone.metadata || {},
-      description: nearestZone.description,
-      minSearchRadius: nearestZone.minSearchRadius || 5,
-      maxSearchRadius: nearestZone.maxSearchRadius || 10,
-      isActive: nearestZone.isActive,
-    };
-
-    // Generate navigation URLs
-    const { latitude, longitude } = nearest.coordinates;
+    console.log(
+      `Calculated accurate centroid: [${centroidLng}, ${centroidLat}]`,
+    );
 
     return {
-      ...nearest,
-      googleMapsUrl: `https://www.google.com/maps/dir/?api=1&origin=${userCoords.latitude},${userCoords.longitude}&destination=${latitude},${longitude}&travelmode=driving`,
-      appleMapsUrl: `http://maps.apple.com/?saddr=${userCoords.latitude},${userCoords.longitude}&daddr=${latitude},${longitude}`,
+      latitude: centroidLat,
+      longitude: centroidLng,
     };
   } catch (error) {
-    console.error('Error finding nearest airport parking zone:', error);
-    throw error;
+    console.error('Error calculating polygon centroid:', error);
+    return calculatePolygonCenter(coordinates); // Fallback to simple average
   }
+};
+
+export const findNearestParkingForPickup = async (userCoords) => {
+  if (Array.isArray(userCoords) && userCoords.length === 2) {
+    userCoords = {
+      latitude: Number(userCoords[1]),
+      longitude: Number(userCoords[0]),
+    };
+  }
+
+  // Validate coordinates
+  if (
+    !userCoords ||
+    typeof userCoords.latitude !== 'number' ||
+    typeof userCoords.longitude !== 'number'
+  ) {
+    throw new Error('Invalid user coordinates.');
+  }
+
+  // Use aggregation to get the distance calculated by MongoDB
+  const result = await Zone.aggregate([
+    {
+      $geoNear: {
+        near: {
+          type: 'Point',
+          coordinates: [userCoords.longitude, userCoords.latitude],
+        },
+        distanceField: 'distance',
+        spherical: true,
+        key: 'boundaries',
+      },
+    },
+    {
+      $match: {
+        type: 'airport-parking',
+        isActive: true,
+      },
+    },
+    {
+      $sort: {
+        distance: 1,
+      },
+    },
+    {
+      $limit: 1,
+    },
+  ]);
+
+  if (result.length === 0) {
+    return null;
+  }
+
+  const nearestZone = result[0];
+
+  // Calculate the accurate center point of the polygon boundaries
+  const centerPoint = calculatePolygonCentroid(
+    nearestZone.boundaries.coordinates,
+  );
+
+  const nearest = {
+    zoneId: nearestZone._id,
+    zoneName: nearestZone.name,
+    zoneType: nearestZone.type,
+    coordinates: {
+      latitude: centerPoint.latitude,
+      longitude: centerPoint.longitude,
+    },
+    distanceKm: Number((nearestZone.distance / 1000).toFixed(3)),
+    boundaries: nearestZone.boundaries,
+    metadata: nearestZone.metadata || {},
+    description: nearestZone.description,
+    minSearchRadius: nearestZone.minSearchRadius || 5,
+    maxSearchRadius: nearestZone.maxSearchRadius || 10,
+    isActive: nearestZone.isActive,
+    // Add the actual center calculation method used
+    centerCalculation: 'centroid',
+  };
+
+  return {
+    ...nearest,
+    googleMapsUrl: `https://www.google.com/maps/dir/?api=1&origin=${userCoords.latitude},${userCoords.longitude}&destination=${centerPoint.latitude},${centerPoint.longitude}&travelmode=driving`,
+    appleMapsUrl: `http://maps.apple.com/?saddr=${userCoords.latitude},${userCoords.longitude}&daddr=${centerPoint.latitude},${centerPoint.longitude}`,
+  };
 };
 
 export const findDriverParkingQueue = async (parkingLotId) => {
