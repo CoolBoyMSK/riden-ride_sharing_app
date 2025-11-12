@@ -15,6 +15,7 @@ import moment from 'moment';
 import Ride from '../models/Ride.js';
 import Fare from '../models/fareManagement.js';
 import Zone from '../models/Zone.js';
+import { emitToUser } from '../realtime/socket.js';
 
 // Ride Operations
 export const createRide = async (rideData) => {
@@ -932,43 +933,232 @@ export const addDriverToQueue = async (parkingLotId, driverId) => {
   }
 };
 
-export const removeDriverFromQueue = async (driverId, session = null) => {
+// export const removeDriverFromQueue = async (
+//   driverId,
+//   parkingQueueId,
+//   session = null,
+// ) => {
+//   const useSession = session || (await mongoose.startSession());
+//   if (!session) useSession.startTransaction();
+
+//   try {
+//     // Remove driver
+//     const result = await ParkingQueue.findByIdAndUpdate(
+//       parkingQueueId,
+//       {
+//         $pull: {
+//           driverQueue: { driverId: driverId },
+//         },
+//       },
+//       { new: true, session: useSession },
+//     );
+
+//     // Optional: Update positions for remaining drivers in affected queues
+//     for (const queue of queuesWithDriver) {
+//       await updateQueuePositions(queue.parkingLotId, useSession);
+//     }
+
+//     const drivers = result.driverQueue;
+//     for (const driver of drivers) {
+//       emitToUser(driver.driverId?.userId, 'ride:parking_queue', {});
+//     }
+
+//     if (!session) await useSession.commitTransaction();
+
+//     return {
+//       message: `Driver ${driverId} removed from ${result.modifiedCount} parking queue(s)`,
+//       modifiedCount: result.modifiedCount,
+//       matchedCount: result.matchedCount,
+//       affectedQueues: queuesWithDriver.map((q) => q.parkingLotId),
+//     };
+//   } catch (err) {
+//     if (!session) await useSession.abortTransaction();
+//     throw new Error(`Failed to remove driver from queues: ${err.message}`);
+//   } finally {
+//     if (!session) useSession.endSession();
+//   }
+// };
+
+export const removeDriverFromQueue = async (
+  driverId,
+  parkingQueueId,
+  session = null,
+) => {
   const useSession = session || (await mongoose.startSession());
   if (!session) useSession.startTransaction();
 
   try {
-    // First find all queues that contain this driver
-    const queuesWithDriver = await ParkingQueue.find({
-      'driverQueue.driverId': driverId,
-    }).session(useSession);
+    // First get the current queue state before removal
+    const currentQueue = await ParkingQueue.findById(parkingQueueId)
+      .populate({
+        path: 'driverQueue.driverId',
+        populate: {
+          path: 'userId',
+          model: 'User',
+          select: 'name email phoneNumber profileImg',
+        },
+      })
+      .populate('parkingLotId', 'name boundaries')
+      .populate('airportId', 'name')
+      .session(useSession);
 
-    // Remove driver from all queues
-    const result = await ParkingQueue.updateMany(
-      { 'driverQueue.driverId': driverId },
+    if (!currentQueue) {
+      throw new Error('Parking Queue not found');
+    }
+
+    // Remove driver from the queue
+    const updatedQueue = await ParkingQueue.findByIdAndUpdate(
+      parkingQueueId,
       {
         $pull: {
           driverQueue: { driverId: driverId },
         },
       },
-      { session: useSession },
-    );
+      { new: true, session: useSession },
+    )
+      .populate({
+        path: 'driverQueue.driverId',
+        populate: {
+          path: 'userId',
+          model: 'User',
+          select: 'name email phoneNumber profileImg',
+        },
+      })
+      .populate('parkingLotId', 'name boundaries')
+      .populate('airportId', 'name');
 
-    // Optional: Update positions for remaining drivers in affected queues
-    for (const queue of queuesWithDriver) {
-      await updateQueuePositions(queue.parkingLotId, useSession);
+    if (!updatedQueue) {
+      throw new Error('Failed to remove driver from queue');
     }
+
+    // Emit updated queue data to all remaining drivers
+    const waitingDrivers = updatedQueue.driverQueue
+      .filter((driver) => driver.status === 'waiting')
+      .sort((a, b) => a.joinedAt - b.joinedAt);
+
+    // Send updated queue data to each remaining driver
+    for (const driver of waitingDrivers) {
+      if (driver.driverId && driver.driverId.userId) {
+        const positionInWaiting = waitingDrivers.findIndex(
+          (d) => d.driverId._id.toString() === driver.driverId._id.toString(),
+        );
+
+        const currentPosition =
+          positionInWaiting >= 0 ? positionInWaiting + 1 : null;
+
+        // Get drivers relative to current driver
+        const driversAhead = waitingDrivers.slice(0, positionInWaiting);
+        const driversBehind = waitingDrivers.slice(positionInWaiting + 1);
+
+        const queueData = {
+          success: true,
+          data: {
+            // ← Remove objectType and move data to top level
+            queueInfo: {
+              queueId: updatedQueue._id,
+              parkingLot: updatedQueue.parkingLotId, // ← Changed from parkingLotId to parkingLot for consistency
+              airport: updatedQueue.airportId, // ← Changed from airportId to airport for consistency
+              totalDrivers: updatedQueue.driverQueue.length,
+              totalWaitingDrivers: waitingDrivers.length,
+              maxQueueSize: updatedQueue.maxQueueSize,
+              isActive: updatedQueue.isActive,
+              createdAt: updatedQueue.createdAt,
+            },
+            currentDriver: {
+              driverId: driver.driverId._id,
+              position: currentPosition,
+              status: driver.status,
+              joinedAt: driver.joinedAt,
+              currentOfferId: driver.currentOfferId,
+              timeInQueue: Date.now() - new Date(driver.joinedAt).getTime(),
+              userInfo: driver.driverId.userId
+                ? {
+                    userId: driver.driverId.userId._id,
+                    name: driver.driverId.userId.name,
+                    email: driver.driverId.userId.email,
+                    phoneNumber: driver.driverId.userId.phoneNumber,
+                    profileImg: driver.driverId.userId.profileImg,
+                  }
+                : null,
+            },
+            allDrivers: waitingDrivers.map((queueDriver, index) => {
+              const isCurrentDriver =
+                queueDriver.driverId._id.toString() ===
+                driver.driverId._id.toString();
+              return {
+                position: index + 1,
+                driverId: queueDriver.driverId._id,
+                status: queueDriver.status,
+                joinedAt: queueDriver.joinedAt,
+                currentOfferId: queueDriver.currentOfferId,
+                timeInQueue:
+                  Date.now() - new Date(queueDriver.joinedAt).getTime(),
+                isCurrentDriver: isCurrentDriver,
+                userInfo: queueDriver.driverId.userId
+                  ? {
+                      userId: queueDriver.driverId.userId._id,
+                      name: queueDriver.driverId.userId.name,
+                      email: queueDriver.driverId.userId.email,
+                      phoneNumber: queueDriver.driverId.userId.phoneNumber,
+                      profileImg: queueDriver.driverId.userId.profileImg,
+                    }
+                  : null,
+              };
+            }),
+            queueBreakdown: {
+              waiting: updatedQueue.driverQueue.filter(
+                (d) => d.status === 'waiting',
+              ).length,
+              offered: updatedQueue.driverQueue.filter(
+                (d) => d.status === 'offered',
+              ).length,
+              responding: updatedQueue.driverQueue.filter(
+                (d) => d.status === 'responding',
+              ).length,
+              total: updatedQueue.driverQueue.length,
+            },
+            relativePosition: {
+              // ← Add this missing section
+              driversAhead: driversAhead.length,
+              driversBehind: driversBehind.length,
+              estimatedWaitTime: calculateEstimatedWaitTime(driversAhead),
+              driversAheadList: driversAhead.map((aheadDriver, index) => ({
+                position: index + 1,
+                driverId: aheadDriver.driverId._id,
+                joinedAt: aheadDriver.joinedAt,
+                timeInQueue:
+                  Date.now() - new Date(aheadDriver.joinedAt).getTime(),
+                userInfo: aheadDriver.driverId.userId
+                  ? {
+                      name: aheadDriver.driverId.userId.name,
+                      profileImg: aheadDriver.driverId.userId.profileImg,
+                    }
+                  : null,
+              })),
+            },
+          },
+        };
+
+        // Emit to each remaining driver
+        emitToUser(driver.driverId.userId._id, 'ride:parking_queue', queueData);
+      }
+    }
+
+    // Optional: Update positions for remaining drivers
+    await updateQueuePositions(updatedQueue.parkingLotId, useSession);
 
     if (!session) await useSession.commitTransaction();
 
     return {
-      message: `Driver ${driverId} removed from ${result.modifiedCount} parking queue(s)`,
-      modifiedCount: result.modifiedCount,
-      matchedCount: result.matchedCount,
-      affectedQueues: queuesWithDriver.map((q) => q.parkingLotId),
+      message: `Driver ${driverId} removed from parking queue`,
+      removedDriverId: driverId,
+      remainingDrivers: updatedQueue.driverQueue.length,
+      notifiedDrivers: waitingDrivers.length,
+      queueId: parkingQueueId,
     };
   } catch (err) {
     if (!session) await useSession.abortTransaction();
-    throw new Error(`Failed to remove driver from queues: ${err.message}`);
+    throw new Error(`Failed to remove driver from queue: ${err.message}`);
   } finally {
     if (!session) useSession.endSession();
   }
@@ -1316,3 +1506,147 @@ const updateQueuePositions = async (parkingLotId, session = null) => {
 //     { session },
 //   );
 // };
+
+export const findParkingQueue = async (driverId, queueId) => {
+  try {
+    // Populate with multiple levels
+    const parkingQueue = await ParkingQueue.findById(queueId)
+      .populate({
+        path: 'driverQueue.driverId',
+        populate: {
+          path: 'userId',
+          model: 'User',
+          select: 'name email phoneNumber profileImg', // Select specific fields from User
+        },
+      })
+      .populate('parkingLotId', 'name boundaries') // Populate parking lot info
+      .populate('airportId', 'name') // Populate airport info
+      .sort({ 'driverQueue.joinedAt': 1 });
+
+    if (!parkingQueue) {
+      throw new Error('Parking Queue not found');
+    }
+
+    const queue = parkingQueue.driverQueue;
+
+    // Find the specific driver in queue
+    const currentDriverInQueue = queue.find(
+      (d) => d.driverId && d.driverId._id.toString() === driverId.toString(),
+    );
+    if (!currentDriverInQueue) {
+      throw new Error('Driver not found in this parking queue');
+    }
+
+    // Get all waiting drivers sorted by join time
+    const waitingDrivers = queue
+      .filter((driver) => driver.status === 'waiting')
+      .sort((a, b) => a.joinedAt - b.joinedAt);
+
+    // Calculate position (only among waiting drivers)
+    const positionInWaiting = waitingDrivers.findIndex(
+      (d) => d.driverId._id.toString() === driverId.toString(),
+    );
+
+    const currentPosition =
+      positionInWaiting >= 0 ? positionInWaiting + 1 : null;
+
+    // Get drivers ahead in queue
+    const driversAhead = waitingDrivers.slice(0, positionInWaiting);
+    const driversBehind = waitingDrivers.slice(positionInWaiting + 1);
+
+    // Format all drivers in queue with their positions
+    const allDriversInQueue = waitingDrivers.map((driver, index) => {
+      const isCurrentDriver =
+        driver.driverId._id.toString() === driverId.toString();
+      return {
+        position: index + 1,
+        driverId: driver.driverId._id,
+        status: driver.status,
+        joinedAt: driver.joinedAt,
+        currentOfferId: driver.currentOfferId,
+        timeInQueue: Date.now() - new Date(driver.joinedAt).getTime(),
+        isCurrentDriver: isCurrentDriver,
+        userInfo: driver.driverId.userId
+          ? {
+              userId: driver.driverId.userId._id,
+              name: driver.driverId.userId.name,
+              email: driver.driverId.userId.email,
+              phoneNumber: driver.driverId.userId.phoneNumber,
+              profileImg: driver.driverId.userId.profileImg,
+            }
+          : null,
+      };
+    });
+
+    return {
+      success: true,
+      objectType: 'parking-queue',
+      data: {
+        queueInfo: {
+          queueId: parkingQueue._id,
+          parkingLot: parkingQueue.parkingLotId,
+          airport: parkingQueue.airportId,
+          totalDrivers: queue.length,
+          totalWaitingDrivers: waitingDrivers.length,
+          maxQueueSize: parkingQueue.maxQueueSize,
+          isActive: parkingQueue.isActive,
+          createdAt: parkingQueue.createdAt,
+        },
+        currentDriver: {
+          driverId: currentDriverInQueue.driverId._id,
+          position: currentPosition,
+          status: currentDriverInQueue.status,
+          joinedAt: currentDriverInQueue.joinedAt,
+          currentOfferId: currentDriverInQueue.currentOfferId,
+          timeInQueue:
+            Date.now() - new Date(currentDriverInQueue.joinedAt).getTime(),
+          userInfo: currentDriverInQueue.driverId.userId
+            ? {
+                userId: currentDriverInQueue.driverId.userId._id,
+                name: currentDriverInQueue.driverId.userId.name,
+                email: currentDriverInQueue.driverId.userId.email,
+                phoneNumber: currentDriverInQueue.driverId.userId.phoneNumber,
+                profileImg: currentDriverInQueue.driverId.userId.profileImg,
+              }
+            : null,
+        },
+        allDrivers: allDriversInQueue,
+        queueBreakdown: {
+          waiting: queue.filter((d) => d.status === 'waiting').length,
+          offered: queue.filter((d) => d.status === 'offered').length,
+          responding: queue.filter((d) => d.status === 'responding').length,
+          total: queue.length,
+        },
+        relativePosition: {
+          driversAhead: driversAhead.length,
+          driversBehind: driversBehind.length,
+          estimatedWaitTime: calculateEstimatedWaitTime(driversAhead),
+          driversAheadList: driversAhead.map((driver, index) => ({
+            position: index + 1,
+            driverId: driver.driverId._id,
+            joinedAt: driver.joinedAt,
+            timeInQueue: Date.now() - new Date(driver.joinedAt).getTime(),
+            userInfo: driver.driverId.userId
+              ? {
+                  name: driver.driverId.userId.name,
+                  profileImg: driver.driverId.userId.profileImg,
+                }
+              : null,
+          })),
+        },
+      },
+      message: 'Parking queue retrieved successfully', // ← Add message
+    };
+  } catch (error) {
+    console.error('Error finding parking queue:', error);
+    throw error;
+  }
+};
+
+const calculateEstimatedWaitTime = (driversAhead) => {
+  if (driversAhead.length === 0) return 0;
+
+  // Simple estimation: average 30 seconds per driver ahead
+  const averageTimePerDriver = 10 * 1000; // 30 seconds in milliseconds
+  return driversAhead.length * averageTimePerDriver;
+};

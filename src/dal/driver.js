@@ -2578,6 +2578,38 @@ export const handleDriverRideResponse = async (
   }
 };
 
+// const acceptRideOffer = async (driverId, rideId, parkingQueueId, session) => {
+//   // Remove driver from queue entirely (since they got a ride)
+//   const parkingQueue = await ParkingQueue.findOne({
+//     _id: parkingQueueId,
+//     'driverQueue.driverId': driverId,
+//     'driverQueue.status': 'offered',
+//     'driverQueue.currentOfferId': rideId,
+//   }).session(session);
+
+//   if (!parkingQueue) {
+//     throw new Error('Ride offer not found or already responded');
+//   }
+
+//   const success = await ParkingQueue.findByIdAndUpdate(
+//     parkingQueueId,
+//     {
+//       $pull: {
+//         driverQueue: { driverId: driverId },
+//         activeOffers: { rideId: rideId },
+//       },
+//     },
+//     { new: true, session },
+//   );
+//   if (!success) {
+//     throw new Error('Failed to update parking queue');
+//   }
+
+//   console.log(
+//     `✅ Driver ${driverId} accepted ride ${rideId} and removed from queue`,
+//   );
+// };
+
 const acceptRideOffer = async (driverId, rideId, parkingQueueId, session) => {
   // Remove driver from queue entirely (since they got a ride)
   const parkingQueue = await ParkingQueue.findOne({
@@ -2585,13 +2617,24 @@ const acceptRideOffer = async (driverId, rideId, parkingQueueId, session) => {
     'driverQueue.driverId': driverId,
     'driverQueue.status': 'offered',
     'driverQueue.currentOfferId': rideId,
-  }).session(session);
+  })
+    .populate({
+      path: 'driverQueue.driverId',
+      populate: {
+        path: 'userId',
+        model: 'User',
+        select: 'name email phoneNumber profileImg',
+      },
+    })
+    .populate('parkingLotId', 'name boundaries')
+    .populate('airportId', 'name')
+    .session(session);
 
   if (!parkingQueue) {
     throw new Error('Ride offer not found or already responded');
   }
 
-  const success = await ParkingQueue.findByIdAndUpdate(
+  const updatedQueue = await ParkingQueue.findByIdAndUpdate(
     parkingQueueId,
     {
       $pull: {
@@ -2600,19 +2643,200 @@ const acceptRideOffer = async (driverId, rideId, parkingQueueId, session) => {
       },
     },
     { new: true, session },
-  );
-  if (!success) {
+  )
+    .populate({
+      path: 'driverQueue.driverId',
+      populate: {
+        path: 'userId',
+        model: 'User',
+        select: 'name email phoneNumber profileImg',
+      },
+    })
+    .populate('parkingLotId', 'name boundaries')
+    .populate('airportId', 'name');
+
+  if (!updatedQueue) {
     throw new Error('Failed to update parking queue');
+  }
+
+  console.log('Updated Queue: ', updatedQueue);
+
+  // Emit updated queue data to all remaining drivers (same as removeDriverFromQueue)
+  const waitingDrivers = updatedQueue.driverQueue
+    .filter((driver) => driver.status === 'waiting')
+    .sort((a, b) => a.joinedAt - b.joinedAt);
+
+  // Send updated queue data to each remaining driver
+  for (const driver of waitingDrivers) {
+    if (driver.driverId && driver.driverId.userId) {
+      const positionInWaiting = waitingDrivers.findIndex(
+        (d) => d.driverId._id.toString() === driver.driverId._id.toString(),
+      );
+
+      const currentPosition =
+        positionInWaiting >= 0 ? positionInWaiting + 1 : null;
+
+      // Get drivers relative to current driver
+      const driversAhead = waitingDrivers.slice(0, positionInWaiting);
+      const driversBehind = waitingDrivers.slice(positionInWaiting + 1);
+
+      const queueData = {
+        success: true,
+        data: {
+          queueInfo: {
+            queueId: updatedQueue._id,
+            parkingLot: updatedQueue.parkingLotId,
+            airport: updatedQueue.airportId,
+            totalDrivers: updatedQueue.driverQueue.length,
+            totalWaitingDrivers: waitingDrivers.length,
+            maxQueueSize: updatedQueue.maxQueueSize,
+            isActive: updatedQueue.isActive,
+            createdAt: updatedQueue.createdAt,
+          },
+          currentDriver: {
+            driverId: driver.driverId._id,
+            position: currentPosition,
+            status: driver.status,
+            joinedAt: driver.joinedAt,
+            currentOfferId: driver.currentOfferId,
+            timeInQueue: Date.now() - new Date(driver.joinedAt).getTime(),
+            userInfo: driver.driverId.userId
+              ? {
+                  userId: driver.driverId.userId._id,
+                  name: driver.driverId.userId.name,
+                  email: driver.driverId.userId.email,
+                  phoneNumber: driver.driverId.userId.phoneNumber,
+                  profileImg: driver.driverId.userId.profileImg,
+                }
+              : null,
+          },
+          allDrivers: waitingDrivers.map((queueDriver, index) => {
+            const isCurrentDriver =
+              queueDriver.driverId._id.toString() ===
+              driver.driverId._id.toString();
+            return {
+              position: index + 1,
+              driverId: queueDriver.driverId._id,
+              status: queueDriver.status,
+              joinedAt: queueDriver.joinedAt,
+              currentOfferId: queueDriver.currentOfferId,
+              timeInQueue:
+                Date.now() - new Date(queueDriver.joinedAt).getTime(),
+              isCurrentDriver: isCurrentDriver,
+              userInfo: queueDriver.driverId.userId
+                ? {
+                    userId: queueDriver.driverId.userId._id,
+                    name: queueDriver.driverId.userId.name,
+                    email: queueDriver.driverId.userId.email,
+                    phoneNumber: queueDriver.driverId.userId.phoneNumber,
+                    profileImg: queueDriver.driverId.userId.profileImg,
+                  }
+                : null,
+            };
+          }),
+          queueBreakdown: {
+            waiting: updatedQueue.driverQueue.filter(
+              (d) => d.status === 'waiting',
+            ).length,
+            offered: updatedQueue.driverQueue.filter(
+              (d) => d.status === 'offered',
+            ).length,
+            responding: updatedQueue.driverQueue.filter(
+              (d) => d.status === 'responding',
+            ).length,
+            total: updatedQueue.driverQueue.length,
+          },
+          relativePosition: {
+            driversAhead: driversAhead.length,
+            driversBehind: driversBehind.length,
+            estimatedWaitTime: calculateEstimatedWaitTime(driversAhead),
+            driversAheadList: driversAhead.map((aheadDriver, index) => ({
+              position: index + 1,
+              driverId: aheadDriver.driverId._id,
+              joinedAt: aheadDriver.joinedAt,
+              timeInQueue:
+                Date.now() - new Date(aheadDriver.joinedAt).getTime(),
+              userInfo: aheadDriver.driverId.userId
+                ? {
+                    name: aheadDriver.driverId.userId.name,
+                    profileImg: aheadDriver.driverId.userId.profileImg,
+                  }
+                : null,
+            })),
+          },
+        },
+      };
+
+      // Emit to each remaining driver
+      emitToUser(driver.driverId.userId._id, 'ride:parking_queue', queueData);
+    }
   }
 
   console.log(
     `✅ Driver ${driverId} accepted ride ${rideId} and removed from queue`,
   );
+
+  return {
+    success: true,
+    message: `Driver ${driverId} accepted ride ${rideId} and removed from queue`,
+    data: {
+      driverId: driverId,
+      rideId: rideId,
+      parkingQueueId: parkingQueueId,
+      action: 'ride_accepted',
+      notifiedDrivers: waitingDrivers.length,
+    },
+  };
 };
+
+// const declineRideOffer = async (driverId, rideId, parkingQueueId, session) => {
+//   // MOVE DRIVER TO END OF QUEUE
+//   const success = await ParkingQueue.findByIdAndUpdate(
+//     parkingQueueId,
+//     [
+//       {
+//         $set: {
+//           driverQueue: {
+//             $concatArrays: [
+//               // Keep all drivers except this one
+//               {
+//                 $filter: {
+//                   input: '$driverQueue',
+//                   as: 'driver',
+//                   cond: { $ne: ['$$driver.driverId', driverId] },
+//                 },
+//               },
+//               // Add this driver back at the end
+//               [
+//                 {
+//                   driverId: driverId,
+//                   joinedAt: new Date(), // New joinedAt to put at end
+//                   status: 'waiting',
+//                   currentOfferId: null,
+//                 },
+//               ],
+//             ],
+//           },
+//         },
+//       },
+//     ],
+//     { new: true, session },
+//   );
+//   if (!success) {
+//     throw new Error('Failed to reject ride request');
+//   }
+
+//   console.log(
+//     `Driver ${driverId} declined ride ${rideId}, moved to end of queue`,
+//   );
+
+//   // Offer to the NEW first driver in queue
+//   await offerRideToNextDriver(parkingQueueId, rideId, session);
+// };
 
 const declineRideOffer = async (driverId, rideId, parkingQueueId, session) => {
   // MOVE DRIVER TO END OF QUEUE
-  const success = await ParkingQueue.findByIdAndUpdate(
+  const updatedQueue = await ParkingQueue.findByIdAndUpdate(
     parkingQueueId,
     [
       {
@@ -2642,9 +2866,131 @@ const declineRideOffer = async (driverId, rideId, parkingQueueId, session) => {
       },
     ],
     { new: true, session },
-  );
-  if (!success) {
+  )
+    .populate({
+      path: 'driverQueue.driverId',
+      populate: {
+        path: 'userId',
+        model: 'User',
+        select: 'name email phoneNumber profileImg',
+      },
+    })
+    .populate('parkingLotId', 'name boundaries')
+    .populate('airportId', 'name');
+
+  if (!updatedQueue) {
     throw new Error('Failed to reject ride request');
+  }
+
+  // Emit updated queue data to all waiting drivers (same as other functions)
+  const waitingDrivers = updatedQueue.driverQueue
+    .filter((driver) => driver.status === 'waiting')
+    .sort((a, b) => a.joinedAt - b.joinedAt);
+
+  // Send updated queue data to each waiting driver
+  for (const driver of waitingDrivers) {
+    if (driver.driverId && driver.driverId.userId) {
+      const positionInWaiting = waitingDrivers.findIndex(
+        (d) => d.driverId._id.toString() === driver.driverId._id.toString(),
+      );
+
+      const currentPosition =
+        positionInWaiting >= 0 ? positionInWaiting + 1 : null;
+
+      // Get drivers relative to current driver
+      const driversAhead = waitingDrivers.slice(0, positionInWaiting);
+      const driversBehind = waitingDrivers.slice(positionInWaiting + 1);
+
+      const queueData = {
+        success: true,
+        data: {
+          queueInfo: {
+            queueId: updatedQueue._id,
+            parkingLot: updatedQueue.parkingLotId,
+            airport: updatedQueue.airportId,
+            totalDrivers: updatedQueue.driverQueue.length,
+            totalWaitingDrivers: waitingDrivers.length,
+            maxQueueSize: updatedQueue.maxQueueSize,
+            isActive: updatedQueue.isActive,
+            createdAt: updatedQueue.createdAt,
+          },
+          currentDriver: {
+            driverId: driver.driverId._id,
+            position: currentPosition,
+            status: driver.status,
+            joinedAt: driver.joinedAt,
+            currentOfferId: driver.currentOfferId,
+            timeInQueue: Date.now() - new Date(driver.joinedAt).getTime(),
+            userInfo: driver.driverId.userId
+              ? {
+                  userId: driver.driverId.userId._id,
+                  name: driver.driverId.userId.name,
+                  email: driver.driverId.userId.email,
+                  phoneNumber: driver.driverId.userId.phoneNumber,
+                  profileImg: driver.driverId.userId.profileImg,
+                }
+              : null,
+          },
+          allDrivers: waitingDrivers.map((queueDriver, index) => {
+            const isCurrentDriver =
+              queueDriver.driverId._id.toString() ===
+              driver.driverId._id.toString();
+            return {
+              position: index + 1,
+              driverId: queueDriver.driverId._id,
+              status: queueDriver.status,
+              joinedAt: queueDriver.joinedAt,
+              currentOfferId: queueDriver.currentOfferId,
+              timeInQueue:
+                Date.now() - new Date(queueDriver.joinedAt).getTime(),
+              isCurrentDriver: isCurrentDriver,
+              userInfo: queueDriver.driverId.userId
+                ? {
+                    userId: queueDriver.driverId.userId._id,
+                    name: queueDriver.driverId.userId.name,
+                    email: queueDriver.driverId.userId.email,
+                    phoneNumber: queueDriver.driverId.userId.phoneNumber,
+                    profileImg: queueDriver.driverId.userId.profileImg,
+                  }
+                : null,
+            };
+          }),
+          queueBreakdown: {
+            waiting: updatedQueue.driverQueue.filter(
+              (d) => d.status === 'waiting',
+            ).length,
+            offered: updatedQueue.driverQueue.filter(
+              (d) => d.status === 'offered',
+            ).length,
+            responding: updatedQueue.driverQueue.filter(
+              (d) => d.status === 'responding',
+            ).length,
+            total: updatedQueue.driverQueue.length,
+          },
+          relativePosition: {
+            driversAhead: driversAhead.length,
+            driversBehind: driversBehind.length,
+            estimatedWaitTime: calculateEstimatedWaitTime(driversAhead),
+            driversAheadList: driversAhead.map((aheadDriver, index) => ({
+              position: index + 1,
+              driverId: aheadDriver.driverId._id,
+              joinedAt: aheadDriver.joinedAt,
+              timeInQueue:
+                Date.now() - new Date(aheadDriver.joinedAt).getTime(),
+              userInfo: aheadDriver.driverId.userId
+                ? {
+                    name: aheadDriver.driverId.userId.name,
+                    profileImg: aheadDriver.driverId.userId.profileImg,
+                  }
+                : null,
+            })),
+          },
+        },
+      };
+
+      // Emit to each waiting driver
+      emitToUser(driver.driverId.userId._id, 'ride:parking_queue', queueData);
+    }
   }
 
   console.log(
@@ -2653,6 +2999,18 @@ const declineRideOffer = async (driverId, rideId, parkingQueueId, session) => {
 
   // Offer to the NEW first driver in queue
   await offerRideToNextDriver(parkingQueueId, rideId, session);
+
+  return {
+    success: true,
+    message: `Driver ${driverId} declined ride ${rideId} and moved to end of queue`,
+    data: {
+      driverId: driverId,
+      rideId: rideId,
+      parkingQueueId: parkingQueueId,
+      action: 'ride_declined',
+      notifiedDrivers: waitingDrivers.length,
+    },
+  };
 };
 
 export const startProgressiveDriverSearch = async (ride) => {

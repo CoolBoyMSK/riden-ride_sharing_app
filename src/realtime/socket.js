@@ -47,6 +47,7 @@ import {
   haversineDistance,
   findDriverParkingQueue,
   getDriverLocation,
+  findParkingQueue,
 } from '../dal/ride.js';
 import {
   findDriverByUserId,
@@ -87,7 +88,7 @@ export const initSocket = (server) => {
   if (ioInstance) return ioInstance;
 
   const io = new Server(server, {
-    pingTimeout: 60000, 
+    pingTimeout: 60000,
     pingInterval: 25000,
     cors: {
       origin: env.FRONTEND_URL || '*',
@@ -624,6 +625,115 @@ export const initSocket = (server) => {
       }
     });
 
+    socket.on('ride:parking_queue', async () => {
+      const objectType = 'parking-queue';
+      try {
+        const driver = await findDriverByUserId(userId);
+        if (!driver) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'NOT_FOUND',
+            message: 'Driver not found',
+          });
+        } else if (!driver.isActive) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver is not active',
+          });
+        } else if (driver.isRestricted) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver in restricted area',
+          });
+        } else if (driver.isBlocked) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver is blocked',
+          });
+        } else if (driver.isSuspended) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver is suspended',
+          });
+        } else if (driver.backgroundCheckStatus !== 'approved') {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver background not verified',
+          });
+        } else if (driver.status !== 'online') {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver is not online',
+          });
+        }
+
+        const driverLocation = await getDriverLocation(driver._id);
+        if (!driverLocation) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'NOT_FOUND',
+            message: 'Driver location not found',
+          });
+        } else if (!driverLocation.isAvailable) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver not available',
+          });
+        } else if (!driverLocation.parkingQueueId) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver not in parking lot',
+          });
+        }
+
+        const queue = await findParkingQueue(
+          driver._id,
+          driverLocation.parkingQueueId,
+        );
+        if (!queue.success) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'NOT_FOUND',
+            message: 'Parking queue data not found',
+          });
+        }
+
+        socket.emit('ride:parking_queue', {
+          success: true,
+          objectType,
+          data: queue.data,
+          message: 'Parking queue fetched successfully',
+        });
+      } catch (error) {
+        console.error(`SOCKET ERROR: ${error}`);
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: error.code || 'SOCKET_ERROR',
+          message: `SOCKET ERROR: ${error.message}`,
+        });
+      }
+    });
+
     socket.on('ride:response', async ({ rideId, driverResponse }) => {
       const objectType = 'airport-parking-offer-response';
       try {
@@ -991,11 +1101,6 @@ export const initSocket = (server) => {
           findUserById(updatedRide.passengerId?.userId),
         ]);
 
-        console.log("DriverId", updatedRide.driverId?.userId)
-        console.log("Driver", newDriver)
-        console.log("PassengerId", updatedRide.passengerId?.userId)
-        console.log("Passenger", newPassenger)
-
         const notifyDriver = await notifyUser({
           userId: newDriver.userId?._id,
           title: 'Ride Request Confirmed',
@@ -1017,6 +1122,13 @@ export const initSocket = (server) => {
         if (!notifyDriver || !notifyPassenger) {
           console.log('Failed to send notification');
         }
+
+        emitToUser(newDriver.userId?._id, 'driver:status_updated', {
+          success: true,
+          objectType: 'status-updated',
+          data: { status: newDriver.status },
+          message: 'Status updated successfully.',
+        });
 
         socket.join(`ride:${updatedRide._id}`);
         io.to(`ride:${ride._id}`).emit('ride:accept_ride', {
@@ -1261,6 +1373,13 @@ export const initSocket = (server) => {
         if (!notifyDriver || !notifyPassenger) {
           console.log('Failed to send notification');
         }
+
+        emitToUser(newDriver.userId?._id, 'driver:status_updated', {
+          success: true,
+          objectType: 'status-updated',
+          data: { status: newDriver.status },
+          message: 'Status updated successfully.',
+        });
 
         const rooms = Array.from(socket.rooms);
         if (rooms.includes(`ride:${ride._id}`)) {
@@ -1801,6 +1920,13 @@ export const initSocket = (server) => {
             console.log('Failed to send notification');
           }
 
+          emitToUser(newDriver.userId?._id, 'driver:status_updated', {
+            success: true,
+            objectType: 'status-updated',
+            data: { status: newDriver.status },
+            message: 'Status updated successfully.',
+          });
+
           socket.join(`ride:${updatedRide._id}`);
           io.to(`ride:${updatedRide._id}`).emit('ride:driver_complete_ride', {
             success: true,
@@ -2096,86 +2222,141 @@ export const initSocket = (server) => {
             isAvailable = false;
           }
 
-          const isRestricted = await isRideInRestrictedArea(
-            location.coordinates,
-          ); // returns boolean
-          const isParkingLot = await isDriverInParkingLot(location.coordinates);
-
-          if (isRestricted && !isParkingLot) {
-            await updateDriverByUserId(userId, { isRestricted });
-            const parkingLot = await findNearestParkingForPickup(
+          if (driver.status === 'online') {
+            const isRestricted = await isRideInRestrictedArea(
               location.coordinates,
-            );
+            ); // returns boolean
+            const isParkingLot = await isDriverInParkingLot(location.coordinates);
 
-            await saveDriverLocation(driver._id, {
-              lng: location.coordinates[0],
-              lat: location.coordinates[1],
-              parkingQueueId: null,
-              isAvailable,
-              speed,
-              heading,
-            });
+            if (isRestricted && !isParkingLot) {
+              await updateDriverByUserId(userId, { isRestricted });
+              const parkingLot = await findNearestParkingForPickup(
+                location.coordinates,
+              );
 
-            const driverLocation = await persistDriverLocationToDB(
-              driver._id.toString(),
-            ).catch((err) =>
-              console.error(
-                `Failed to persist driver location for driver ${driver._id}:`,
-                err,
-              ),
-            );
-
-            if (driverLocation) {
-              socket.emit('ride:driver_update_location', {
-                success: true,
-                objectType,
-                data: parkingLot,
-                code: 'RESTRICTED_AREA',
-                message:
-                  'You are inside the restricted area, and you are not allowed to pick ride in this area, reach to nearby parking lot to pick rides',
+              await saveDriverLocation(driver._id, {
+                lng: location.coordinates[0],
+                lat: location.coordinates[1],
+                parkingQueueId: null,
+                isAvailable,
+                speed,
+                heading,
               });
-            }
-          } else if (isParkingLot) {
-            let queue;
-            const parkingQueue = await findDriverParkingQueue(isParkingLot._id);
-            if (parkingQueue) {
-              queue = await addDriverToQueue(isParkingLot._id, driver._id);
-            }
 
-            await updateDriverByUserId(userId, { isRestricted: false });
+              const driverLocation = await persistDriverLocationToDB(
+                driver._id.toString(),
+              ).catch((err) =>
+                console.error(
+                  `Failed to persist driver location for driver ${driver._id}:`,
+                  err,
+                ),
+              );
 
-            await saveDriverLocation(driver._id, {
-              lng: location.coordinates[0],
-              lat: location.coordinates[1],
-              parkingQueueId: parkingQueue ? parkingQueue._id : null,
-              isAvailable,
-              speed,
-              heading,
-            });
+              if (driverLocation) {
+                socket.emit('ride:driver_update_location', {
+                  success: true,
+                  objectType,
+                  data: parkingLot,
+                  code: 'RESTRICTED_AREA',
+                  message:
+                    'You are inside the restricted area, and you are not allowed to pick ride in this area, reach to nearby parking lot to pick rides',
+                });
+              }
+            } else if (isParkingLot) {
+              let queue;
+              const parkingQueue = await findDriverParkingQueue(
+                isParkingLot._id,
+              );
+              if (parkingQueue) {
+                queue = await addDriverToQueue(isParkingLot._id, driver._id);
+              }
 
-            const driverLocation = await persistDriverLocationToDB(
-              driver._id.toString(),
-            ).catch((err) =>
-              console.error(
-                `Failed to persist driver location for driver ${driver._id}:`,
-                err,
-              ),
-            );
+              await updateDriverByUserId(userId, { isRestricted: false });
 
-            if (driverLocation) {
+              await saveDriverLocation(driver._id, {
+                lng: location.coordinates[0],
+                lat: location.coordinates[1],
+                parkingQueueId: parkingQueue ? parkingQueue._id : null,
+                isAvailable,
+                speed,
+                heading,
+              });
+
+              const driverLocation = await persistDriverLocationToDB(
+                driver._id.toString(),
+              ).catch((err) =>
+                console.error(
+                  `Failed to persist driver location for driver ${driver._id}:`,
+                  err,
+                ),
+              );
+
+              if (driverLocation) {
+                socket.emit('ride:driver_update_location', {
+                  success: true,
+                  objectType,
+                  data: queue,
+                  code: 'PARKING_LOT',
+                  message:
+                    'You are within the premises of airport parking lot, You can pick rides now',
+                });
+              }
+            } else {
+              const currentLocation = await getDriverLocation(driver._id);
+              if (currentLocation.parkingQueueId) {
+                await removeDriverFromQueue(
+                  driver._id,
+                  currentLocation.parkingQueueId,
+                );
+                await updateDriverByUserId(userId, { isRestricted: false });
+              }
+
+              const driverLocation = await persistDriverLocationToDB(
+                driver._id.toString(),
+              ).catch((err) =>
+                console.error(
+                  `Failed to persist driver location for driver ${driver._id}:`,
+                  err,
+                ),
+              );
+
+              await saveDriverLocation(driver._id, {
+                lng: location.coordinates[0],
+                lat: location.coordinates[1],
+                parkingQueueId: null,
+                isAvailable,
+                speed,
+                heading,
+              });
+
+              if (driverLocation.currentRideId) {
+                io.to(`ride:${driverLocation.currentRideId}`).emit(
+                  'ride:driver_update_location',
+                  {
+                    success: true,
+                    objectType,
+                    data: driverLocation.location,
+                    message: 'Location updated successfully',
+                  },
+                );
+              }
+
               socket.emit('ride:driver_update_location', {
                 success: true,
                 objectType,
-                data: queue,
-                code: 'PARKING_LOT',
-                message:
-                  'You are within the premises of airport parking lot, You can pick rides now',
+                data: driverLocation.location,
+                message: 'Location updated successfully',
               });
             }
           } else {
-            await removeDriverFromQueue(driver._id);
-
-            await updateDriverByUserId(userId, { isRestricted: false });
+            const currentLocation = await getDriverLocation(driver._id);
+            if (currentLocation.parkingQueueId) {
+              await removeDriverFromQueue(
+                driver._id,
+                currentLocation.parkingQueueId,
+              );
+              await updateDriverByUserId(userId, { isRestricted: false });
+            }
 
             const driverLocation = await persistDriverLocationToDB(
               driver._id.toString(),
@@ -2751,6 +2932,13 @@ export const initSocket = (server) => {
           console.log('Failed to send notification');
         }
         // Notification Logic End
+
+        emitToUser(newDriver.userId?._id, 'driver:status_updated', {
+          success: true,
+          objectType: 'status-updated',
+          data: { status: newDriver.status },
+          message: 'Status updated successfully.',
+        });
 
         const rooms = Array.from(socket.rooms);
         if (rooms.includes(`ride:${ride._id}`)) {
