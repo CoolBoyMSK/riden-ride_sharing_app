@@ -8,6 +8,7 @@ import UpdateRequest from '../../models/updateRequest.js';
 import UserDevice from '../../models/UserDevice.js';
 import env from '../../config/envConfig.js';
 import CMS from '../../models/CMS.js';
+import Biometric from '../../models/Biometric.js';
 import { sendEmailUpdateVerificationOtp } from '../../templates/emails/user/index.js';
 import mongoose from 'mongoose';
 import {
@@ -275,4 +276,56 @@ export const findDeviceInfo = async (userId) => {
     userId,
     lastLoginAt: { $gte: thirtyDaysAgo }, // only last 30 days
   }).sort({ lastLoginAt: -1 }); // latest first
+};
+
+export const createBiometric = async (data) => {
+  const biometric = await Biometric.create({
+    userId: data.userId,
+    publicKey: data.publicKey,
+    deviceId: data.deviceId,
+  });
+
+  if (!biometric) {
+    throw new Error('Failed to add biometric');
+  }
+
+  return biometric;
+};
+
+export const enableBiometric = async (userId) => {
+  const session = await mongoose.startSession();
+  try {
+    session.startTransaction();
+
+    const biometric = await Biometric.findOneAndUpdate(
+      { userId },
+      [{ $set: { biometricEnabled: { $not: '$biometricEnabled' } } }],
+      { new: true, session },
+    );
+
+    const user = await UserModel.findByIdAndUpdate(
+      userId,
+      [{ $set: { isBiometric: { $not: '$isBiometric' } } }],
+      { new: true, session },
+    );
+
+    if (!user || !biometric) {
+      throw new Error('Failed to toggle biometric');
+    }
+
+    await session.commitTransaction();
+
+    return {
+      success: true,
+      biometricEnabled: biometric.biometricEnabled,
+      isBiometric: user.isBiometric,
+      message: `Biometric ${biometric.biometricEnabled ? 'enabled' : 'disabled'} successfully`,
+    };
+  } catch (error) {
+    await session.abortTransaction();
+    console.error('BIOMETRIC ERROR: ', error);
+    throw error;
+  } finally {
+    session.endSession();
+  }
 };

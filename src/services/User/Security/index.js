@@ -4,10 +4,12 @@ import {
   addRecoveryNumber,
   deleteRecoveryNumber,
   updateRecoveryPhoneNumber,
-  getPasskeyRegisterOptions,
-  verifyPasskeyRegistration,
-  update2FAStatus,
+  // getPasskeyRegisterOptions,
+  // verifyPasskeyRegistration,
+  // update2FAStatus,
   findDeviceInfo,
+  createBiometric,
+  enableBiometric,
 } from '../../../dal/user/index.js';
 
 export const createRecoveryNumber = async (user, { phoneNumber }, resp) => {
@@ -125,23 +127,16 @@ export const removeRecoveryNumber = async (user, { numberId }, resp) => {
   }
 };
 
-export const fetchPasskeyRegisterOptions = async (user, resp) => {
+export const addBiometric = async (user, data, resp) => {
   try {
-    const isUser = await findUserById(user.id);
-    if (!isUser) {
-      resp.error = true;
-      resp.error_message = 'Failed to fetch user';
-      return resp;
-    }
-
-    const success = await getPasskeyRegisterOptions(isUser.userId._id);
+    const success = await createBiometric({ userId: user._id, ...data });
     if (!success) {
       resp.error = true;
-      resp.error_message = 'Failed to register passkey';
+      resp.error_message = 'Failed to add biometric';
       return resp;
     }
 
-    resp.data = success;
+    resp.data = { success: true };
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);
@@ -151,23 +146,16 @@ export const fetchPasskeyRegisterOptions = async (user, resp) => {
   }
 };
 
-export const verifyAndSavePasskeyInDb = async (user, { payload }, resp) => {
+export const toggleBiometric = async (user, resp) => {
   try {
-    const isUser = await findUserById(user.id);
-    if (!isUser) {
+    const data = await enableBiometric(user._id);
+    if (!data.success) {
       resp.error = true;
-      resp.error_message = 'Failed to fetch user';
+      resp.error_message = 'Failed to toggle biometric';
       return resp;
     }
 
-    const success = await verifyPasskeyRegistration(isUser.userId._id, payload);
-    if (!success) {
-      resp.error = true;
-      resp.error_message = 'Failed to save passkeys';
-      return resp;
-    }
-
-    resp.data = { message: 'Passkey registered' };
+    resp.data = data;
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);
@@ -177,31 +165,83 @@ export const verifyAndSavePasskeyInDb = async (user, { payload }, resp) => {
   }
 };
 
-export const toggle2FAStatus = async (user, resp) => {
-  try {
-    const isUser = await findUserById(user.id);
-    if (!isUser) {
-      resp.error = true;
-      resp.error_message = 'Failed to fetch user';
-      return resp;
-    }
+// export const fetchPasskeyRegisterOptions = async (user, resp) => {
+//   try {
+//     const isUser = await findUserById(user.id);
+//     if (!isUser) {
+//       resp.error = true;
+//       resp.error_message = 'Failed to fetch user';
+//       return resp;
+//     }
 
-    const success = await update2FAStatus(isUser.userId._id);
-    if (!success) {
-      resp.error = true;
-      resp.error_message = 'Failed to save passkeys';
-      return resp;
-    }
+//     const success = await getPasskeyRegisterOptions(isUser.userId._id);
+//     if (!success) {
+//       resp.error = true;
+//       resp.error_message = 'Failed to register passkey';
+//       return resp;
+//     }
 
-    resp.data = success;
-    return resp;
-  } catch (error) {
-    console.error(`API ERROR: ${error}`);
-    resp.error = true;
-    resp.error_message = error.message || 'something went wrong';
-    return resp;
-  }
-};
+//     resp.data = success;
+//     return resp;
+//   } catch (error) {
+//     console.error(`API ERROR: ${error}`);
+//     resp.error = true;
+//     resp.error_message = error.message || 'something went wrong';
+//     return resp;
+//   }
+// };
+
+// export const verifyAndSavePasskeyInDb = async (user, { payload }, resp) => {
+//   try {
+//     const isUser = await findUserById(user.id);
+//     if (!isUser) {
+//       resp.error = true;
+//       resp.error_message = 'Failed to fetch user';
+//       return resp;
+//     }
+
+//     const success = await verifyPasskeyRegistration(isUser.userId._id, payload);
+//     if (!success) {
+//       resp.error = true;
+//       resp.error_message = 'Failed to save passkeys';
+//       return resp;
+//     }
+
+//     resp.data = { message: 'Passkey registered' };
+//     return resp;
+//   } catch (error) {
+//     console.error(`API ERROR: ${error}`);
+//     resp.error = true;
+//     resp.error_message = error.message || 'something went wrong';
+//     return resp;
+//   }
+// };
+
+// export const toggle2FAStatus = async (user, resp) => {
+//   try {
+//     const isUser = await findUserById(user.id);
+//     if (!isUser) {
+//       resp.error = true;
+//       resp.error_message = 'Failed to fetch user';
+//       return resp;
+//     }
+
+//     const success = await update2FAStatus(isUser.userId._id);
+//     if (!success) {
+//       resp.error = true;
+//       resp.error_message = 'Failed to save passkeys';
+//       return resp;
+//     }
+
+//     resp.data = success;
+//     return resp;
+//   } catch (error) {
+//     console.error(`API ERROR: ${error}`);
+//     resp.error = true;
+//     resp.error_message = error.message || 'something went wrong';
+//     return resp;
+//   }
+// };
 
 export const getUserDevices = async (user, resp) => {
   try {

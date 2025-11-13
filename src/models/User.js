@@ -104,6 +104,10 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    isBiometric: {
+      type: Boolean,
+      default: false,
+    },
     notifications: {
       type: notificationSchema,
       default: () => ({
