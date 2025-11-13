@@ -1261,10 +1261,17 @@ export const sendDriverEmailOtp = async (
         return resp;
       }
 
-      const result = await requestEmailOtp(email, user.name, {
-        phoneNumber: user.phoneNumber,
+      const result = await requestEmailOtp(
         email,
-      });
+        user.name,
+        {
+          phoneNumber: user.phoneNumber,
+          email,
+        },
+        'otp',
+        'driver',
+      );
+      console.log(result);
       if (!result.ok) {
         resp.error = true;
         resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
