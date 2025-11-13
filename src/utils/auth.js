@@ -163,7 +163,7 @@ const verifyPasskeyLogin = async (emailOrPhone, response) => {
   };
 };
 
-export const verifyBiometricLogin = async (userId, signature) => {
+const verifyBiometricLogin = async (userId, signature) => {
   // Get user's stored public key
   const user = await User.findById(userId);
   if (!user) {
