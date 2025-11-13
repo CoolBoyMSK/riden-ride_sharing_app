@@ -1623,15 +1623,15 @@ export const updateFCMToken = async (user, { userDeviceToken }, resp) => {
   }
 };
 
-export const biometricLogin = async ({ signature, userId }, resp) => {
+export const biometricLogin = async ({ signature, publicKey }, resp) => {
   try {
-    if (!signature || !userId) {
+    if (!signature || !publicKey) {
       resp.error = true;
-      resp.error_message = 'Signature and user Id are required';
+      resp.error_message = 'Signature and public key are required';
       return resp;
     }
 
-    const result = await verifyBiometricLogin(userId, signature);
+    const result = await verifyBiometricLogin(publicKey, signature);
     if (!result.success) {
       resp.error = true;
       resp.error_message = 'Failed to verify biometric';

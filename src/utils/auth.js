@@ -163,35 +163,28 @@ const verifyPasskeyLogin = async (emailOrPhone, response) => {
   };
 };
 
-const verifyBiometricLogin = async (userId, signature) => {
+const verifyBiometricLogin = async (publicKey, signature) => {
   // Get user's stored public key
-  const user = await User.findById(userId);
-  if (!user) {
-    throw new Error('User not found');
-  }
-
-  const biometric = await Biometric.findOne({ userId });
+  const biometric = await Biometric.findOne({ publicKey });
 
   if (!biometric || !biometric.biometricEnabled) {
     throw new Error('Biometric not registered or disabled');
   }
 
-  if (!biometric.publicKey) {
-    throw new Error('No public key found for user');
+  const user = await User.findById(biometric.userId);
+  if (!user) {
+    throw new Error('User not found');
   }
 
   // Verify signature with stored public key
-  const isValidSignature = await verifySignature(
-    signature,
-    biometric.publicKey,
-  );
+  const isValidSignature = await verifySignature(signature, publicKey);
   if (!isValidSignature) {
     throw new Error('Biometric verification failed');
   }
 
   // Update last used timestamp
   await Biometric.findOneAndUpdate(
-    { userId },
+    { userId: user._id },
     { lastBiometricUsed: new Date() },
     { new: true },
   );
