@@ -290,37 +290,6 @@ export const findPendingRides = async (
   return q;
 };
 
-export const upsertDriverLocation = async (
-  driverId,
-  locationData,
-  options = {},
-) => {
-  let query = DriverLocationModel.findOneAndUpdate(
-    { driverId },
-    {
-      ...locationData,
-      status: 'online',
-      isAvailable: true,
-      lastUpdated: new Date(),
-    },
-    {
-      new: true,
-      upsert: true,
-      ...options,
-    },
-  );
-
-  if (options.session) query = query.session(options.session);
-
-  return query;
-};
-
-export const findDriverLocation = async (driverId, { session = null } = {}) => {
-  let query = DriverLocationModel.findOne({ driverId });
-  if (session) query = query.session(session);
-  return await query.lean();
-};
-
 export const findAvailableDriversNearby = async (
   pickupLocation,
   carType,
@@ -440,16 +409,17 @@ const driverLocationKey = (driverId) => `driver:${driverId}:location`;
 
 export const saveDriverLocation = async (
   driverId,
-  { lng, lat, parkingQueueId, isAvailable = true, speed, heading },
+  { lng, lat, status, parkingQueueId, isAvailable, speed, heading },
 ) => {
   const key = driverLocationKey(driverId);
   const payload = JSON.stringify({
     coordinates: [lng, lat],
-    updatedAt: Date.now(),
+    status,
     parkingQueueId,
     isAvailable,
     speed,
     heading,
+    updatedAt: Date.now(),
   });
   await redis().set(key, payload);
   return true;
@@ -468,17 +438,47 @@ export const getDriverLocation = async (driverId) => {
 export const persistDriverLocationToDB = async (driverId, { session } = {}) => {
   const data = await getDriverLocation(driverId);
   if (!data) return null;
-  // data.coordinates is [lng, lat]
   return upsertDriverLocation(
     driverId,
     {
       location: { type: 'Point', coordinates: data.coordinates },
+      status: data.status,
       parkingQueueId: data.parkingQueueId,
+      isAvailable: data.isAvailable,
       speed: data.speed,
       heading: data.heading,
     },
     session,
   );
+};
+
+export const upsertDriverLocation = async (
+  driverId,
+  locationData,
+  options = {},
+) => {
+  let query = DriverLocationModel.findOneAndUpdate(
+    { driverId },
+    {
+      ...locationData,
+      lastUpdated: new Date(),
+    },
+    {
+      new: true,
+      upsert: true,
+      ...options,
+    },
+  );
+
+  if (options.session) query = query.session(options.session);
+
+  return query;
+};
+
+export const findDriverLocation = async (driverId, { session = null } = {}) => {
+  let query = DriverLocationModel.findOne({ driverId });
+  if (session) query = query.session(session);
+  return await query.lean();
 };
 
 export const findNearbyRideRequests = async (

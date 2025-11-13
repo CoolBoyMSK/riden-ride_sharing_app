@@ -2226,9 +2226,11 @@ export const initSocket = (server) => {
             const isRestricted = await isRideInRestrictedArea(
               location.coordinates,
             ); // returns boolean
-            const isParkingLot = await isDriverInParkingLot(location.coordinates);
+            const isParkingLot = await isDriverInParkingLot(
+              location.coordinates,
+            );
 
-            if (isRestricted && !isParkingLot) {
+            if (isRestricted) {
               await updateDriverByUserId(userId, { isRestricted });
               const parkingLot = await findNearestParkingForPickup(
                 location.coordinates,
@@ -2237,6 +2239,7 @@ export const initSocket = (server) => {
               await saveDriverLocation(driver._id, {
                 lng: location.coordinates[0],
                 lat: location.coordinates[1],
+                status: driver.status,
                 parkingQueueId: null,
                 isAvailable,
                 speed,
@@ -2276,6 +2279,7 @@ export const initSocket = (server) => {
               await saveDriverLocation(driver._id, {
                 lng: location.coordinates[0],
                 lat: location.coordinates[1],
+                status: driver.status,
                 parkingQueueId: parkingQueue ? parkingQueue._id : null,
                 isAvailable,
                 speed,
@@ -2311,6 +2315,16 @@ export const initSocket = (server) => {
                 await updateDriverByUserId(userId, { isRestricted: false });
               }
 
+              await saveDriverLocation(driver._id, {
+                lng: location.coordinates[0],
+                lat: location.coordinates[1],
+                status: driver.status,
+                parkingQueueId: null,
+                isAvailable,
+                speed,
+                heading,
+              });
+
               const driverLocation = await persistDriverLocationToDB(
                 driver._id.toString(),
               ).catch((err) =>
@@ -2319,15 +2333,6 @@ export const initSocket = (server) => {
                   err,
                 ),
               );
-
-              await saveDriverLocation(driver._id, {
-                lng: location.coordinates[0],
-                lat: location.coordinates[1],
-                parkingQueueId: null,
-                isAvailable,
-                speed,
-                heading,
-              });
 
               if (driverLocation.currentRideId) {
                 io.to(`ride:${driverLocation.currentRideId}`).emit(
@@ -2358,6 +2363,16 @@ export const initSocket = (server) => {
               await updateDriverByUserId(userId, { isRestricted: false });
             }
 
+            await saveDriverLocation(driver._id, {
+              lng: location.coordinates[0],
+              lat: location.coordinates[1],
+              status: driver.status,
+              parkingQueueId: null,
+              isAvailable,
+              speed,
+              heading,
+            });
+
             const driverLocation = await persistDriverLocationToDB(
               driver._id.toString(),
             ).catch((err) =>
@@ -2366,15 +2381,6 @@ export const initSocket = (server) => {
                 err,
               ),
             );
-
-            await saveDriverLocation(driver._id, {
-              lng: location.coordinates[0],
-              lat: location.coordinates[1],
-              parkingQueueId: null,
-              isAvailable,
-              speed,
-              heading,
-            });
 
             if (driverLocation.currentRideId) {
               io.to(`ride:${driverLocation.currentRideId}`).emit(

@@ -87,9 +87,8 @@ const createCronJob = async (schedule, taskFunction, jobName = 'My Job') => {
   return task;
 };
 
-// 3. Job that runs at 2 AM daily
 const frequentCancellationJob = await createCronJob(
-  '10 2 * * *',
+  '0 2 * * *',
   async () => {
     try {
       // Find drivers who cancelled more than once today
@@ -238,7 +237,7 @@ const frequentCancellationJob = await createCronJob(
 );
 
 const suspensionCheckingJob = await createCronJob(
-  '20 2 * * *', // runs daily at 2 AM
+  '10 2 * * *',
   async () => {
     try {
       const now = new Date();
@@ -296,7 +295,7 @@ const suspensionCheckingJob = await createCronJob(
 );
 
 const checkIncompleteProfileJob = await createCronJob(
-  '30 2 * * *', // Runs every 2 days at 2 AM
+  '20 2 * * *',
   async () => {
     try {
       // Calculate date 2 days ago
@@ -446,7 +445,7 @@ const checkIncompleteProfileJob = await createCronJob(
 );
 
 const promoCodeExpiryJob = await createCronJob(
-  '40 2 * * *', // runs daily at 3 AM
+  '30 2 * * *',
   async () => {
     try {
       const now = new Date();
@@ -480,7 +479,7 @@ const promoCodeExpiryJob = await createCronJob(
 );
 
 const rideRatingAllowedExpiryJob = await createCronJob(
-  '50 2 * * *', // runs daily at 3 AM
+  '40 2 * * *',
   async () => {
     try {
       const now = new Date();
