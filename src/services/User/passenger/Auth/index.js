@@ -1011,7 +1011,7 @@ export const otpVerification = async (
         return resp;
       }
 
-      user = await findUserByEmail(result.pending?.phoneNumber);
+      user = await findUserByPhone(result.pending?.phoneNumber);
       if (!user || !user.roles.includes('passenger')) {
         resp.error = true;
         resp.error_message = 'Passenger not found';

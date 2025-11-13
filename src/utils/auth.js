@@ -195,11 +195,73 @@ const verifyBiometricLogin = async (publicKey, signature) => {
   };
 };
 
+// const verifySignature = async (signature, publicKey) => {
+//   const verify = crypto.createVerify('SHA256');
+//   verify.update('login-challenge');
+//   verify.end();
+//   return verify.verify(publicKey, signature, 'base64');
+// };
+
 const verifySignature = async (signature, publicKey) => {
-  const verify = crypto.createVerify('SHA256');
-  verify.update('login-challenge');
-  verify.end();
-  return verify.verify(publicKey, signature, 'base64');
+  try {
+    if (!signature || !publicKey) {
+      throw new Error('Signature and public key are required');
+    }
+
+    const cleanPublicKey = publicKey.trim();
+    const challenge = 'login';
+
+    // Define different key formats to try
+    const keyFormats = [
+      {
+        name: 'PEM as-is',
+        key: cleanPublicKey,
+      },
+      {
+        name: 'PEM with headers',
+        key: cleanPublicKey.includes('-----BEGIN')
+          ? cleanPublicKey
+          : `-----BEGIN PUBLIC KEY-----\n${cleanPublicKey}\n-----END PUBLIC KEY-----`,
+      },
+      {
+        name: 'Base64 raw',
+        key: cleanPublicKey.replace(
+          /-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----|\n/g,
+          '',
+        ),
+      },
+    ];
+
+    // Try each key format
+    for (const format of keyFormats) {
+      try {
+        console.log(`Trying verification with format: ${format.name}`);
+
+        // Create a NEW verify object for each attempt
+        const verify = crypto.createVerify('SHA256');
+        verify.update(challenge);
+        verify.end();
+
+        const isValid = verify.verify(format.key, signature, 'base64');
+
+        if (isValid) {
+          console.log(`✓ Verification successful with format: ${format.name}`);
+          return true;
+        } else {
+          console.log(`✗ Verification failed with format: ${format.name}`);
+        }
+      } catch (formatError) {
+        console.log(`✗ Format ${format.name} error:`, formatError.message);
+        // Continue to next format
+      }
+    }
+
+    console.log('All verification formats failed');
+    return false;
+  } catch (error) {
+    console.error('Signature verification error:', error.message);
+    return false;
+  }
 };
 
 export {

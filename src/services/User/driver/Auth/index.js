@@ -1625,6 +1625,8 @@ export const updateFCMToken = async (user, { userDeviceToken }, resp) => {
 
 export const biometricLogin = async ({ signature, publicKey }, resp) => {
   try {
+    console.log('Signature: ', signature);
+    console.log('Public Key: ', publicKey);
     if (!signature || !publicKey) {
       resp.error = true;
       resp.error_message = 'Signature and public key are required';
