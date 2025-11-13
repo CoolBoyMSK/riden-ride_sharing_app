@@ -12,6 +12,7 @@ import {
   resendOtp,
   refreshAuthToken,
   updateFCMToken,
+  biometricLogin,
 } from '../../../../services/User/driver/Auth/index.js';
 
 export const signUpDriverWithEmailController = (req, res) =>
@@ -153,6 +154,18 @@ export const updateFCMTokenController = (req, res) =>
       validationFn: null,
       handlerParams: [req.user, req.body],
       successMessage: 'FCM token updated successfully',
+    },
+    req,
+    res,
+  );
+
+export const biometricLoginController = (req, res) =>
+  handleResponse(
+    {
+      handler: biometricLogin,
+      validationFn: null,
+      handlerParams: [req.body],
+      successMessage: 'Biometric login successfully',
     },
     req,
     res,

@@ -5,6 +5,7 @@ import {
   generateRefreshToken,
   verifyRefreshToken,
   generateUniqueId,
+  verifyBiometricLogin,
 } from '../../../../utils/auth.js';
 import {
   findUserByEmail,
@@ -1614,6 +1615,36 @@ export const updateFCMToken = async (user, { userDeviceToken }, resp) => {
       resp.error_message = 'Unauthorized Access';
       return resp;
     }
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'something went wrong';
+    return resp;
+  }
+};
+
+export const biometricLogin = async ({ signature, userId }, resp) => {
+  try {
+    if (!signature || !userId) {
+      resp.error = true;
+      resp.error_message = 'Signature and user Id are required';
+      return resp;
+    }
+
+    const result = await verifyBiometricLogin(userId, signature);
+    if (!result.success) {
+      resp.error = true;
+      resp.error_message = 'Failed to verify biometric';
+      return resp;
+    }
+
+    const payload = { id: result.user?._id, roles: result.user?.roles };
+    resp.data = {
+      user: result.user,
+      accessToken: generateAccessToken(payload),
+      refreshToken: generateRefreshToken(payload),
+    };
+    return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);
     resp.error = true;

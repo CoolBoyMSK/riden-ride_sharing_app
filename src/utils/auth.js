@@ -4,6 +4,7 @@ import env from '../config/envConfig.js';
 import crypto from 'crypto';
 import mongoose from 'mongoose';
 import User from '../models/User.js';
+import Biometric from '../models/Biometric.js';
 import base64url from 'base64url';
 import {
   generateAuthenticationOptions,
@@ -162,6 +163,52 @@ const verifyPasskeyLogin = async (emailOrPhone, response) => {
   };
 };
 
+export const verifyBiometricLogin = async (userId, signature) => {
+  // Get user's stored public key
+  const user = await User.findById(userId);
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  const biometric = await Biometric.findOne({ userId });
+
+  if (!biometric || !biometric.biometricEnabled) {
+    throw new Error('Biometric not registered or disabled');
+  }
+
+  if (!biometric.publicKey) {
+    throw new Error('No public key found for user');
+  }
+
+  // Verify signature with stored public key
+  const isValidSignature = await verifySignature(
+    signature,
+    biometric.publicKey,
+  );
+  if (!isValidSignature) {
+    throw new Error('Biometric verification failed');
+  }
+
+  // Update last used timestamp
+  await Biometric.findOneAndUpdate(
+    { userId },
+    { lastBiometricUsed: new Date() },
+    { new: true },
+  );
+
+  return {
+    success: true,
+    user,
+  };
+};
+
+const verifySignature = async (signature, publicKey) => {
+  const verify = crypto.createVerify('SHA256');
+  verify.update('login-challenge');
+  verify.end();
+  return verify.verify(publicKey, signature, 'base64');
+};
+
 export {
   hashPassword,
   comparePasswords,
@@ -175,4 +222,5 @@ export {
   generateUniqueId,
   getPasskeyLoginOptions,
   verifyPasskeyLogin,
+  verifyBiometricLogin,
 };

@@ -13,6 +13,7 @@ import {
   resendOtpController,
   refreshAuthTokenController,
   updateFCMTokenController,
+  biometricLoginController,
 } from '../../../../controllers/User/Drivers/Auth/index.js';
 
 const router = express.Router();
@@ -88,6 +89,12 @@ registerRoute({
   route: '/fcm',
   driver_auth_enable: true,
   put_method: updateFCMTokenController,
+});
+
+registerRoute({
+  router,
+  route: '/biometric',
+  post_method: biometricLoginController,
 });
 
 export default router;
