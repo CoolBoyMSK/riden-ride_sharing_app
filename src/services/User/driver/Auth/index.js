@@ -903,7 +903,7 @@ export const otpVerification = async (
     } else if (verifyUserEmailOtp) {
       if (!email || !otp) {
         resp.error = true;
-        resp.error_message = 'Phone number and OTP are required';
+        resp.error_message = 'Email and OTP are required';
         return resp;
       }
 
