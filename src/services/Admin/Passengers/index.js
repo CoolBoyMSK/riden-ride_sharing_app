@@ -82,30 +82,29 @@ export const getPassengerById = async ({ passengerId }, resp) => {
 };
 
 export const deletePassengerById = async ({ passengerId }, resp) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
   try {
-    const passenger = await findPassenger({ _id: passengerId });
-    if (!passenger) {
-      resp.error = true;
-      resp.error_message = 'Passenger not found';
-      return resp;
-    }
-
-    const filter = { userId: passenger.userId, passengerId: passenger._id };
-    const deleted = await deletePassenger(filter);
-
+    const deleted = await deletePassenger(passengerId);
     if (!deleted) {
+      await session.abortTransaction();
       resp.error = true;
       resp.error_message = 'Failed to delete Passenger';
       return resp;
     }
 
-    resp.data = deleted;
+    await session.abortTransaction();
+
+    resp.data = { message: 'Passenger deleted successfully' };
     return resp;
   } catch (error) {
+    await session.abortTransaction();
     console.error(`API ERROR: ${error}`);
     resp.error = true;
     resp.error_message = error.message || 'something went wrong';
     return resp;
+  } finally {
+    session.endSession();
   }
 };
 

@@ -24,6 +24,7 @@ import {
   sendDriverDocumentsRejectedEmail,
   sendDriverAccountSuspendedEmail,
 } from '../../../templates/emails/user/index.js';
+import { notifyUser } from '../../../dal/notification.js';
 
 export const getAllDrivers = async (
   { page, limit, search, fromDate, toDate, isApproved },
@@ -115,29 +116,25 @@ export const deleteDriverByIdAPI = async ({ driverId }, resp) => {
 
   try {
     const success = await deleteDriver(driverId, session);
-
     if (!success) {
       await session.abortTransaction();
-      session.endSession();
-
       resp.error = true;
       resp.error_message = 'Failed to delete driver or associated user';
       return resp;
     }
 
     await session.commitTransaction();
-    session.endSession();
 
     resp.data = { message: 'Driver deleted successfully' };
     return resp;
   } catch (error) {
     await session.abortTransaction();
-    session.endSession();
-
     console.error(`API ERROR: ${error}`);
     resp.error = true;
     resp.error_message = error.message || 'something went wrong';
     return resp;
+  } finally {
+    session.endSession();
   }
 };
 
@@ -197,6 +194,28 @@ export const updateDriverDocumentStatus = async (
         user.userId?.email,
         user.userId?.name,
       );
+
+      const notify = await notifyUser({
+        userId: user.userId,
+        title: 'Document Rejected',
+        message: `Your document has been rejected`,
+        module: 'support',
+        metadata: { updated },
+      });
+      if (!notify) {
+        console.error('Failed to send notification');
+      }
+    } else if (status === 'verified') {
+      const notify = await notifyUser({
+        userId: user.userId,
+        title: 'Document Verified',
+        message: `Your document has been verified`,
+        module: 'support',
+        metadata: { updated },
+      });
+      if (!notify) {
+        console.error('Failed to send notification');
+      }
     }
 
     const unverified = Object.values(updated.documents).filter(
@@ -472,6 +491,22 @@ export const uploadWayBillDocument = async (
         },
         { new: true },
       );
+    }
+
+    const wayBillNotIssued = Object.values(updated.wayBill).filter(
+      (doc) => doc.status !== 'issued',
+    );
+    if (wayBillNotIssued.length == 0) {
+      const notify = await notifyUser({
+        userId: updated.userId,
+        title: 'Way Bill Issued Successfully',
+        message: `Your way bill has been issued`,
+        module: 'support',
+        metadata: { updated },
+      });
+      if (!notify) {
+        console.error('Failed to send notification');
+      }
     }
 
     resp.data = updated.wayBill[docType];

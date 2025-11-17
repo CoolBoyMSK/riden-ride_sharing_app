@@ -39,12 +39,28 @@ export const updatePassenger = (filter, payload, options = {}) =>
 export const updatePassengerById = (passengerId, payload) =>
   PassengerModel.findByIdAndUpdate(passengerId, payload, { new: true });
 
-export const deletePassenger = async (filter) => {
-  const user = await UserModel.findOneAndDelete({ _id: filter.userId });
-  if (!user) {
-    return false;
+export const deletePassenger = async (passengerId, session) => {
+  let passenger = await PassengerModel.findById(passengerId).session(session);
+  if (!passenger) throw new Error('Passenger not found');
+
+  const userId = passenger.userId; // Save userId before deleting Passenger
+  let user = await UserModel.findById(userId).session(session);
+  if (!user) throw new Error('Driver not found');
+
+  const passengerDeleteResult = await PassengerModel.deleteOne({
+    _id: passengerId,
+  }).session(session);
+  const userDeleteResult = await UserModel.deleteOne({ _id: userId }).session(
+    session,
+  );
+  if (
+    passengerDeleteResult.deletedCount === 0 ||
+    userDeleteResult.deletedCount === 0
+  ) {
+    throw new Error('Failed to delete passenger');
   }
-  return PassengerModel.findOneAndDelete({ _id: filter.passengerId });
+
+  return true;
 };
 
 export const updatePassengerBlockStatus = (passengerId, isBlocked) =>

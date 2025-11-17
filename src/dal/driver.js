@@ -66,6 +66,10 @@ export const updateDriverByUserId = async (id, update, options = {}) => {
     { new: true, session: options.session },
   );
 
+  if (!updatedDriver) {
+    throw new Error('Driver not found');
+  }
+
   return updatedDriver;
 };
 
@@ -286,8 +290,8 @@ export const updateDriverDocumentRecord = (driverId, docType, imageUrl) =>
     { new: true, select: `documents.${docType}` },
   ).lean();
 
-export const updateWayBillDocuments = (driverId, docType, imageUrl) =>
-  DriverModel.findOneAndUpdate(
+export const updateWayBillDocuments = async (driverId, docType, imageUrl) => {
+  const driver = await DriverModel.findOneAndUpdate(
     { userId: driverId },
     {
       $set: {
@@ -297,6 +301,13 @@ export const updateWayBillDocuments = (driverId, docType, imageUrl) =>
     },
     { new: true, select: `wayBill.${docType}` },
   ).lean();
+
+  if (!driver) {
+    throw new Error('Driver not found');
+  }
+
+  return driver;
+};
 
 export const findVehicleByUserId = async (userId, options = {}) =>
   DriverModel.findOne({ userId }, 'vehicle', {
@@ -422,14 +433,25 @@ export const getfindDrivers = async ({
 };
 
 export const deleteDriver = async (driverId, session) => {
-  const driver = await DriverModel.findById(driverId).session(session);
-  if (!driver) return false;
+  let driver = await DriverModel.findById(driverId).session(session);
+  if (!driver) throw new Error('Driver not found');
 
-  const user = await UserModel.findById(driver.userId).session(session);
-  if (!user) return false;
+  const userId = driver.userId; // Save userId before deleting driver
+  let user = await UserModel.findById(userId).session(session);
+  if (!user) throw new Error('Driver not found');
 
-  await DriverModel.deleteOne({ _id: driverId }).session(session);
-  await UserModel.deleteOne({ _id: driver.userId }).session(session);
+  const driverDeleteResult = await DriverModel.deleteOne({
+    _id: driverId,
+  }).session(session);
+  const userDeleteResult = await UserModel.deleteOne({ _id: userId }).session(
+    session,
+  );
+  if (
+    driverDeleteResult.deletedCount === 0 ||
+    userDeleteResult.deletedCount === 0
+  ) {
+    throw new Error('Failed to delete driver');
+  }
 
   return true;
 };
@@ -440,32 +462,27 @@ export const updateDocumentStatus = async (
   status,
   options = {},
 ) => {
-  try {
-    const driver = await DriverModel.findOneAndUpdate(
-      { _id: driverId },
-      { $set: { [`documents.${type}.status`]: status } },
-      { new: true, ...options },
-    );
+  const driver = await DriverModel.findOneAndUpdate(
+    { _id: driverId },
+    { $set: { [`documents.${type}.status`]: status } },
+    { new: true, ...options },
+  );
 
-    if (!driver) {
-      throw new Error('Driver not found');
-    }
-
-    if (type === 'profilePicture' && status === 'verified') {
-      const imageUrl = driver.documents?.profilePicture?.imageUrl;
-
-      if (imageUrl) {
-        await UserModel.findByIdAndUpdate(driver.userId, {
-          profileImg: imageUrl,
-        });
-      }
-    }
-
-    return driver;
-  } catch (error) {
-    console.error('Error updating document status:', error);
-    throw error;
+  if (!driver) {
+    throw new Error('Driver not found');
   }
+
+  if (type === 'profilePicture' && status === 'verified') {
+    const imageUrl = driver.documents?.profilePicture?.imageUrl;
+
+    if (imageUrl) {
+      await UserModel.findByIdAndUpdate(driver.userId, {
+        profileImg: imageUrl,
+      });
+    }
+  }
+
+  return driver;
 };
 
 export const updateWayBillStatus = (driverId, type, status, options = {}) => {
