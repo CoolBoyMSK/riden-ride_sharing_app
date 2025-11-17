@@ -437,6 +437,7 @@ export const getDriverLocation = async (driverId) => {
 
 export const persistDriverLocationToDB = async (driverId, { session } = {}) => {
   const data = await getDriverLocation(driverId);
+  console.log('Persisting Driver Location to DB:', data);
   if (!data) return null;
   return upsertDriverLocation(
     driverId,
