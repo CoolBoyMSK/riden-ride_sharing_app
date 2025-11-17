@@ -2222,6 +2222,10 @@ export const initSocket = (server) => {
             isAvailable = false;
           }
 
+          console.log(
+            `Updating location for driver ${driver._id} to [${location.coordinates[0]}, ${location.coordinates[1]}] with speed ${speed} and heading ${heading}`,
+          );
+
           if (driver.status === 'online') {
             const isRestricted = await isRideInRestrictedArea(
               location.coordinates,
