@@ -612,32 +612,44 @@ export const findDrivingHours = async (driverId) => {
   const endOfDay = new Date();
   endOfDay.setHours(23, 59, 59, 999);
 
-  // Fetch today's completed & paid rides for this driver
-  const rides = await Ride.find({
+  // Fetch today's completed rides with proper time fields
+  const rides = await RideModel.find({
     driverId,
-    passengerId: { $exists: true },
     status: 'RIDE_COMPLETED',
-    paymentStatus: 'COMPLETED',
-    driverAssignedAt: { $gte: startOfDay, $lte: endOfDay },
-    driverPaidAt: { $exists: true },
-  }).select('driverAssignedAt driverPaidAt');
+    // Use actual ride start and end times, not assignment/payment times
+    $or: [
+      { rideStartedAt: { $gte: startOfDay, $lte: endOfDay } },
+      { rideCompletedAt: { $gte: startOfDay, $lte: endOfDay } },
+    ],
+  }).select('rideStartedAt rideCompletedAt status driverAssignedAt');
 
   if (!rides.length) {
     return {
       success: true,
       totalHoursDriven: 0,
       remainingHours: 13,
+      ridesCount: 0,
       message: 'No completed rides for today.',
     };
   }
 
-  // Calculate total hours
+  // Calculate total ACTUAL driving hours
   const totalHours = rides.reduce((acc, ride) => {
-    if (ride.driverAssignedAt && ride.driverPaidAt) {
-      const diffMs =
-        new Date(ride.driverPaidAt) - new Date(ride.driverAssignedAt);
-      const diffHours = diffMs / (1000 * 60 * 60);
-      return acc + (diffHours > 0 ? diffHours : 0);
+    // Use startedAt and completedAt for actual driving time
+    if (ride.rideStartedAt && ride.rideCompletedAt) {
+      const startTime = new Date(ride.rideStartedAt);
+      const endTime = new Date(ride.rideCompletedAt);
+
+      // Ensure valid time range and within today
+      if (endTime > startTime) {
+        const diffMs = endTime - startTime;
+        const diffHours = diffMs / (1000 * 60 * 60);
+
+        // Only count positive, reasonable driving times (less than 24 hours per ride)
+        if (diffHours > 0 && diffHours < 24) {
+          return acc + diffHours;
+        }
+      }
     }
     return acc;
   }, 0);
@@ -648,5 +660,7 @@ export const findDrivingHours = async (driverId) => {
     success: true,
     totalHoursDriven: Number(totalHours.toFixed(2)),
     remainingHours: Number(remainingHours.toFixed(2)),
+    ridesCount: rides.length,
+    dailyLimit: 13,
   };
 };
