@@ -1817,6 +1817,8 @@ export const initSocket = (server) => {
           });
 
           const fare = parseFloat(fareResult.actualFare)
+          console.log('Calculated Fare: ', fare);
+          console.log(typeof fare)
 
           const updatedRide = await updateRideById(ride._id, {
             status: 'RIDE_COMPLETED',
