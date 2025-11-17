@@ -191,6 +191,9 @@ export const calculateActualFare = async (rideData) => {
       waitingCharge -
       discount;
 
+    console.log('Subtotal before promo discount: ', subtotal);
+    console.log(typeof subtotal);
+
     // Apply promo code
     let promoDiscount = 0;
     let promoDetails = null;
@@ -212,6 +215,8 @@ export const calculateActualFare = async (rideData) => {
       }
     }
     const finalAmount = Math.max(0, subtotal - promoDiscount);
+    console.log('Final Amount after promo discount: ', finalAmount);
+    console.log(typeof finalAmount);
 
     return {
       success: true,
@@ -229,7 +234,7 @@ export const calculateActualFare = async (rideData) => {
         surgeAmount,
         finalAmount,
       },
-      actualFare: finalAmount,
+      actualFare: parseFloat(finalAmount),
       promoDetails,
     };
   } catch (error) {
