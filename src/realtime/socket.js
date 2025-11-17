@@ -2310,19 +2310,6 @@ export const initSocket = (server) => {
                 });
               }
             } else {
-              const currentLocation = await getDriverLocation(driver._id);
-              console.log('Current Location:', currentLocation);
-              if (
-                currentLocation.parkingQueueId &&
-                currentLocation.parkingQueueId !== null
-              ) {
-                await removeDriverFromQueue(
-                  driver._id,
-                  currentLocation.parkingQueueId,
-                );
-                await updateDriverByUserId(userId, { isRestricted: false });
-              }
-
               await saveDriverLocation(driver._id, {
                 lng: location.coordinates[0],
                 lat: location.coordinates[1],
@@ -2352,6 +2339,19 @@ export const initSocket = (server) => {
                     message: 'Location updated successfully',
                   },
                 );
+              }
+
+              const currentLocation = await getDriverLocation(driver._id);
+              console.log('Current Location:', currentLocation);
+              if (
+                currentLocation.parkingQueueId &&
+                currentLocation.parkingQueueId !== null
+              ) {
+                await removeDriverFromQueue(
+                  driver._id,
+                  currentLocation.parkingQueueId,
+                );
+                await updateDriverByUserId(userId, { isRestricted: false });
               }
 
               socket.emit('ride:driver_update_location', {
