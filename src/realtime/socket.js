@@ -1816,11 +1816,13 @@ export const initSocket = (server) => {
             fareConfig: ride.fareConfig,
           });
 
+          const fare = parseFloat(fareResult.actualFare)
+
           const updatedRide = await updateRideById(ride._id, {
             status: 'RIDE_COMPLETED',
             rideCompletedAt: new Date(),
             paymentStatus: 'PROCESSING',
-            actualFare: Math.floor(fareResult.actualFare),
+            actualFare: Math.floor(fare),
             actualDistance,
             actualDuration,
             actualWaitingTime: parseFloat((waitingTime / 60).toFixed(2)),
@@ -2221,10 +2223,6 @@ export const initSocket = (server) => {
           if (driver.status === 'on_ride' && isAvailable) {
             isAvailable = false;
           }
-
-          console.log(
-            `Updating location for driver ${driver._id} to [${location.coordinates[0]}, ${location.coordinates[1]}] with speed ${speed} and heading ${heading}`,
-          );
 
           if (driver.status === 'online') {
             const isRestricted = await isRideInRestrictedArea(
