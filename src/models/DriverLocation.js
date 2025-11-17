@@ -35,10 +35,13 @@ const driverLocationSchema = new mongoose.Schema(
     currentRideId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Ride',
+      default: null,
     },
     parkingQueueId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'ParkingQueue',
+      default: null,
+      index: true,
     },
     heading: {
       type: Number, // Direction in degrees (0-360)

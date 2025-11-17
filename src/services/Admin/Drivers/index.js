@@ -467,6 +467,11 @@ export const uploadWayBillDocument = async (
     }
 
     const imageUrl = await uploadDriverDocumentToS3(id, docType, file);
+    if (imageUrl) {
+      resp.error = true;
+      resp.error_message = 'Failed to upload document';
+      return resp;
+    }
 
     let updated = await updateWayBillDocuments(id, docType, imageUrl);
     if (!updated) {
@@ -476,6 +481,35 @@ export const uploadWayBillDocument = async (
     }
 
     if (docType === 'certificateOfInsurance') {
+      if (insurer) {
+        resp.error = true;
+        resp.error_message = 'Insurer cannot be empty';
+        return resp;
+      } else if (NaN(naic)) {
+        resp.error = true;
+        resp.error_message = 'Invalid NAIC format, Must be a numeric value';
+        return resp;
+      } else if (policy) {
+        resp.error = true;
+        resp.error_message = 'Policy cannot be empty';
+        return resp;
+      } else if (operator) {
+        resp.error = true;
+        resp.error_message = 'Operator cannot be empty';
+        return resp;
+      } else if (
+        NaN(Date.parse(policyStartDate)) ||
+        NaN(Date.parse(policyEndDate))
+      ) {
+        resp.error = true;
+        resp.error_message = 'Invalid policy start or end date';
+        return resp;
+      } else if (NaN(Date.parse(coveredRideStartTime))) {
+        resp.error = true;
+        resp.error_message = 'Invalid covered ride start time';
+        return resp;
+      }
+
       updated = await updateDriverByUserId(
         id,
         {
