@@ -2307,7 +2307,11 @@ export const initSocket = (server) => {
               }
             } else {
               const currentLocation = await getDriverLocation(driver._id);
-              if (currentLocation.parkingQueueId) {
+              console.log('Current Location:', currentLocation);
+              if (
+                currentLocation.parkingQueueId &&
+                currentLocation.parkingQueueId !== null
+              ) {
                 await removeDriverFromQueue(
                   driver._id,
                   currentLocation.parkingQueueId,
