@@ -198,22 +198,23 @@ export const calculateActualFare = async (rideData) => {
     let promoDiscount = 0;
     let promoDetails = null;
 
-    // if (promoCode?.code && promoCode?.isApplied) {
-    //   promoDiscount = (subtotal * promoCode.discount) / 100;
-    //   promoDetails = promoCode;
+    if (promoCode?.code && promoCode?.isApplied) {
+      promoDiscount = (subtotal * promoCode.discount) / 100;
+      promoDetails = promoCode;
+    }
+
+    // if (promoCode) {
+    //   const validPromo = await validatePromoCode(promoCode);
+    //   if (validPromo) {
+    //     promoDiscount = (subtotal * validPromo.discount) / 100;
+    //     promoDetails = {
+    //       code: validPromo.code,
+    //       discount: validPromo.discount,
+    //       isApplied: true,
+    //     };
+    //   }
     // }
 
-    if (promoCode) {
-      const validPromo = await validatePromoCode(promoCode);
-      if (validPromo) {
-        promoDiscount = (subtotal * validPromo.discount) / 100;
-        promoDetails = {
-          code: validPromo.code,
-          discount: validPromo.discount,
-          isApplied: true,
-        };
-      }
-    }
     const finalAmount = Math.max(0, subtotal - promoDiscount);
     console.log('Final Amount after promo discount: ', finalAmount);
     console.log(typeof finalAmount);
