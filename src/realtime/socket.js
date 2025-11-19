@@ -1,12 +1,8 @@
+import mongoose from 'mongoose';
 import { Server } from 'socket.io';
 import Redis from 'ioredis';
 import { createAdapter } from '@socket.io/redis-adapter';
-import {
-  addSocket,
-  removeSocket,
-  getSocketIds,
-  isOnline,
-} from '../utils/onlineUsers.js';
+import { addSocket, removeSocket, getSocketIds } from '../utils/onlineUsers.js';
 import env from '../config/envConfig.js';
 import { verifyAccessToken } from '../utils/auth.js';
 import {
@@ -31,7 +27,6 @@ import {
   updateDriverAvailability,
   findNearbyRideRequests,
   findNearestParkingForPickup,
-  filterRidesForDriver,
   addDriverToQueue,
   removeDriverFromQueue,
   isDriverInParkingLot,
@@ -48,6 +43,7 @@ import {
   findDriverParkingQueue,
   getDriverLocation,
   findParkingQueue,
+  checkDestinationRides,
 } from '../dal/ride.js';
 import {
   findDriverByUserId,
@@ -80,7 +76,6 @@ import {
   sendPassengerRideCancellationWarningEmail,
   sendDriverRideCancellationEmail,
 } from '../templates/emails/user/index.js';
-import mongoose from 'mongoose';
 
 let ioInstance = null;
 
@@ -1014,6 +1009,15 @@ export const initSocket = (server) => {
 
         let isDestinationRide = false;
         if (driver.isDestination) {
+          const canAcceptDestinationRide = await checkDestinationRides(driver._id);
+          if (!canAcceptDestinationRide) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: 'Driver has reached the maximum number of destination rides',
+            });
+          }
           isDestinationRide = true;
         }
 
@@ -1323,10 +1327,10 @@ export const initSocket = (server) => {
           });
         }
 
-        await sendDriverRideCancellationEmail(
-          mailTo.userId?.email,
-          mailTo.userId?.name,
-        );
+        // await sendDriverRideCancellationEmail(
+        //   mailTo.userId?.email,
+        //   mailTo.userId?.name,
+        // );
 
         const stats = await findDrivingHours(driver._id);
         if (stats.remainingHours < 3 && stats.remainingHours > 0) {
@@ -1808,17 +1812,12 @@ export const initSocket = (server) => {
             actualDistance,
             actualDuration,
             waitingTime,
-            promoCode: ride.promoCode,
             rideStartedAt: ride.rideStartedAt,
-            rideCompletedAt: Date.now(),
-            isAirportRide: ride.isAirport,
             surgeMultiplier: ride.fareBreakdown?.surgeMultiplier,
             fareConfig: ride.fareConfig,
           });
 
           const fare = parseFloat(fareResult.actualFare);
-          console.log('Calculated Fare: ', fare);
-          console.log(typeof fare);
 
           const updatedRide = await updateRideById(ride._id, {
             status: 'RIDE_COMPLETED',
@@ -2904,10 +2903,10 @@ export const initSocket = (server) => {
           });
         }
 
-        await sendPassengerRideCancellationWarningEmail(
-          mailTo.userId?.email,
-          mailTo.userId?.name,
-        );
+        // await sendPassengerRideCancellationWarningEmail(
+        //   mailTo.userId?.email,
+        //   mailTo.userId?.name,
+        // );
 
         socket.join(`ride:${updatedRide._id}`);
         io.to(`ride:${updatedRide._id}`).emit('ride:passenger_cancel_ride', {

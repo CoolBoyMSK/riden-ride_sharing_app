@@ -1,5 +1,8 @@
 import { getFareForLocation } from '../../../dal/fareManagement.js';
-import { validatePromoCode } from '../../../dal/promo_code.js';
+import {
+  validatePromoCode,
+  findActivePromoCodes,
+} from '../../../dal/promo_code.js';
 
 // Get current day of week
 const getCurrentDay = () => {
@@ -16,8 +19,8 @@ const getCurrentDay = () => {
 };
 
 // Check if current time is night time
-const isNightTime = (nightTimeConfig) => {
-  const now = new Date();
+const isNightTime = (nightTimeConfig, scheduledTime = null) => {
+  const now = scheduledTime ? new Date(scheduledTime) : new Date();
   const currentTime = now.getHours() * 60 + now.getMinutes(); // minutes since midnight
 
   const [fromHour, fromMin] = nightTimeConfig.from.split(':').map(Number);
@@ -42,6 +45,7 @@ export const calculateEstimatedFare = async (
   promoCode = null,
   surgeMultiplier = 1,
   fareConfig,
+  scheduledTime = null,
 ) => {
   try {
     if (!fareConfig) {
@@ -62,7 +66,7 @@ export const calculateEstimatedFare = async (
     const surgeAmount = baseFare * surgeMultiplier - baseFare;
     const distanceFare = distance * carTypeFare.perKmFare;
     const timeFare = duration ? duration * carTypeFare.perMinuteFare : 0;
-    const nightCharge = isNightTime(carTypeFare.nightTime)
+    const nightCharge = isNightTime(carTypeFare.nightTime, scheduledTime)
       ? carTypeFare.nightCharge
       : 0;
 
@@ -73,24 +77,6 @@ export const calculateEstimatedFare = async (
       distanceFare +
       timeFare +
       nightCharge;
-
-    // Apply promo code if provided (same logic as before)
-    let promoDiscount = 0;
-    let promoDetails = null;
-
-    if (promoCode) {
-      const validPromo = await validatePromoCode(promoCode);
-      if (validPromo) {
-        promoDiscount = (subtotal * validPromo.discount) / 100;
-        promoDetails = {
-          code: validPromo.code,
-          discount: validPromo.discount,
-          isApplied: true,
-        };
-      }
-    }
-
-    const finalAmount = Math.max(0, subtotal - promoDiscount);
 
     // Return the exact same structure as before
     return {
@@ -104,14 +90,14 @@ export const calculateEstimatedFare = async (
         waitingCharge: 0,
         discount: 0, // Will be calculated during actual ride
         subtotal,
-        promoDiscount,
+        promoDiscount: 0,
         surgeMultiplier,
         surgeAmount: surgeAmount > 0 ? surgeAmount : 0,
-        finalAmount,
+        finalAmount: subtotal,
       },
       fareConfig: carTypeFare,
-      estimatedFare: finalAmount,
-      promoDetails,
+      estimatedFare: subtotal,
+      promoDetails: null,
       currency: 'CAD',
     };
   } catch (error) {
@@ -129,10 +115,7 @@ export const calculateActualFare = async (rideData) => {
       actualDistance,
       actualDuration,
       waitingTime = 0,
-      promoCode,
       rideStartedAt,
-      rideCompletedAt,
-      isAirportRide = false,
       surgeMultiplier = 1,
       fareConfig,
     } = rideData;
@@ -144,18 +127,6 @@ export const calculateActualFare = async (rideData) => {
 
     // Determine the day based on ride start time
     const rideDate = new Date(rideStartedAt);
-    // const days = [
-    //   'Sunday',
-    //   'Monday',
-    //   'Tuesday',
-    //   'Wednesday',
-    //   'Thursday',
-    //   'Friday',
-    //   'Saturday',
-    // ];
-    // const rideDay = days[rideDate.getDay()];
-
-    // const dayFare = fareConfig.dailyFares.find((fare) => fare.day === rideDay);
 
     // Calculate components
     const rideSetupFee = fareConfig.rideSetupFee;
@@ -198,10 +169,19 @@ export const calculateActualFare = async (rideData) => {
     let promoDiscount = 0;
     let promoDetails = null;
 
-    if (promoCode?.code && promoCode?.isApplied) {
-      promoDiscount = (subtotal * promoCode.discount) / 100;
-      promoDetails = promoCode;
+    const activePromoCodes = await findActivePromoCodes();
+    if (activePromoCodes.length > 0) {
+      const validPromo = activePromoCodes[0];
+      if (validPromo) {
+        promoDiscount = (subtotal * validPromo.discount) / 100;
+        promoDetails = validPromo;
+      }
     }
+
+    // if (promoCode?.code && promoCode?.isApplied) {
+    //   promoDiscount = (subtotal * promoCode.discount) / 100;
+    //   promoDetails = promoCode;
+    // }
 
     // if (promoCode) {
     //   const validPromo = await validatePromoCode(promoCode);
@@ -216,8 +196,6 @@ export const calculateActualFare = async (rideData) => {
     // }
 
     const finalAmount = Math.max(0, subtotal - promoDiscount);
-    console.log('Final Amount after promo discount: ', finalAmount);
-    console.log(typeof finalAmount);
 
     return {
       success: true,

@@ -3,6 +3,7 @@ import {
   getStats,
   getLifeTimeHighlights,
   getWeeklyStats,
+  getPayoutStats,
   getDailyStatsForWeek,
   getDrivingHours,
   fetchDriverBalance,
@@ -39,6 +40,18 @@ export const getWeeklyStatsController = (req, res) =>
       validationFn: null,
       handlerParams: [req.user],
       successMessage: 'Stats fetched successfully',
+    },
+    req,
+    res,
+  );
+
+export const getPayoutStatsController = (req, res) =>
+  handleResponse(
+    {
+      handler: getPayoutStats,
+      validationFn: null,
+      handlerParams: [req.user, req.query],
+      successMessage: 'Payout stats fetched successfully',
     },
     req,
     res,

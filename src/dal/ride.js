@@ -76,6 +76,20 @@ export const updateRideById = async (
   return result;
 };
 
+export const checkDestinationRides = async (driverId) => {
+  const completedDestinationRidesCount = await RideModel.countDocuments({
+    driverId,
+    status: 'RIDE_COMPLETED',
+    isDestinationRide: true,
+  });
+
+  if (completedDestinationRidesCount >= 2) {
+    return false;
+  } else {
+    return true;
+  }
+};
+
 export const createFeedback = async (payload) => Feedback.create(payload);
 
 export const updateRideByRideId = async (rideId, updateData) => {
@@ -136,6 +150,53 @@ export const findActiveRideByPassenger = async (passengerId) => {
   })
     .populate('driverId')
     .lean();
+};
+
+export const findScheduledRideByPassenger = async (passengerId) => {
+  const now = new Date();
+  const fortyFiveMinutesFromNow = new Date(now.getTime() + 45 * 60 * 1000);
+  const twelveHoursFromNow = new Date(now.getTime() + 12 * 60 * 60 * 1000);
+
+  // Find scheduled rides for this passenger that are in the future
+  const scheduledRide = await RideModel.findOne({
+    passengerId,
+    status: 'SCHEDULED',
+    scheduledTime: {
+      $gt: now, // Must be in the future
+      $lte: twelveHoursFromNow, // Within 12 hours
+    },
+  })
+    .sort({ scheduledTime: 1 }) // Get the earliest scheduled ride
+    .lean();
+
+  if (!scheduledRide) {
+    return null;
+  }
+
+  // If scheduled within 45 minutes, return false (can't book another ride)
+  if (scheduledRide.scheduledTime <= fortyFiveMinutesFromNow) {
+    return false;
+  }
+
+  // Calculate remaining time
+  const timeDiff = scheduledRide.scheduledTime - now;
+  const hours = Math.floor(timeDiff / (1000 * 60 * 60));
+  const minutes = Math.floor((timeDiff % (1000 * 60 * 60)) / (1000 * 60));
+
+  let remainingTimeMessage = '';
+  if (hours > 0 && minutes > 0) {
+    remainingTimeMessage = `${hours} hour${hours > 1 ? 's' : ''} and ${minutes} minute${minutes > 1 ? 's' : ''}`;
+  } else if (hours > 0) {
+    remainingTimeMessage = `${hours} hour${hours > 1 ? 's' : ''}`;
+  } else {
+    remainingTimeMessage = `${minutes} minute${minutes > 1 ? 's' : ''}`;
+  }
+
+  return {
+    ride: { ...scheduledRide },
+    remainingTime: remainingTimeMessage,
+    remainingTimeMs: timeDiff,
+  };
 };
 
 export const findActiveRideByDriver = async (driverId) => {
@@ -1277,6 +1338,7 @@ export const findActiveRide = async (id, role) => {
         'CANCELLED_BY_PASSENGER',
         'CANCELLED_BY_DRIVER',
         'CANCELLED_BY_SYSTEM',
+        'SCHEDULED',
       ],
     },
     paymentStatus: { $nin: ['PROCESSING', 'COMPLETED'] },

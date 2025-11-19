@@ -124,6 +124,30 @@ export const createDriverWallet = async (driverId) =>
 export const getDriverBalance = async (driverId) =>
   DriverWallet.findOne({ driverId });
 
+export const getDriverTodayEarnings = async (driverId) => {
+  const today = new Date();
+  const startOfDay = new Date(today.setHours(0, 0, 0, 0));
+  const endOfDay = new Date(today.setHours(23, 59, 59, 999));
+
+  const transactions = await TransactionModel.find({
+    driverId,
+    passengerId: { $exists: true },
+    status: 'succeeded',
+    isRefunded: false,
+    category: { $in: ['RIDE', 'TIP'] },
+    createdAt: { $gte: startOfDay, $lte: endOfDay },
+    type: 'DEBIT',
+  })
+    .select('amount')
+    .lean();
+
+  const balance = transactions.reduce((acc, curr) => acc + curr.amount, 0);
+
+  return {
+    balance,
+  };
+};
+
 const increaseDriverPendingBalance = async (driverId, amount) =>
   DriverWallet.findOneAndUpdate(
     { driverId },

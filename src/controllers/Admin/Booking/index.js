@@ -2,15 +2,17 @@ import { handleResponse } from '../../../utils/handleRespone.js';
 import {
   getCompletedBookings,
   getOngoingBookings,
+  getScheduledBookings,
   getBookingById,
+  getNearestDriversForScheduledRide,
+  assignDriver,
 } from '../../../services/Admin/Booking/index.js';
 
 export const getCompletedBookingsController = (req, res) =>
   handleResponse(
     {
       handler: getCompletedBookings,
-      validationFn: null,
-      handlerParams: [req.user, req.query],
+      handlerParams: [req.query],
       successMessage: 'Completed Bookings fetched successfully',
     },
     req,
@@ -21,9 +23,19 @@ export const getOngoingBookingsController = (req, res) =>
   handleResponse(
     {
       handler: getOngoingBookings,
-      validationFn: null,
-      handlerParams: [req.user, req.query],
+      handlerParams: [req.query],
       successMessage: 'Ongoing Bookings fetched successfully',
+    },
+    req,
+    res,
+  );
+
+export const getScheduledBookingsController = (req, res) =>
+  handleResponse(
+    {
+      handler: getScheduledBookings,
+      handlerParams: [req.query],
+      successMessage: 'Scheduled Bookings fetched successfully',
     },
     req,
     res,
@@ -33,9 +45,30 @@ export const getBookingByIdController = (req, res) =>
   handleResponse(
     {
       handler: getBookingById,
-      validationFn: null,
-      handlerParams: [req.user, req.params],
+      handlerParams: [req.params],
       successMessage: 'Booking fetched successfully',
+    },
+    req,
+    res,
+  );
+
+export const getNearestDriversForScheduledRideController = (req, res) =>
+  handleResponse(
+    {
+      handler: getNearestDriversForScheduledRide,
+      handlerParams: [req.params, req.query],
+      successMessage: 'Driver assigned to booking successfully',
+    },
+    req,
+    res,
+  );
+
+export const assignDriverToScheduledRideController = (req, res) =>
+  handleResponse(
+    {
+      handler: assignDriver,
+      handlerParams: [req.params, req.query],
+      successMessage: 'Driver assigned to scheduled ride successfully',
     },
     req,
     res,

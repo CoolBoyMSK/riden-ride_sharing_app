@@ -1,6 +1,11 @@
 import mongoose from 'mongoose';
 import { CAR_TYPES } from '../enums/carType.js';
-import { RIDE_STATUS, PAYMENT_STATUS } from '../enums/rideStatus.js';
+import {
+  RIDE_STATUS,
+  PAYMENT_STATUS,
+  PAYMENT_METHODS,
+  BOOKED_FOR,
+} from '../enums/rideStatus.js';
 
 const locationSchema = new mongoose.Schema(
   {
@@ -126,6 +131,32 @@ const rideSchema = new mongoose.Schema(
       enum: CAR_TYPES,
       required: true,
     },
+    bookedFor: {
+      type: String,
+      enum: BOOKED_FOR,
+      required: true,
+      default: 'ME',
+    },
+    bookedForName: {
+      type: String,
+      trim: true,
+      required: function () {
+        if (this.bookedFor) {
+          return this.bookedFor === 'SOMEONE';
+        }
+        return false;
+      },
+    },
+    bookedForPhoneNumber: {
+      type: String,
+      trim: true,
+      required: function () {
+        if (this.bookedFor) {
+          return this.bookedFor === 'SOMEONE';
+        }
+        return false;
+      },
+    },
     status: {
       type: String,
       enum: RIDE_STATUS,
@@ -134,7 +165,20 @@ const rideSchema = new mongoose.Schema(
     },
     scheduledTime: {
       type: Date,
-      default: Date.now,
+      validate: {
+        validator: (value) => {
+          if (!value) {
+            return true;
+          } else if (value < new Date()) {
+            return false;
+          } else if (value < new Date() + 30 * 60 * 1000) {
+            return false;
+          }
+          return true;
+        },
+        message:
+          'Scheduled time must be in the future and at least 30 minutes from now',
+      },
     },
 
     // Promo Code Support
@@ -227,7 +271,7 @@ const rideSchema = new mongoose.Schema(
     // Payment
     paymentMethod: {
       type: String,
-      enum: ['CARD', 'WALLET'],
+      enum: PAYMENT_METHODS,
       required: true,
     },
     paymentStatus: {
@@ -240,16 +284,11 @@ const rideSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
-    walletId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Wallet',
-      required: function () {
-        return this.paymentMethod === 'WALLET';
-      },
-    },
-    walletId: {
+    cardId: {
       type: String,
-      trim: true,
+      required: function () {
+        return this.paymentMethod === 'CARD';
+      },
     },
 
     // Distance & Time
@@ -280,6 +319,13 @@ const rideSchema = new mongoose.Schema(
     requestedAt: {
       type: Date,
       default: Date.now,
+      index: true,
+    },
+    scheduledAt: {
+      type: Date,
+      default: function () {
+        return this.isScheduledRide ? new Date() : undefined;
+      },
       index: true,
     },
     driverAssignedAt: {
@@ -345,8 +391,15 @@ const rideSchema = new mongoose.Schema(
       ref: 'ChatRoom',
       unique: true,
     },
-    receipt: {
-      type: Object,
+
+    // Metadata
+    passengersAllowed: {
+      type: Number,
+      min: 0,
+    },
+    patientsAllowed: {
+      type: Number,
+      min: 0,
     },
     isAirport: {
       type: Boolean,
@@ -360,8 +413,13 @@ const rideSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-
-    // Metadata
+    isScheduledRide: {
+      type: Boolean,
+      default: false,
+    },
+    receipt: {
+      type: Object,
+    },
     fareConfig: {
       type: Object,
       required: true,
@@ -425,17 +483,5 @@ const rideSchema = new mongoose.Schema(
 rideSchema.index({ passengerId: 1, status: 1 });
 rideSchema.index({ driverId: 1, status: 1 });
 rideSchema.index({ status: 1, requestedAt: -1 });
-// rideSchema.index({ 'pickupLocation.coordinates': '2dsphere' });
-// rideSchema.index({ 'dropoffLocation.coordinates': '2dsphere' });
-
-// Generate ride ID before saving
-rideSchema.pre('save', function (next) {
-  if (!this.rideId) {
-    const timestamp = Date.now().toString(36);
-    const random = Math.random().toString(36).substr(2, 5);
-    this.rideId = `RIDE_${timestamp}_${random}`.toUpperCase();
-  }
-  next();
-});
 
 export default mongoose.model('Ride', rideSchema);

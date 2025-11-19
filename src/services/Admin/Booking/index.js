@@ -1,23 +1,17 @@
 import {
-  findAdminById,
   findFinishedBookings,
   findOngoingBookings,
+  findScheduledBookings,
   findBookingById,
+  findNearestDriversForScheduledRide,
+  assignDriverToScheduledRide,
 } from '../../../dal/admin/index.js';
 
 export const getCompletedBookings = async (
-  user,
   { page = 1, limit = 10, search = '', fromDate, toDate },
   resp,
 ) => {
   try {
-    const admin = await findAdminById(user._id);
-    if (!admin) {
-      resp.error = true;
-      resp.error_message = 'Failed to fetch admin';
-      return resp;
-    }
-
     const bookings = await findFinishedBookings({
       page,
       limit,
@@ -42,18 +36,10 @@ export const getCompletedBookings = async (
 };
 
 export const getOngoingBookings = async (
-  user,
   { page = 1, limit = 10, search = '', fromDate, toDate },
   resp,
 ) => {
   try {
-    const admin = await findAdminById(user._id);
-    if (!admin) {
-      resp.error = true;
-      resp.error_message = 'Failed to fetch admin';
-      return resp;
-    }
-
     const bookings = await findOngoingBookings(
       page,
       limit,
@@ -77,15 +63,44 @@ export const getOngoingBookings = async (
   }
 };
 
-export const getBookingById = async (user, { id }, resp) => {
+export const getScheduledBookings = async (
+  {
+    page = 1,
+    limit = 10,
+    search = '',
+    fromDate,
+    toDate,
+    driverAssigned = false,
+  },
+  resp,
+) => {
   try {
-    const admin = await findAdminById(user._id);
-    if (!admin) {
+    const bookings = await findScheduledBookings({
+      page,
+      limit,
+      search,
+      fromDate,
+      toDate,
+      driverAssigned,
+    });
+    if (!bookings) {
       resp.error = true;
-      resp.error_message = 'Failed to fetch admin';
+      resp.error_message = 'Failed to fetch scheduled bookings';
       return resp;
     }
 
+    resp.data = bookings;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'something went wrong';
+    return resp;
+  }
+};
+
+export const getBookingById = async ({ id }, resp) => {
+  try {
     const booking = await findBookingById(id);
     if (!booking) {
       resp.error = true;
@@ -94,6 +109,56 @@ export const getBookingById = async (user, { id }, resp) => {
     }
 
     resp.data = booking;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'something went wrong';
+    return resp;
+  }
+};
+
+export const getNearestDriversForScheduledRide = async (
+  { id },
+  { page = 1, limit = 10, search = '' },
+  resp,
+) => {
+  try {
+    const drivers = await findNearestDriversForScheduledRide({
+      rideId: id,
+      page,
+      limit,
+      search,
+    });
+    if (!drivers) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch drivers';
+      return resp;
+    }
+
+    resp.data = drivers;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'something went wrong';
+    return resp;
+  }
+};
+
+export const assignDriver = async ({ id }, { driverId }, resp) => {
+  try {
+    const success = await assignDriverToScheduledRide({
+      rideId: id,
+      driverId,
+    });
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to assign driver to scheduled ride';
+      return resp;
+    }
+
+    resp.data = success;
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);

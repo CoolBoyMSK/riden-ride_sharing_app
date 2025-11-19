@@ -243,22 +243,9 @@ export const findLifeTimeHighlights = async (driverId) => {
     throw new Error('Driver not found');
   }
 
-  const joinDate = driver.createdAt;
-  const now = new Date();
-
-  // Difference in years
-  const yearsSinceJoined =
-    now.getFullYear() -
-    joinDate.getFullYear() -
-    (now.getMonth() < joinDate.getMonth() ||
-    (now.getMonth() === joinDate.getMonth() &&
-      now.getDate() < joinDate.getDate())
-      ? 1
-      : 0);
-
   return {
     totalRides,
-    yearsSinceJoined,
+    joinDate: driver.createdAt,
   };
 };
 
@@ -663,4 +650,58 @@ export const findDrivingHours = async (driverId) => {
     ridesCount: rides.length,
     dailyLimit: 13,
   };
+};
+
+export const findPayoutStats = async (
+  driverId,
+  driverCreatedAt,
+  { page = 1, limit = 10, fromDate, toDate } = {},
+) => {
+  try {
+    // Parse and constrain date filters
+    let payoutDateFilter = {};
+    let minStartDate = driverCreatedAt;
+    let maxEndDate = new Date();
+
+    if (fromDate) {
+      minStartDate = new Date(fromDate);
+      if (isNaN(minStartDate)) minStartDate = driverCreatedAt;
+    }
+    if (toDate) {
+      maxEndDate = new Date(toDate);
+      if (isNaN(maxEndDate)) maxEndDate = new Date();
+      maxEndDate.setHours(23, 59, 59, 999);
+    }
+
+    payoutDateFilter.payoutDate = {
+      $gte: minStartDate,
+      $lte: maxEndDate,
+    };
+
+    // Build query
+    const query = {
+      driverId: new mongoose.Types.ObjectId(driverId),
+      ...payoutDateFilter,
+    };
+
+    // Get total count
+    const total = await DriverPayout.countDocuments(query);
+
+    // Get payouts in paginated form
+    const payouts = await DriverPayout.find(query)
+      .sort({ payoutDate: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean();
+
+    return {
+      data: payouts,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      total,
+      totalPages: Math.ceil(total / limit),
+    };
+  } catch (error) {
+    throw error;
+  }
 };

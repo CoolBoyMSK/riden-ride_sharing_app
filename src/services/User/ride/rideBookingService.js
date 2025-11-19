@@ -1,22 +1,29 @@
 import {
   createRide,
   findActiveRideByPassenger,
+  findScheduledRideByPassenger,
   updateRideByRideId,
   findRideByRideId,
 } from '../../../dal/ride.js';
-import { findPassengerByUserId } from '../../../dal/passenger.js';
 import {
-  // checkSurgePricing,
+  findPassengerByUserId,
+  findPassengerData,
+} from '../../../dal/passenger.js';
+import {
   analyzeSurgePricing,
   startProgressiveDriverSearch,
   updateExistingRidesSurgePricing,
   findFareConfigurationForLocation,
   isAirportRide,
 } from '../../../dal/driver.js';
-import { getPassengerWallet } from '../../../dal/stripe.js';
 import { validatePromoCode } from '../../../dal/promo_code.js';
 import { calculateEstimatedFare } from './fareCalculationService.js';
 import { getNearbyDriversCount } from './driverMatchingService.js';
+import {
+  notifyUser,
+  createAdminNotification,
+} from '../../../dal/notification.js';
+import { CAR_TYPES, PASSENGER_ALLOWED } from '../../../enums/carType.js';
 
 // Calculate distance using simple Haversine formula (for estimation)
 const calculateDistance = async (pickup, dropoff) => {
@@ -147,10 +154,14 @@ export const bookRide = async (userId, rideData) => {
       pickupLocation,
       dropoffLocation,
       carType,
+      bookedFor,
+      bookedForName,
+      bookedForPhoneNumber,
       paymentMethod,
       promoCode,
       scheduledTime,
       specialRequests,
+      cardId,
     } = rideData;
 
     // Input validation
@@ -158,7 +169,7 @@ export const bookRide = async (userId, rideData) => {
     if (validationError) return validationError;
 
     // Find passenger profile
-    const passenger = await findPassengerByUserId(userId);
+    const passenger = await findPassengerData(userId);
     if (!passenger) {
       return {
         success: false,
@@ -174,6 +185,62 @@ export const bookRide = async (userId, rideData) => {
         message: 'You already have an active ride',
         activeRide: activeRide,
       };
+    }
+
+    const scheduledRide = await findScheduledRideByPassenger(passenger._id);
+    if (scheduledRide === false) {
+      return {
+        success: false,
+        message:
+          'You already have a scheduled ride within 45 minutes. Please wait before booking another ride.',
+      };
+    } else if (scheduledRide) {
+      const notifyPassenger = await notifyUser({
+        userId: passenger.userId?._id,
+        title: 'Scheduled Ride Reminder',
+        message: `You have a scheduled ride in ${scheduledRide.remainingTime}. ${scheduledRide.ride.bookedFor === 'SOMEONE' ? `For ${scheduledRide.ride.bookedForName} with phone number ${scheduledRide.ride.bookedForPhoneNumber}` : ''}`,
+        module: 'ride',
+        metadata: scheduledRide.ride,
+      });
+      if (!notifyPassenger) {
+        console.error('Failed to send notification');
+      }
+    }
+
+    if (bookedFor === 'SOMEONE') {
+      if (!bookedForName || !bookedForPhoneNumber) {
+        return {
+          success: false,
+          message:
+            'Name and phone number are required when booking ride for someone else',
+        };
+      }
+
+      const name = bookedForName.trim();
+      const phoneNumber = bookedForPhoneNumber.trim();
+
+      if (name.length === 0 || phoneNumber.length === 0) {
+        return {
+          success: false,
+          message:
+            'Name and phone number are required when booking ride for someone else',
+        };
+      }
+
+      if (name.length < 3) {
+        return {
+          success: false,
+          message: 'Name must be at least 3 characters long',
+        };
+      }
+
+      if (!/^[0-9+\- ]{7,20}$/.test(phoneNumber)) {
+        return {
+          success: false,
+          message:
+            'Phone number must be 7-20 characters and contain only digits, +, -, or spaces.',
+        };
+      }
     }
 
     // Parallel execution for better performance
@@ -211,9 +278,9 @@ export const bookRide = async (userId, rideData) => {
     }
 
     // Validate and apply promo code
-    const promoValidation = await validateAndApplyPromoCode(promoCode);
-    if (!promoValidation.success) return promoValidation;
-    const { promoDetails, promoDiscount } = promoValidation;
+    // const promoValidation = await validateAndApplyPromoCode(promoCode);
+    // if (!promoValidation.success) return promoValidation;
+    // const { promoDetails, promoDiscount } = promoValidation;
 
     // Get fare configuration (reuse from surge analysis if available, otherwise fetch)
     // const fareConfig =
@@ -239,15 +306,43 @@ export const bookRide = async (userId, rideData) => {
       };
     }
 
-    // Calculate fare
-    const fareResult = await calculateEstimatedFare(
-      carType,
-      distance,
-      duration,
-      promoCode,
-      surgeMultiplier,
-      fareConfig,
-    );
+    let fareResult;
+    if (scheduledTime) {
+      const time = new Date(scheduledTime);
+      const now = new Date();
+      if (time < now) {
+        return {
+          success: false,
+          message: 'Scheduled time must be in the future',
+        };
+      }
+      const timeDifference = time - now;
+      if (timeDifference < 30 * 60 * 1000) {
+        return {
+          success: false,
+          message: 'Scheduled time must be more than 30 minutes from now',
+        };
+      }
+
+      fareResult = await calculateEstimatedFare(
+        carType,
+        distance,
+        duration,
+        promoCode,
+        surgeMultiplier,
+        fareConfig,
+        time,
+      );
+    } else {
+      fareResult = await calculateEstimatedFare(
+        carType,
+        distance,
+        duration,
+        promoCode,
+        surgeMultiplier,
+        fareConfig,
+      );
+    }
 
     if (!fareResult.success) {
       return {
@@ -257,13 +352,13 @@ export const bookRide = async (userId, rideData) => {
     }
 
     // Validate payment method
+
     const paymentValidation = await validatePaymentMethod(
       passenger,
       paymentMethod,
-      fareResult.estimatedFare,
+      cardId,
     );
     if (!paymentValidation.success) return paymentValidation;
-    const { wallet } = paymentValidation;
 
     // Create ride record
     ride = await createRideRecord({
@@ -272,7 +367,7 @@ export const bookRide = async (userId, rideData) => {
       dropoffLocation,
       carType,
       paymentMethod,
-      promoDetails,
+      cardId,
       scheduledTime,
       specialRequests,
       distance,
@@ -284,13 +379,58 @@ export const bookRide = async (userId, rideData) => {
       isSurgeApplied,
       surgeData: surgeDataWithCurrentRide,
       fareConfig,
-      wallet,
+      isScheduledRide: scheduledTime ? true : false,
+      status: scheduledTime ? 'SCHEDULED' : 'REQUESTED',
+      bookedFor,
+      bookedForName,
+      bookedForPhoneNumber,
+      passengersAllowed: PASSENGER_ALLOWED[carType].passengersAllowed,
+      patientsAllowed: PASSENGER_ALLOWED[carType].patientsAllowed,
     });
 
     if (!ride) {
       return {
         success: false,
-        message: 'Failed to create ride record',
+        message: 'Failed to create ride record. Please try again.',
+      };
+    } else if (ride.isScheduledRide) {
+      const notifyPassenger = await notifyUser({
+        userId: passenger.userId?._id,
+        title: 'Scheduling Request Sent',
+        message: `Your scheduling request has been sent successfully. You will be notified when the request is responded by the admin.`,
+        module: 'ride',
+        metadata: ride,
+      });
+      if (!notifyPassenger) {
+        console.error('Failed to send notification');
+      }
+
+      if (ride.bookedFor === 'SOMEONE') {
+        const notifyAdmin = await createAdminNotification({
+          title: 'New Ride Scheduling Request',
+          message: `A new scheduling request has been sent by ${ride.userId?.name} for ${ride.bookedForName} with phone number ${ride.bookedForPhoneNumber}`,
+          metadata: ride,
+          module: 'ride',
+        });
+        if (!notifyAdmin) {
+          console.error('Failed to send notification');
+        }
+      } else {
+        const notifyAdmin = await createAdminNotification({
+          title: 'New Ride Scheduling Request',
+          message: `A new scheduling request has been sent by a ${passenger.userId?.name}`,
+          metadata: ride,
+          module: 'ride',
+        });
+        if (!notifyAdmin) {
+          console.error('Failed to send notification');
+        }
+      }
+
+      return {
+        success: true,
+        message: 'Scheduling request sent successfully',
+        data: ride,
       };
     }
 
@@ -353,64 +493,68 @@ const validateRideInput = (rideData) => {
       message:
         'Missing required fields: pickupLocation, dropoffLocation, carType, paymentMethod',
     };
+  } else if (!CAR_TYPES.includes(carType)) {
+    return {
+      success: false,
+      message: `Car type must be one of: ${CAR_TYPES.join(', ')}`,
+    };
+  } else if (!PASSENGER_ALLOWED[carType]) {
+    return {
+      success: false,
+      message: `Passengers allowed must be greater than 0`,
+    };
+  } else if (PASSENGER_ALLOWED[carType].patientsAllowed < 0) {
+    return {
+      success: false,
+      message: `Patients allowed must be greater than 0`,
+    };
   }
 
   return null;
 };
 
-const validateAndApplyPromoCode = async (promoCode) => {
-  if (!promoCode) {
-    return { success: true, promoDetails: null, promoDiscount: 0 };
-  }
+// const validateAndApplyPromoCode = async (promoCode) => {
+//   if (!promoCode) {
+//     return { success: true, promoDetails: null, promoDiscount: 0 };
+//   }
 
-  const validPromo = await validatePromoCode(promoCode);
-  if (!validPromo) {
-    return {
-      success: false,
-      message: 'Invalid or expired promo code',
-    };
-  }
+//   const validPromo = await validatePromoCode(promoCode);
+//   if (!validPromo) {
+//     return {
+//       success: false,
+//       message: 'Invalid or expired promo code',
+//     };
+//   }
 
-  return {
-    success: true,
-    promoDetails: {
-      code: validPromo.code,
-      discount: validPromo.discount,
-      isApplied: true,
-    },
-    promoDiscount: validPromo.discount,
-  };
-};
+//   return {
+//     success: true,
+//     promoDetails: {
+//       code: validPromo.code,
+//       discount: validPromo.discount,
+//       isApplied: true,
+//     },
+//     promoDiscount: validPromo.discount,
+//   };
+// };
 
-const validatePaymentMethod = async (passenger, paymentMethod, fareAmount) => {
+const validatePaymentMethod = async (passenger, paymentMethod, cardId) => {
   if (paymentMethod === 'CARD') {
-    if (!passenger.paymentMethodIds?.length) {
+    if (!cardId) {
       return {
         success: false,
-        message: 'Card(s) not available. Please add a card.',
+        message: 'Card ID is required',
       };
-    }
-    if (!passenger.defaultCardId) {
+    } else if (!passenger.paymentMethodIds?.length) {
       return {
         success: false,
-        message: 'Please add a default payment method',
+        message: 'No cards available. Please add a card.',
       };
-    }
-  } else if (paymentMethod === 'WALLET') {
-    const wallet = await getPassengerWallet(passenger._id);
-    if (!wallet) {
+    } else if (!passenger.paymentMethodIds.includes(cardId)) {
       return {
         success: false,
-        message: 'Wallet not available',
+        message: 'Please add a valid card',
       };
     }
-    if (wallet.balance < fareAmount) {
-      return {
-        success: false,
-        message: 'Insufficient wallet funds',
-      };
-    }
-    return { success: true, wallet };
   } else {
     return {
       success: false,
@@ -428,7 +572,7 @@ const createRideRecord = async (params) => {
     dropoffLocation,
     carType,
     paymentMethod,
-    promoDetails,
+    cardId,
     scheduledTime,
     specialRequests,
     distance,
@@ -440,7 +584,13 @@ const createRideRecord = async (params) => {
     isSurgeApplied,
     surgeData,
     fareConfig,
-    wallet,
+    isScheduledRide,
+    status,
+    bookedFor,
+    bookedForName,
+    bookedForPhoneNumber,
+    passengersAllowed,
+    patientsAllowed,
   } = params;
 
   const ridePayload = {
@@ -449,15 +599,14 @@ const createRideRecord = async (params) => {
     dropoffLocation,
     carType,
     paymentMethod,
-    ...(paymentMethod === 'WALLET' && { walletId: wallet?._id }),
-    ...(promoDetails && { promoCode: promoDetails }),
-    scheduledTime: scheduledTime ? new Date(scheduledTime) : new Date(),
+    ...(paymentMethod === 'CARD' && { cardId }),
+    scheduledTime: scheduledTime ? new Date(scheduledTime) : null,
     ...(specialRequests && { specialRequests }),
     estimatedDistance: distance,
     estimatedDuration: duration,
     estimatedFare: fareResult.estimatedFare,
     fareBreakdown: fareResult.fareBreakdown,
-    status: 'REQUESTED',
+    status,
     isAirport,
     airport,
     searchRadius: 5,
@@ -471,6 +620,12 @@ const createRideRecord = async (params) => {
     fareConfigType: fareConfig.zone ? 'zone' : 'default',
     zoneName: fareConfig.zone?.name || 'default',
     createdAt: new Date(),
+    isScheduledRide,
+    bookedFor,
+    bookedForName,
+    bookedForPhoneNumber,
+    passengersAllowed,
+    patientsAllowed,
   };
 
   return await createRide(ridePayload);

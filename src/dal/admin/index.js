@@ -41,21 +41,6 @@ const getAllDaysInMonth = (year, month) => {
   return days;
 };
 
-// const isInvalidTokenError = (err) => {
-//   if (!err) return false;
-//   const m = (err.message || '').toLowerCase();
-//   return /registration-token-not-registered|invalid-registration-token|not-registered|invalid argument|unauthorized/i.test(
-//     m,
-//   );
-// };
-
-// const _sumStats = (a, b) => ({
-//   totalTargets: a.totalTargets + b.totalTargets,
-//   sent: a.sent + b.sent,
-//   failed: a.failed + b.failed,
-//   invalidTokens: a.invalidTokens + b.invalidTokens,
-// });
-
 export const findAdminByEmail = (email) => AdminModel.findOne({ email });
 
 export const findAdminById = (id) => AdminModel.findById(id);
@@ -493,6 +478,393 @@ export const findBookingById = async (id) => {
     driverRides,
     driverReviews,
   };
+};
+
+export const findScheduledBookings = async ({
+  page = 1,
+  limit = 10,
+  search = '',
+  fromDate,
+  toDate,
+  driverAssigned = false,
+}) => {
+  const safePage = Math.max(parseInt(page, 10) || 1, 1);
+  const safeLimit = Math.max(parseInt(limit, 10) || 10, 1);
+
+  // --- base match ---
+  // Scheduled bookings are those with scheduledTime in the future and status REQUESTED
+  const now = new Date();
+  const match = {
+    isScheduledRide: true,
+    driverId: { $exists: driverAssigned },
+    scheduledTime: { $gt: now },
+  };
+
+  // --- date filter on scheduledTime ---
+  if (fromDate || toDate) {
+    match.scheduledTime = { ...match.scheduledTime };
+    if (fromDate) {
+      match.scheduledTime.$gte = parseDate(fromDate);
+    }
+    if (toDate) {
+      match.scheduledTime.$lte = parseDate(toDate, true);
+    }
+  }
+
+  // --- safe search ---
+  const safeSearch = typeof search === 'string' ? search.trim() : '';
+  const escapedSearch = safeSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = safeSearch ? new RegExp(escapedSearch, 'i') : null;
+
+  // --- query ---
+  const query = Booking.find(match)
+    .populate({
+      path: 'passengerId',
+      populate: { path: 'userId', select: 'name email phoneNumber profileImg' },
+    })
+    .sort({ scheduledTime: -1 }) // latest scheduled first
+    .lean();
+
+  const allBookings = await query;
+
+  // --- apply search in-memory (safe + flexible) ---
+  const filtered = regex
+    ? allBookings.filter((b) => {
+        const passenger = b.passengerId?.userId || {};
+        const driver = b.driverId?.userId || {};
+        return (
+          regex.test(passenger.name || '') ||
+          regex.test(passenger.email || '') ||
+          regex.test(passenger.phoneNumber || '') ||
+          regex.test(driver.name || '') ||
+          regex.test(driver.email || '') ||
+          regex.test(driver.phoneNumber || '') ||
+          regex.test(b.rideId || '')
+        );
+      })
+    : allBookings;
+
+  const total = filtered.length;
+  const start = (safePage - 1) * safeLimit;
+  const paged = filtered.slice(start, start + safeLimit);
+
+  // --- map result ---
+  const data = paged.map((b) => ({
+    _id: b._id,
+    rideId: b.rideId,
+    status: b.status,
+    scheduledTime: b.scheduledTime,
+    createdAt: b.createdAt,
+    updatedAt: b.updatedAt,
+    estimatedFare: b.estimatedFare,
+    carType: b.carType,
+    passenger: {
+      uniqueId: b.passengerId?.uniqueId || '',
+      name: b.passengerId?.userId?.name || '',
+      email: b.passengerId?.userId?.email || '',
+      phoneNumber: b.passengerId?.userId?.phoneNumber || '',
+      profileImg: b.passengerId?.userId?.profileImg || '',
+    },
+    isDriverAssigned: b.driverId ? true : false,
+  }));
+
+  return {
+    data,
+    total,
+    page: safePage,
+    limit: safeLimit,
+    totalPages: Math.ceil(total / safeLimit) || 0,
+  };
+};
+
+export const findNearestDriversForScheduledRide = async ({
+  rideId,
+  page = 1,
+  limit = 10,
+  search = '',
+}) => {
+  // 25km radius in meters
+  const SEARCH_RADIUS = 25 * 1000;
+
+  const safePage = Math.max(parseInt(page, 10) || 1, 1);
+  const safeLimit = Math.max(parseInt(limit, 10) || 10, 1);
+
+  // Validate rideId
+  if (!rideId || !mongoose.Types.ObjectId.isValid(rideId)) {
+    throw new Error('Valid rideId is required');
+  }
+
+  // Find the scheduled ride to get pickup location
+  const ride = await Booking.findOne({
+    _id: rideId,
+  })
+    .populate({
+      path: 'passengerId',
+      populate: { path: 'userId', select: 'name email phoneNumber' },
+    })
+    .lean();
+
+  if (!ride) {
+    throw new Error('Ride not found');
+  }
+
+  if (!ride.isScheduledRide || !ride.scheduledTime) {
+    throw new Error('Ride is not a scheduled ride');
+  }
+
+  const pickupCoordinates = ride.pickupLocation?.coordinates;
+  if (!pickupCoordinates || pickupCoordinates.length !== 2) {
+    throw new Error('Invalid pickup location coordinates');
+  }
+
+  // --- safe search ---
+  const safeSearch = typeof search === 'string' ? search.trim() : '';
+  const escapedSearch = safeSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const searchRegex = safeSearch ? new RegExp(escapedSearch, 'i') : null;
+
+  // Aggregation pipeline to find drivers within 25km radius
+  const pipeline = [
+    // Stage 1: Find nearby driver locations using $geoNear
+    {
+      $geoNear: {
+        near: {
+          type: 'Point',
+          coordinates: pickupCoordinates, // [longitude, latitude]
+        },
+        distanceField: 'distance', // Distance in meters
+        maxDistance: SEARCH_RADIUS, // 25km in meters
+        spherical: true,
+        key: 'location',
+        query: {
+          status: 'online',
+          isAvailable: true,
+          currentRideId: { $in: [null, undefined, ''] },
+        },
+      },
+    },
+    // Stage 2: Lookup driver details
+    {
+      $lookup: {
+        from: 'drivers',
+        localField: 'driverId',
+        foreignField: '_id',
+        as: 'driver',
+      },
+    },
+    // Stage 3: Unwind driver array
+    { $unwind: '$driver' },
+    // Stage 4: Match driver criteria
+    {
+      $match: {
+        'driver.vehicle.type': ride.carType,
+        'driver.isBlocked': false,
+        'driver.isSuspended': false,
+        'driver.isActive': true,
+        'driver.backgroundCheckStatus': 'approved',
+        'driver.status': 'online',
+      },
+    },
+    // Stage 5: Lookup user details
+    {
+      $lookup: {
+        from: 'users',
+        localField: 'driver.userId',
+        foreignField: '_id',
+        as: 'user',
+      },
+    },
+    // Stage 6: Unwind user array
+    { $unwind: '$user' },
+    // Stage 7: Filter out blocked users
+    {
+      $match: {
+        'user.isBlocked': { $ne: true },
+      },
+    },
+    // Stage 8: Project fields
+    {
+      $project: {
+        _id: 1,
+        driverId: '$driver._id',
+        userId: '$driver.userId',
+        driverUniqueId: '$driver.uniqueId',
+        location: 1,
+        distance: 1, // Distance in meters from pickup location
+        distanceKm: { $divide: ['$distance', 1000] }, // Distance in kilometers
+        heading: 1,
+        speed: 1,
+        accuracy: 1,
+        lastUpdated: 1,
+        status: 1,
+        isAvailable: 1,
+        driverName: '$user.name',
+        driverEmail: '$user.email',
+        driverPhone: '$user.phoneNumber',
+        driverProfileImg: '$user.profileImg',
+        vehicleType: '$driver.vehicle.type',
+        vehicleModel: '$driver.vehicle.model',
+        vehiclePlate: '$driver.vehicle.plateNumber',
+        vehicleColor: '$driver.vehicle.color',
+        vehicleImage: '$driver.vehicle.imageUrl',
+        rideId: ride._id,
+        rideRideId: ride.rideId,
+        pickupLocation: {
+          address: ride.pickupLocation.address,
+          placeName: ride.pickupLocation.placeName,
+          coordinates: ride.pickupLocation.coordinates,
+        },
+        scheduledTime: ride.scheduledTime,
+        carType: ride.carType,
+      },
+    },
+    // Stage 9: Sort by distance (nearest first)
+    { $sort: { distance: 1 } },
+  ];
+
+  // Execute aggregation
+  const allDrivers = await DriverLocation.aggregate(pipeline);
+
+  // Apply search filter in memory (search through driver name, email, phone, uniqueId, vehicle plate)
+  const filtered = searchRegex
+    ? allDrivers.filter((driver) => {
+        return (
+          searchRegex.test(driver.driverName || '') ||
+          searchRegex.test(driver.driverEmail || '') ||
+          searchRegex.test(driver.driverPhone || '') ||
+          searchRegex.test(driver.driverUniqueId || '') ||
+          searchRegex.test(driver.vehiclePlate || '')
+        );
+      })
+    : allDrivers;
+
+  // Calculate pagination
+  const total = filtered.length;
+  const start = (safePage - 1) * safeLimit;
+  const paged = filtered.slice(start, start + safeLimit);
+
+  // Map results for response
+  const data = paged.map((driver) => ({
+    _id: driver.driverId,
+    uniqueId: driver.driverUniqueId,
+    userId: driver.userId,
+    name: driver.driverName,
+    email: driver.driverEmail,
+    phoneNumber: driver.driverPhone,
+    profileImg: driver.driverProfileImg,
+    distance: Math.round(driver.distance),
+    status: driver.status,
+    lastUpdated: driver.lastUpdated,
+  }));
+
+  return {
+    data,
+    total,
+    page: safePage,
+    limit: safeLimit,
+    totalPages: Math.ceil(total / safeLimit) || 0,
+  };
+};
+
+export const assignDriverToScheduledRide = async ({ rideId, driverId }) => {
+  // Validate rideId
+  if (!rideId || !mongoose.Types.ObjectId.isValid(rideId)) {
+    throw new Error('Invalid ride ID provided');
+  } else if (!driverId || !mongoose.Types.ObjectId.isValid(driverId)) {
+    throw new Error('Invalid driver ID provided');
+  }
+
+  // Find the ride
+  const ride = await Booking.findById(rideId)
+    .populate({
+      path: 'passengerId',
+      populate: { path: 'userId', select: 'name email phoneNumber' },
+    })
+    .lean();
+
+  if (!ride) {
+    throw new Error('Ride not found');
+  } else if (!ride.isScheduledRide) {
+    throw new Error('This ride is not a scheduled ride');
+  } else if (!ride.scheduledTime) {
+    throw new Error('Scheduled time is missing for this ride');
+  } else if (ride.driverId) {
+    throw new Error('Ride already has a driver assigned');
+  } else if (ride.status !== 'SCHEDULED') {
+    throw new Error(
+      `Cannot assign driver to a ride with status: ${ride.status}. Ride must be SCHEDULED`,
+    );
+  }
+
+  // Find the driver
+  const driver = await Driver.findById(driverId)
+    .populate({
+      path: 'userId',
+      select: 'name email phoneNumber',
+    })
+    .lean();
+
+  if (!driver) {
+    throw new Error('Driver not found');
+  } else if (driver.isBlocked) {
+    throw new Error('Driver is blocked and cannot be assigned to rides');
+  } else if (driver.isSuspended) {
+    throw new Error('Driver is suspended and cannot be assigned to rides');
+  } else if (!driver.isActive) {
+    throw new Error('Driver is not active and cannot be assigned to rides');
+  } else if (driver.backgroundCheckStatus !== 'approved') {
+    throw new Error(
+      `Driver background check status is ${driver.backgroundCheckStatus}. Only approved drivers can be assigned`,
+    );
+  } else if (!driver.vehicle || !driver.vehicle.type) {
+    throw new Error('Driver vehicle information is missing');
+  } else if (driver.vehicle.type !== ride.carType) {
+    throw new Error(
+      `Driver vehicle type (${driver.vehicle.type}) does not match ride car type (${ride.carType})`,
+    );
+  }
+
+  // Check driver location and availability
+  const driverLocation = await DriverLocation.findOne({ driverId }).lean();
+
+  if (!driverLocation) {
+    throw new Error(
+      'Driver location not found. Driver must be online to be assigned',
+    );
+  } else if (driverLocation.status !== 'online') {
+    throw new Error(
+      `Driver is currently ${driverLocation.status}. Only online drivers can be assigned`,
+    );
+  } else if (driverLocation.isAvailable === false) {
+    throw new Error('Driver is not available for assignment');
+  } else if (driverLocation.currentRideId) {
+    throw new Error('Driver is currently on another ride');
+  }
+
+  // Update ride with driver assignment
+  const updatedRide = await Booking.findByIdAndUpdate(
+    rideId,
+    {
+      driverId: driverId,
+      status: 'DRIVER_ASSIGNED',
+      driverAssignedAt: new Date(),
+    },
+    { new: true },
+  )
+    .populate({
+      path: 'passengerId',
+      populate: { path: 'userId', select: 'name email phoneNumber' },
+    })
+    .populate({
+      path: 'driverId',
+      populate: { path: 'userId', select: 'name email phoneNumber profileImg' },
+    })
+    .lean();
+
+  if (!updatedRide) {
+    throw new Error('Failed to update ride with driver assignment');
+  }
+
+  return updatedRide;
 };
 
 export const findDriverFeedbacks = async ({
@@ -2385,132 +2757,6 @@ export const findComissionStats = async () => {
     totalCommission,
   };
 };
-
-// export const createAlert = async ({ user, audience, recipients, blocks }) =>
-//   Alert.create({
-//     createdBy: user._id,
-//     audience,
-//     recipients: recipients || [],
-//     blocks,
-//     status: 'PENDING',
-//   });
-
-// // --- Main ---
-// export const sendAlert = async (alertId) => {
-//   const alert = await Alert.findById(alertId);
-//   if (!alert) throw new Error('Alert not found');
-
-//   alert.status = 'IN_PROGRESS';
-//   await alert.save();
-
-//   // Build user query based on audience
-//   let userQuery = { userDeviceToken: { $exists: true, $ne: null } };
-
-//   if (alert.audience === 'custom') {
-//     userQuery._id = { $in: alert.recipients || [] };
-//   } else if (alert.audience === 'drivers') {
-//     userQuery.roles = { $in: ['driver'] };
-//   } else if (alert.audience === 'passengers') {
-//     userQuery.roles = { $in: ['passenger'] };
-//   }
-//   // audience = all → keep base query
-
-//   // Stream users to avoid memory blowup
-//   const cursor = User.find(userQuery)
-//     .select('_id userDeviceToken')
-//     .lean()
-//     .cursor();
-
-//   let stats = { totalTargets: 0, sent: 0, failed: 0, invalidTokens: 0 };
-//   const primaryBlock = (alert.blocks && alert.blocks[0]) || {
-//     title: '',
-//     body: '',
-//     data: {},
-//   };
-
-//   let collector = [];
-
-//   for await (const user of cursor) {
-//     if (!user.userDeviceToken) continue;
-//     collector.push({ token: user.userDeviceToken, userId: user._id });
-
-//     if (collector.length >= BATCH_SIZE) {
-//       const res = await _sendBatch(collector, primaryBlock);
-//       stats = _sumStats(stats, res);
-//       collector = [];
-//     }
-//   }
-
-//   // leftover batch
-//   if (collector.length) {
-//     const res = await _sendBatch(collector, primaryBlock);
-//     stats = _sumStats(stats, res);
-//   }
-
-//   // Update alert stats
-//   alert.stats = {
-//     totalTargets: stats.totalTargets,
-//     sent: stats.sent,
-//     failed: stats.failed,
-//     invalidTokens: stats.invalidTokens,
-//   };
-//   alert.status =
-//     stats.failed === 0 ? 'SENT' : stats.sent === 0 ? 'FAILED' : 'SENT';
-//   await alert.save();
-
-//   return stats;
-// };
-
-// // --- Batch sender ---
-// const _sendBatch = async (items, block) => {
-//   const tokens = items.map((i) => i.token);
-//   const message = {
-//     notification: { title: block.title || '', body: block.body || '' },
-//     data: Object.keys(block.data || {}).reduce(
-//       (acc, k) => ({ ...acc, [k]: String(block.data[k]) }),
-//       {},
-//     ),
-//     tokens,
-//   };
-
-//   const result = {
-//     totalTargets: tokens.length,
-//     sent: 0,
-//     failed: 0,
-//     invalidTokens: 0,
-//   };
-
-//   try {
-//     const resp = await messaging.sendEachForMulticast(message);
-
-//     for (let i = 0; i < resp.responses.length; i++) {
-//       const r = resp.responses[i];
-//       const token = tokens[i];
-
-//       if (r.success) {
-//         result.sent++;
-//       } else {
-//         result.failed++;
-//         if (isInvalidTokenError(r.error)) {
-//           result.invalidTokens++;
-//           // mark token as invalid in User schema
-//           await mongoose
-//             .model('User')
-//             .updateOne(
-//               { userDeviceToken: token },
-//               { $unset: { userDeviceToken: 1 } },
-//             )
-//             .exec();
-//         }
-//       }
-//     }
-//   } catch (err) {
-//     console.error('_sendBatch fatal error', err);
-//     result.failed = tokens.length;
-//   }
-
-//   return result;
-// };
 
 // Helper function to check for invalid tokens
 const isInvalidTokenError = (error) => {

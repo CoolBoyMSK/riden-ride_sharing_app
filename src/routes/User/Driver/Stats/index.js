@@ -4,6 +4,7 @@ import {
   getStatsController,
   getLifeTimeHighlightsController,
   getWeeklyStatsController,
+  getPayoutStatsController,
   getDailyStatsForWeekController,
   getDrivingHoursController,
   fetchDriverBalanceController,
@@ -30,6 +31,13 @@ registerRoute({
   route: '/weekly',
   driver_auth_enable: true,
   get_method: getWeeklyStatsController,
+});
+
+registerRoute({
+  router,
+  route: '/payouts',
+  driver_auth_enable: true,
+  get_method: getPayoutStatsController,
 });
 
 registerRoute({
