@@ -22,3 +22,14 @@ export const DOCUMENT_TYPES = [
 ];
 
 export const WAYBILL_STATUS = ['not_issued', 'issued'];
+
+export const ALLOWED_DRIVER_UPDATE_REQUEST_FIELDS = [
+  'name',
+  'proofOfWork',
+  'profilePicture',
+  'driversLicense',
+  'commercialDrivingRecord',
+  'vehicleOwnerCertificateAndInsurance',
+  'vehicleInspection',
+  'profileImg',
+];
