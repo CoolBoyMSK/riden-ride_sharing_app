@@ -1,10 +1,10 @@
 import mongoose from 'mongoose';
-import { CAR_TYPES } from '../enums/carType.js';
+import { CAR_TYPES } from '../enums/vehicleEnums.js';
 import {
   DRIVER_STATUS,
   DOCUMENT_STATUS,
   WAYBILL_STATUS,
-} from '../enums/driver.js';
+} from '../enums/driverEnums.js';
 
 const suspensionSchema = new mongoose.Schema(
   {

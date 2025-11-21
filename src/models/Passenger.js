@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { CARD_TYPES, PAYMENT_METHODS } from '../enums/paymentEnums.js';
 
 const addressSchema = new mongoose.Schema(
   {
@@ -40,6 +41,58 @@ const addressSchema = new mongoose.Schema(
   { _id: true },
 );
 
+const walletSchema = new mongoose.Schema(
+  {
+    enabled: {
+      type: Boolean,
+      default: false,
+    },
+    setupIntentId: {
+      type: String,
+      default: null,
+    },
+    clientSecret: {
+      type: String,
+      default: null,
+    },
+    paymentMethodId: {
+      type: String,
+      default: null,
+    },
+    paymentMethodCreatedAt: {
+      type: Date,
+      default: null,
+    },
+  },
+  { timestamps: true, _id: false },
+);
+
+const paymentMethodSchema = new mongoose.Schema(
+  {
+    id: {
+      type: String,
+      required: true,
+    },
+    type: {
+      type: String,
+      enum: ['card', 'google_pay', 'apple_pay'],
+      required: true,
+    },
+    cardType: {
+      type: String,
+      enum: CARD_TYPES,
+      required: function () {
+        return this.type === 'card';
+      },
+    },
+    details: {
+      type: Object,
+      required: true,
+    },
+  },
+  { timestamps: true, _id: false },
+);
+
 const passengerSchema = new mongoose.Schema(
   {
     userId: {
@@ -53,6 +106,11 @@ const passengerSchema = new mongoose.Schema(
       unique: true,
       required: true,
     },
+    isOnRide: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
     isActive: {
       type: Boolean,
       default: false,
@@ -61,6 +119,7 @@ const passengerSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    paymentMethods: [paymentMethodSchema],
     paymentMethodIds: [
       {
         type: String,
@@ -73,6 +132,8 @@ const passengerSchema = new mongoose.Schema(
     defaultCardId: {
       type: String,
     },
+    isGooglePay: walletSchema,
+    isApplePay: walletSchema,
   },
   {
     timestamps: true,

@@ -1,6 +1,6 @@
 import Joi from 'joi';
 import { DAYS_OF_WEEK } from '../../enums/weekDays.js';
-import { CAR_TYPES } from '../../enums/carType.js';
+import { CAR_TYPES } from '../../enums/vehicleEnums.js';
 
 const dailyFareSchema = Joi.object({
   day: Joi.string()

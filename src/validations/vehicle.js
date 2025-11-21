@@ -1,5 +1,5 @@
 import Joi from 'joi';
-import { CAR_TYPES } from '../enums/carType.js';
+import { CAR_TYPES } from '../enums/vehicleEnums.js';
 
 export async function upsertVehicleValidation(body) {
   const schema = Joi.object({

@@ -9,7 +9,7 @@ import DriverLocation from '../models/DriverLocation.js';
 import FareManagement from '../models/fareManagement.js';
 import Zone from '../models/Zone.js';
 import ParkingQueue from '../models/ParkingQueue.js';
-import { DOCUMENT_TYPES } from '../enums/driver.js';
+import { DOCUMENT_TYPES } from '../enums/driverEnums.js';
 import { findUserById } from './user/index.js';
 import { sendDocumentEditRequestApprovalEmail } from '../templates/emails/user/index.js';
 import { emitToUser, emitToRide } from '../realtime/socket.js';

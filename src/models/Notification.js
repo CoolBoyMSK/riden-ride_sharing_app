@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { ALLOWED_SETTINGS } from '../enums/userSettings.js';
+import { ALLOWED_USER_SETTINGS } from '../enums/userEnums.js';
 
 const recipientSchema = new mongoose.Schema(
   {
@@ -54,7 +54,7 @@ const notificationSchema = new mongoose.Schema(
     },
     module: {
       type: String,
-      enum: ALLOWED_SETTINGS,
+      enum: ALLOWED_USER_SETTINGS,
       required: true,
       index: true,
     },

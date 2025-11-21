@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { CALL_TYPES, CALL_STATUS } from '../enums/call.js';
+import { CALL_TYPES, CALL_STATUS } from '../enums/callEnums.js';
 
 const callLogSchema = new mongoose.Schema(
   {

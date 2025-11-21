@@ -9,6 +9,8 @@ import {
   topUpInAppWalletController,
   getInAppWalletController,
   getTransactionsController,
+  createWalletSetupIntentController,
+  deleteWalletController,
 } from '../../../controllers/User/Passengers/paymentManagementController.js';
 import { registerRoute } from '../../../utils/registerRoute.js';
 
@@ -75,6 +77,20 @@ registerRoute({
   route: '/transactions',
   passenger_auth_enable: true,
   get_method: getTransactionsController,
+});
+
+registerRoute({
+  router,
+  route: '/wallet/add',
+  passenger_auth_enable: true,
+  post_method: createWalletSetupIntentController,
+});
+
+registerRoute({
+  router,
+  route: '/wallet/delete',
+  passenger_auth_enable: true,
+  delete_method: deleteWalletController,
 });
 
 export default router;

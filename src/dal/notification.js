@@ -3,7 +3,7 @@ import User from '../models/User.js';
 import AdminNotification from '../models/AdminNotification.js';
 import AdminAccess from '../models/AdminAccess.js';
 import Notification from '../models/Notification.js';
-import { ALLOWED_SETTINGS } from '../enums/userSettings.js';
+import { ALLOWED_USER_SETTINGS } from '../enums/userEnums.js';
 import firebaseAdmin from '../config/firebaseAdmin.js';
 import { emitToUser } from '../realtime/socket.js';
 
@@ -484,10 +484,10 @@ export const createUserNotification = async ({
     };
   }
 
-  if (!ALLOWED_SETTINGS.includes(module)) {
+  if (!ALLOWED_USER_SETTINGS.includes(module)) {
     return {
       success: false,
-      message: `Invalid module. Allowed values: ${ALLOWED_SETTINGS.join(', ')}`,
+      message: `Invalid module. Allowed values: ${ALLOWED_USER_SETTINGS.join(', ')}`,
     };
   }
 
@@ -600,10 +600,10 @@ export const notifyUser = async ({
       };
     }
 
-    if (!ALLOWED_SETTINGS.includes(module)) {
+    if (!ALLOWED_USER_SETTINGS.includes(module)) {
       return {
         success: false,
-        message: `Invalid module. Allowed values: ${ALLOWED_SETTINGS.join(', ')}`,
+        message: `Invalid module. Allowed values: ${ALLOWED_USER_SETTINGS.join(', ')}`,
       };
     }
 

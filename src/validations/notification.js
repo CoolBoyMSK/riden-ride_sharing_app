@@ -1,14 +1,14 @@
 import Joi from 'joi';
 import mongoose from 'mongoose';
-import { ALLOWED_SETTINGS } from '../enums/userSettings.js';
+import { ALLOWED_USER_SETTINGS } from '../enums/userEnums.js';
 
 export const validateNotificationSettingName = (data) => {
   const schema = Joi.object({
     type: Joi.string()
-      .valid(...ALLOWED_SETTINGS)
+      .valid(...ALLOWED_USER_SETTINGS)
       .required()
       .messages({
-        'any.only': `Invalid setting name. Allowed values: ${ALLOWED_SETTINGS.join(', ')}.`,
+        'any.only': `Invalid setting name. Allowed values: ${ALLOWED_USER_SETTINGS.join(', ')}.`,
         'string.base': 'Setting name must be a string.',
         'any.required': 'Setting name is required.',
       }),

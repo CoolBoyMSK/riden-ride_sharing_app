@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { ADMIN_ROLES } from '../enums/adminModules.js';
+import { ADMIN_ROLES } from '../enums/adminEnums.js';
 
 const adminSchema = new mongoose.Schema(
   {

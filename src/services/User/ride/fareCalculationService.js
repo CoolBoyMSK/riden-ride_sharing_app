@@ -1,24 +1,7 @@
-import { getFareForLocation } from '../../../dal/fareManagement.js';
 import {
-  validatePromoCode,
   findActivePromoCodes,
 } from '../../../dal/promo_code.js';
 
-// Get current day of week
-const getCurrentDay = () => {
-  const days = [
-    'sunday',
-    'monday',
-    'tuesday',
-    'wednesday',
-    'thursday',
-    'friday',
-    'saturday',
-  ];
-  return days[new Date().getDay()];
-};
-
-// Check if current time is night time
 const isNightTime = (nightTimeConfig, scheduledTime = null) => {
   const now = scheduledTime ? new Date(scheduledTime) : new Date();
   const currentTime = now.getHours() * 60 + now.getMinutes(); // minutes since midnight
@@ -37,7 +20,6 @@ const isNightTime = (nightTimeConfig, scheduledTime = null) => {
   return currentTime >= fromTime && currentTime <= toTime;
 };
 
-// Calculate estimated fare
 export const calculateEstimatedFare = async (
   carType,
   distance,
@@ -224,7 +206,6 @@ export const calculateActualFare = async (rideData) => {
   }
 };
 
-// Helper function to check night time for a specific date
 const isNightTimeForDate = (date, nightTimeConfig) => {
   const currentTime = date.getHours() * 60 + date.getMinutes();
 
@@ -239,10 +220,4 @@ const isNightTimeForDate = (date, nightTimeConfig) => {
   }
 
   return currentTime >= fromTime && currentTime <= toTime;
-};
-
-// Helper function to check peak hour for a specific date
-const isPeakHourForDate = (date) => {
-  const hour = date.getHours();
-  return (hour >= 7 && hour <= 10) || (hour >= 17 && hour <= 20);
 };

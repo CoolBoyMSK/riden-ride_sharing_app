@@ -1,0 +1,966 @@
+{
+	"info": {
+		"_postman_id": "payment-hold-apis-2024",
+		"name": "Payment Hold APIs - Google Pay, Apple Pay, Card",
+		"description": "Complete Postman collection for Payment Hold APIs including Google Pay, Apple Pay, and Card payment methods with ride booking, completion, and cancellation flows.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Payment Methods",
+			"item": [
+				{
+					"name": "Get All Payment Methods",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/user/passenger/payment-method/get",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"user",
+								"passenger",
+								"payment-method",
+								"get"
+							]
+						},
+						"description": "Get all payment methods (Cards, Google Pay, Apple Pay) for the authenticated passenger"
+					},
+					"response": []
+				},
+				{
+					"name": "Add Card Payment Method",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"card\": {\n    \"number\": \"4242424242424242\",\n    \"exp_month\": 12,\n    \"exp_year\": 2025,\n    \"cvc\": \"123\"\n  },\n  \"billing_details\": {\n    \"name\": \"John Doe\",\n    \"email\": \"john@example.com\",\n    \"address\": {\n      \"line1\": \"123 Main St\",\n      \"city\": \"Toronto\",\n      \"state\": \"ON\",\n      \"postal_code\": \"M5H 2N2\",\n      \"country\": \"CA\"\n    }\n  }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/user/passenger/payment-method/add",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"user",
+								"passenger",
+								"payment-method",
+								"add"
+							]
+						},
+						"description": "Add a new card payment method to the passenger's account"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Payment Method by ID",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/user/passenger/payment-method/get/:paymentMethodId",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"user",
+								"passenger",
+								"payment-method",
+								"get",
+								":paymentMethodId"
+							],
+							"variable": [
+								{
+									"key": "paymentMethodId",
+									"value": "pm_xxxxx",
+									"description": "Stripe payment method ID"
+								}
+							]
+						},
+						"description": "Get details of a specific payment method by ID"
+					},
+					"response": []
+				},
+				{
+					"name": "Set Default Payment Method",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/user/passenger/payment-method/set/:paymentMethodId",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"user",
+								"passenger",
+								"payment-method",
+								"set",
+								":paymentMethodId"
+							],
+							"variable": [
+								{
+									"key": "paymentMethodId",
+									"value": "pm_xxxxx",
+									"description": "Stripe payment method ID to set as default"
+								}
+							]
+						},
+						"description": "Set a payment method as default for the passenger"
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Payment Method",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/user/passenger/payment-method/delete/:paymentMethodId",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"user",
+								"passenger",
+								"payment-method",
+								"delete",
+								":paymentMethodId"
+							],
+							"variable": [
+								{
+									"key": "paymentMethodId",
+									"value": "pm_xxxxx",
+									"description": "Stripe payment method ID to delete"
+								}
+							]
+						},
+						"description": "Delete a payment method from the passenger's account"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Google Pay & Apple Pay Setup",
+			"item": [
+				{
+					"name": "Setup Google Pay Intent",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/user/passenger/payment-method/wallet/add?walletType=GOOGLE_PAY",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"user",
+								"passenger",
+								"payment-method",
+								"wallet",
+								"add"
+							],
+							"query": [
+								{
+									"key": "walletType",
+									"value": "GOOGLE_PAY",
+									"description": "Wallet type: GOOGLE_PAY or APPLE_PAY"
+								}
+							]
+						},
+						"description": "Create a Setup Intent for Google Pay. Returns clientSecret and setupIntentId for frontend Stripe Elements integration."
+					},
+					"response": []
+				},
+				{
+					"name": "Setup Apple Pay Intent",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/user/passenger/payment-method/wallet/add?walletType=APPLE_PAY",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"user",
+								"passenger",
+								"payment-method",
+								"wallet",
+								"add"
+							],
+							"query": [
+								{
+									"key": "walletType",
+									"value": "APPLE_PAY",
+									"description": "Wallet type: GOOGLE_PAY or APPLE_PAY"
+								}
+							]
+						},
+						"description": "Create a Setup Intent for Apple Pay. Returns clientSecret and setupIntentId for frontend Stripe Elements integration."
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Google Pay",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/user/passenger/payment-method/wallet/delete?walletType=GOOGLE_PAY",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"user",
+								"passenger",
+								"payment-method",
+								"wallet",
+								"delete"
+							],
+							"query": [
+								{
+									"key": "walletType",
+									"value": "GOOGLE_PAY",
+									"description": "Wallet type to delete: GOOGLE_PAY or APPLE_PAY"
+								}
+							]
+						},
+						"description": "Delete Google Pay payment method from passenger's account"
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Apple Pay",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/user/passenger/payment-method/wallet/delete?walletType=APPLE_PAY",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"user",
+								"passenger",
+								"payment-method",
+								"wallet",
+								"delete"
+							],
+							"query": [
+								{
+									"key": "walletType",
+									"value": "APPLE_PAY",
+									"description": "Wallet type to delete: GOOGLE_PAY or APPLE_PAY"
+								}
+							]
+						},
+						"description": "Delete Apple Pay payment method from passenger's account"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Ride Booking with Payment Hold",
+			"item": [
+				{
+					"name": "Get Fare Estimate",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"pickupLocation\": {\n    \"coordinates\": [-79.3832, 43.6532],\n    \"address\": \"Toronto City Hall\",\n    \"placeName\": \"City Hall\"\n  },\n  \"dropoffLocation\": {\n    \"coordinates\": [-79.3832, 43.6532],\n    \"address\": \"CN Tower\",\n    \"placeName\": \"CN Tower\"\n  },\n  \"carType\": \"STANDARD\",\n  \"promoCode\": null\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/user/rides/estimate-fare",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"user",
+								"rides",
+								"estimate-fare"
+							]
+						},
+						"description": "Get fare estimate before booking a ride. Use this to show estimated fare to passenger."
+					},
+					"response": []
+				},
+				{
+					"name": "Book Ride with Card (Payment Hold)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"pickupLocation\": {\n    \"coordinates\": [-79.3832, 43.6532],\n    \"address\": \"Toronto City Hall\",\n    \"placeName\": \"City Hall\"\n  },\n  \"dropoffLocation\": {\n    \"coordinates\": [-79.3832, 43.6532],\n    \"address\": \"CN Tower\",\n    \"placeName\": \"CN Tower\"\n  },\n  \"carType\": \"STANDARD\",\n  \"paymentMethod\": \"CARD\",\n  \"cardId\": \"pm_xxxxx\",\n  \"bookedFor\": \"ME\",\n  \"promoCode\": null,\n  \"specialRequests\": null\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/user/rides/book",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"user",
+								"rides",
+								"book"
+							]
+						},
+						"description": "Book a ride with Card payment method. Payment will be held (authorized) but not captured until ride completion. Returns ride object with paymentIntentId if payment hold was successful."
+					},
+					"response": []
+				},
+				{
+					"name": "Book Ride with Google Pay (Payment Hold)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"pickupLocation\": {\n    \"coordinates\": [-79.3832, 43.6532],\n    \"address\": \"Toronto City Hall\",\n    \"placeName\": \"City Hall\"\n  },\n  \"dropoffLocation\": {\n    \"coordinates\": [-79.3832, 43.6532],\n    \"address\": \"CN Tower\",\n    \"placeName\": \"CN Tower\"\n  },\n  \"carType\": \"STANDARD\",\n  \"paymentMethod\": \"GOOGLE_PAY\",\n  \"cardId\": \"pm_xxxxx\",\n  \"bookedFor\": \"ME\",\n  \"promoCode\": null\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/user/rides/book",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"user",
+								"rides",
+								"book"
+							]
+						},
+						"description": "Book a ride with Google Pay payment method. Payment will be held (authorized) but not captured until ride completion. Returns ride object with paymentIntentId if payment hold was successful."
+					},
+					"response": []
+				},
+				{
+					"name": "Book Ride with Apple Pay (Payment Hold)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"pickupLocation\": {\n    \"coordinates\": [-79.3832, 43.6532],\n    \"address\": \"Toronto City Hall\",\n    \"placeName\": \"City Hall\"\n  },\n  \"dropoffLocation\": {\n    \"coordinates\": [-79.3832, 43.6532],\n    \"address\": \"CN Tower\",\n    \"placeName\": \"CN Tower\"\n  },\n  \"carType\": \"STANDARD\",\n  \"paymentMethod\": \"APPLE_PAY\",\n  \"cardId\": \"pm_xxxxx\",\n  \"bookedFor\": \"ME\",\n  \"promoCode\": null\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/user/rides/book",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"user",
+								"rides",
+								"book"
+							]
+						},
+						"description": "Book a ride with Apple Pay payment method. Payment will be held (authorized) but not captured until ride completion. Returns ride object with paymentIntentId if payment hold was successful."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Current Ride",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/user/rides/current",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"user",
+								"rides",
+								"current"
+							]
+						},
+						"description": "Get current active ride for the passenger. Includes paymentIntentId if payment was held."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Ride Status",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/user/rides/:rideId/status",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"user",
+								"rides",
+								":rideId",
+								"status"
+							],
+							"variable": [
+								{
+									"key": "rideId",
+									"value": "ride_xxxxx",
+									"description": "Ride ID"
+								}
+							]
+						},
+						"description": "Get status of a specific ride including payment status and paymentIntentId"
+					},
+					"response": []
+				},
+				{
+					"name": "Cancel Ride (Releases Payment Hold)",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"reason\": \"Changed my mind\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/user/rides/:rideId/cancel",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"user",
+								"rides",
+								":rideId",
+								"cancel"
+							],
+							"variable": [
+								{
+									"key": "rideId",
+									"value": "ride_xxxxx",
+									"description": "Ride ID to cancel"
+								}
+							]
+						},
+						"description": "Cancel a ride. If payment was held (paymentIntentId exists), the payment hold will be automatically released/cancelled. Payment hold cancellation happens automatically via Socket event 'ride:passenger_cancel_ride'."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Ride Completion (Payment Capture)",
+			"item": [
+				{
+					"name": "Complete Ride - Driver",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"actualDistance\": 12.5,\n  \"waitingTime\": 5\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/user/rides/complete/:rideId",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"user",
+								"rides",
+								"complete",
+								":rideId"
+							],
+							"variable": [
+								{
+									"key": "rideId",
+									"value": "ride_xxxxx",
+									"description": "Ride ID to complete"
+								}
+							]
+						},
+						"description": "Complete a ride (called by driver). After completion, payment is automatically processed:\n- If payment was held (paymentIntentId exists): Payment is captured automatically via Socket event 'ride:pay_driver'\n- If no payment hold: New payment intent is created and processed\n\nPayment capture happens automatically in the background via Socket, no additional API call needed."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Ride Cost Breakdown",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/user/rides/:rideId/cost-breakdown",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"user",
+								"rides",
+								":rideId",
+								"cost-breakdown"
+							],
+							"variable": [
+								{
+									"key": "rideId",
+									"value": "ride_xxxxx",
+									"description": "Ride ID"
+								}
+							]
+						},
+						"description": "Get detailed cost breakdown for a completed ride"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Wallet Management",
+			"item": [
+				{
+					"name": "Get Wallet Balance",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/user/passenger/payment-method/wallet",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"user",
+								"passenger",
+								"payment-method",
+								"wallet"
+							]
+						},
+						"description": "Get passenger wallet balance including availableBalance and negativeBalance"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Wallet Transactions",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/user/passenger/payment-method/transactions",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"user",
+								"passenger",
+								"payment-method",
+								"transactions"
+							]
+						},
+						"description": "Get all wallet transactions for the passenger"
+					},
+					"response": []
+				},
+				{
+					"name": "Top Up Wallet",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{accessToken}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"amount\": 50\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/user/passenger/payment-method/fund/:paymentMethodId",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"user",
+								"passenger",
+								"payment-method",
+								"fund",
+								":paymentMethodId"
+							],
+							"variable": [
+								{
+									"key": "paymentMethodId",
+									"value": "pm_xxxxx",
+									"description": "Payment method ID to use for top-up"
+								}
+							]
+						},
+						"description": "Top up passenger wallet using a payment method (Card, Google Pay, or Apple Pay)"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Socket Events (Payment Flow)",
+			"item": [
+				{
+					"name": "Socket - Ride Completion",
+					"request": {
+						"method": "WS",
+						"header": [],
+						"url": {
+							"raw": "ws://{{baseUrl}}/socket.io/?token={{accessToken}}",
+							"protocol": "ws",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"socket.io",
+								""
+							],
+							"query": [
+								{
+									"key": "token",
+									"value": "{{accessToken}}",
+									"description": "JWT access token"
+								}
+							]
+						},
+						"description": "Socket event for ride completion:\n\n**Driver sends:**\n```json\n{\n  \"event\": \"ride:driver_complete_ride\",\n  \"data\": {\n    \"rideId\": \"ride_xxxxx\",\n    \"actualDistance\": 12.5,\n    \"earlyCompleteReason\": null\n  }\n}\n```\n\n**Payment Processing:**\nAfter ride completion, payment is automatically processed via `ride:pay_driver` event:\n- If `paymentIntentId` exists: Payment is captured automatically\n- If no `paymentIntentId`: New payment is created\n\n**Response:**\n```json\n{\n  \"success\": true,\n  \"objectType\": \"pay-driver\",\n  \"data\": {\n    \"ride\": {...},\n    \"transaction\": {...}\n  },\n  \"message\": \"Driver Paid Successfully\"\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Socket - Cancel Ride (Releases Hold)",
+					"request": {
+						"method": "WS",
+						"header": [],
+						"url": {
+							"raw": "ws://{{baseUrl}}/socket.io/?token={{accessToken}}",
+							"protocol": "ws",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"socket.io",
+								""
+							],
+							"query": [
+								{
+									"key": "token",
+									"value": "{{accessToken}}",
+									"description": "JWT access token"
+								}
+							]
+						},
+						"description": "Socket event for ride cancellation:\n\n**Passenger sends:**\n```json\n{\n  \"event\": \"ride:passenger_cancel_ride\",\n  \"data\": {\n    \"rideId\": \"ride_xxxxx\",\n    \"reason\": \"Changed my mind\"\n  }\n}\n```\n\n**Payment Hold Release:**\nIf `paymentIntentId` exists, payment hold is automatically cancelled/released.\n\n**Response:**\n```json\n{\n  \"success\": true,\n  \"objectType\": \"cancel-ride-passenger\",\n  \"data\": {...},\n  \"message\": \"Ride successfully cancelled by passenger\"\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Socket - Pay Driver (Auto)",
+					"request": {
+						"method": "WS",
+						"header": [],
+						"url": {
+							"raw": "ws://{{baseUrl}}/socket.io/?token={{accessToken}}",
+							"protocol": "ws",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"socket.io",
+								""
+							],
+							"query": [
+								{
+									"key": "token",
+									"value": "{{accessToken}}",
+									"description": "JWT access token"
+								}
+							]
+						},
+						"description": "Socket event for payment processing (called automatically after ride completion):\n\n**System sends automatically:**\n```json\n{\n  \"event\": \"ride:pay_driver\",\n  \"data\": {\n    \"rideId\": \"ride_xxxxx\"\n  }\n}\n```\n\n**Payment Processing Logic:**\n1. Checks if `ride.paymentIntentId` exists\n2. If exists: Captures held payment using `captureHeldPayment`\n3. Processes driver payout using `processDriverPayoutAfterCapture`\n4. If not exists: Creates new payment using `passengerPaysDriver`\n\n**Response:**\n```json\n{\n  \"success\": true,\n  \"objectType\": \"pay-driver\",\n  \"data\": {\n    \"ride\": {...},\n    \"transaction\": {...}\n  },\n  \"message\": \"Driver Paid Successfully\"\n}\n```"
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:3000",
+			"type": "string"
+		},
+		{
+			"key": "accessToken",
+			"value": "",
+			"type": "string"
+		}
+	]
+}
+

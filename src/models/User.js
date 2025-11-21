@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { USER_TYPES } from '../enums/userRoles.js';
+import { USER_TYPES } from '../enums/userEnums.js';
 import { GENDER_TYPES } from '../enums/genderEnums.js';
 
 const notificationSchema = new mongoose.Schema(

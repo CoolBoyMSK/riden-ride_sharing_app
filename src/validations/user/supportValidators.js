@@ -1,5 +1,5 @@
 import Joi from 'joi';
-import { COMPLAIN_TYPES } from '../../enums/complainTypes.js';
+import { COMPLAIN_TYPES } from '../../enums/complainEnums.js';
 
 const fileSchema = Joi.object({
   fieldname: Joi.string().valid('gallery').required(),

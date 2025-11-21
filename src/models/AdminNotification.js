@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { ADMIN_MODULES } from '../enums/adminModules.js';
+import { ADMIN_MODULES } from '../enums/adminEnums.js';
 
 const recipientSchema = new mongoose.Schema(
   {

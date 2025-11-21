@@ -1,5 +1,5 @@
 import Joi from 'joi';
-import { DOCUMENT_STATUS } from '../enums/driver.js';
+import { DOCUMENT_STATUS } from '../enums/driverEnums.js';
 
 const suspensionSchema = Joi.object({
   reason: Joi.string().min(5).max(256).required(),

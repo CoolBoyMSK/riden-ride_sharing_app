@@ -1,12 +1,13 @@
 import mongoose from 'mongoose';
-import { REQUEST_STATUS, REQUESTED_FIELD } from '../enums/requestStatus.js';
-import { CAR_TYPES } from '../enums/carType.js';
+import { REQUEST_STATUS } from '../enums/updateRequestEnums.js';
+import { CAR_TYPES } from '../enums/vehicleEnums.js';
+import { ALLOWED_DRIVER_UPDATE_REQUEST_FIELDS } from '../enums/driverEnums.js';
 
 const requestSchema = new mongoose.Schema(
   {
     field: {
       type: String,
-      enum: REQUESTED_FIELD,
+      enum: ALLOWED_DRIVER_UPDATE_REQUEST_FIELDS,
       default: 'name',
     },
     reason: {

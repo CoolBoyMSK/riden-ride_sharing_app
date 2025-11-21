@@ -7,6 +7,7 @@ import {
   getBookingByIdController,
   getNearestDriversForScheduledRideController,
   assignDriverToScheduledRideController,
+  rejectScheduledRideController,
 } from '../../../controllers/Admin/Booking/index.js';
 
 const router = express.Router();
@@ -57,6 +58,14 @@ registerRoute({
   admin_auth_enable: true,
   post_permission: 'booking_management',
   post_method: assignDriverToScheduledRideController,
+});
+
+registerRoute({
+  router,
+  route: '/reject/:id',
+  admin_auth_enable: true,
+  post_permission: 'booking_management',
+  post_method: rejectScheduledRideController,
 });
 
 export default router;

@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { DRIVER_STATUS } from '../enums/driver.js';
+import { DRIVER_STATUS } from '../enums/driverEnums.js';
 
 const driverLocationSchema = new mongoose.Schema(
   {

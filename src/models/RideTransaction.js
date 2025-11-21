@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import PAYMENT_METHODS from '../enums/paymentMethods.js';
+import { PAYMENT_METHODS } from '../enums/paymentEnums.js';
 
 const rideTransactionSchema = new mongoose.Schema(
   {

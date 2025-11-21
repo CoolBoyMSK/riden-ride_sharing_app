@@ -4,7 +4,6 @@ import DriverModel from '../models/Driver.js';
 import ChatRoomModel from '../models/ChatRoom.js';
 import { generateUniqueId } from '../utils/auth.js';
 import redisClient from '../config/redisConfig.js';
-import { RESTRICTED_AREA } from '../enums/restrictedArea.js';
 import ParkingQueue from '../models/ParkingQueue.js';
 import mongoose, { Error } from 'mongoose';
 import Feedback from '../models/Feedback.js';
@@ -36,7 +35,7 @@ export const createRide = async (rideData) => {
 
 export const findRideById = async (rideId, { session } = {}) => {
   let query = RideModel.findById(rideId)
-    .populate('passengerId', 'userId isActive isBlocked')
+    .populate('passengerId', 'userId isActive isBlocked isOnRide')
     .populate('driverId', 'userId vehicle backgroundCheckStatus isBlocked');
   if (session) query = query.session(session);
   return await query.lean();
@@ -351,37 +350,6 @@ export const findPendingRides = async (
   return q;
 };
 
-export const findAvailableDriversNearby = async (
-  pickupLocation,
-  carType,
-  radius = 10000,
-) => {
-  return await DriverLocationModel.find({
-    status: 'ONLINE',
-    isAvailable: true,
-    location: {
-      $near: {
-        $geometry: {
-          type: 'Point',
-          coordinates: pickupLocation,
-        },
-        $maxDistance: radius,
-      },
-    },
-  })
-    .populate({
-      path: 'driverId',
-      match: {
-        'vehicle.type': carType,
-        isBlocked: false,
-        isDeleted: false,
-        backgroundCheckStatus: 'approved',
-      },
-      select: 'userId vehicle backgroundCheckStatus',
-    })
-    .lean();
-};
-
 export const updateDriverAvailability = async (
   driverId,
   isAvailable,
@@ -599,15 +567,6 @@ export const haversineDistance = (coord1, coord2) => {
   return R * c;
 };
 
-// export const isDriverInParkingLot = (driverCoords, parkingRadiusKm = 1) => {
-//   for (const area of RESTRICTED_AREA) {
-//     for (const lot of area.parkingLots) {
-//       const distance = haversineDistance(driverCoords, lot.coordinates);
-//       if (distance <= parkingRadiusKm) return true;
-//     }
-//   }
-//   return false;
-// };
 
 export const isDriverInParkingLot = async (coords) => {
   if (
@@ -1334,11 +1293,11 @@ export const findActiveRide = async (id, role) => {
     ...query,
     status: {
       $nin: [
+        'SCHEDULED',
         'RIDE_COMPLETED',
         'CANCELLED_BY_PASSENGER',
         'CANCELLED_BY_DRIVER',
         'CANCELLED_BY_SYSTEM',
-        'SCHEDULED',
       ],
     },
     paymentStatus: { $nin: ['PROCESSING', 'COMPLETED'] },

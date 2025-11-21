@@ -6,7 +6,7 @@ import Ride from '../models/Ride.js';
 import Report from '../models/Report.js';
 import mongoose, { Error } from 'mongoose';
 import { generateUniqueId } from '../utils/auth.js';
-import { COMPLAIN_TYPES } from '../enums/complainTypes.js';
+import { COMPLAIN_TYPES } from '../enums/complainEnums.js';
 import { notifyUser } from '../dal/notification.js';
 
 export const findComplainTypes = () => {

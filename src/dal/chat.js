@@ -253,34 +253,6 @@ export const createMessage = async ({
 export const findMessageById = async (messageId) =>
   ChatMessage.findById(messageId).populate('senderId').lean();
 
-export const getMessagesByRide = async (rideId, options = {}) => {
-  try {
-    const { before = null, limit = 50, includeDeleted = false } = options;
-
-    const query = { rideId };
-
-    if (!includeDeleted) {
-      query.isDeleted = false;
-    }
-
-    if (before) {
-      query.createdAt = { $lt: new Date(before) };
-    }
-
-    const messages = await ChatMessage.find(query)
-      .populate('senderId', 'name profileImg')
-      .populate('replyTo', 'text senderId createdAt')
-      .sort({ createdAt: -1 })
-      .limit(parseInt(limit))
-      .lean();
-
-    return messages.reverse(); // Return in chronological order
-  } catch (error) {
-    console.error('Error fetching messages:', error);
-    throw new Error('Failed to fetch messages');
-  }
-};
-
 export const markMessageDelivered = async (messageId, userId) => {
   try {
     const result = await ChatMessage.updateOne(
@@ -337,26 +309,6 @@ export const markMessageRead = async (messageId, userId) => {
   }
 };
 
-export const markAllMessagesDelivered = async (rideId, userId) => {
-  try {
-    const result = await ChatMessage.updateMany(
-      {
-        rideId,
-        senderId: { $ne: userId },
-        deliveredAt: null,
-      },
-      {
-        $set: { deliveredAt: new Date() },
-      },
-    );
-
-    return result;
-  } catch (error) {
-    console.error('Error marking all messages as delivered:', error);
-    throw new Error('Failed to mark messages as delivered');
-  }
-};
-
 export const markAllRideMessagesAsRead = async (rideId, userId) => {
   const result = await ChatMessage.updateMany(
     {
@@ -371,22 +323,6 @@ export const markAllRideMessagesAsRead = async (rideId, userId) => {
   );
 
   return result.modifiedCount;
-};
-
-export const getUnreadMessageCount = async (rideId, userId) => {
-  try {
-    const count = await ChatMessage.countDocuments({
-      rideId,
-      senderId: { $ne: userId },
-      'readBy.userId': { $ne: userId },
-      isDeleted: false,
-    });
-
-    return count;
-  } catch (error) {
-    console.error('Error getting unread message count:', error);
-    throw new Error('Failed to get unread message count');
-  }
 };
 
 export const deleteMessage = async (messageId, userId) => {
@@ -440,34 +376,5 @@ export const editMessage = async (messageId, userId, newText) => {
   } catch (error) {
     console.error('Error editing message:', error);
     throw new Error('Failed to edit message');
-  }
-};
-
-export const getChatStats = async (rideId) => {
-  try {
-    const stats = await ChatMessage.aggregate([
-      { $match: { rideId, isDeleted: false } },
-      {
-        $group: {
-          _id: null,
-          totalMessages: { $sum: 1 },
-          participants: { $addToSet: '$senderId' },
-          firstMessage: { $min: '$createdAt' },
-          lastMessage: { $max: '$createdAt' },
-        },
-      },
-    ]);
-
-    return (
-      stats[0] || {
-        totalMessages: 0,
-        participants: [],
-        firstMessage: null,
-        lastMessage: null,
-      }
-    );
-  } catch (error) {
-    console.error('Error getting chat stats:', error);
-    throw new Error('Failed to get chat statistics');
   }
 };

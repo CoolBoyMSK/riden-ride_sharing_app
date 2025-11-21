@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { CAR_TYPES } from '../enums/carType.js';
+import { CAR_TYPES } from '../enums/vehicleEnums.js';
 
 const commissionSchema = new mongoose.Schema(
   {

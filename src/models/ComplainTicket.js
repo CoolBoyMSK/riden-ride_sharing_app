@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { COMPLAIN_TYPES } from '../enums/complainTypes.js';
+import { COMPLAIN_TYPES } from '../enums/complainEnums.js';
 
 const chatSchema = new mongoose.Schema(
   {

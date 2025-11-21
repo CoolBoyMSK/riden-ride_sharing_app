@@ -2,30 +2,131 @@ import {
   createRide,
   findActiveRideByPassenger,
   findScheduledRideByPassenger,
-  updateRideByRideId,
-  findRideByRideId,
 } from '../../../dal/ride.js';
-import {
-  findPassengerByUserId,
-  findPassengerData,
-} from '../../../dal/passenger.js';
+import RideModel from '../../../models/Ride.js';
+import { findPassengerData } from '../../../dal/passenger.js';
 import {
   analyzeSurgePricing,
   startProgressiveDriverSearch,
   updateExistingRidesSurgePricing,
   findFareConfigurationForLocation,
   isAirportRide,
+  stopDriverSearch,
 } from '../../../dal/driver.js';
-import { validatePromoCode } from '../../../dal/promo_code.js';
 import { calculateEstimatedFare } from './fareCalculationService.js';
-import { getNearbyDriversCount } from './driverMatchingService.js';
 import {
   notifyUser,
   createAdminNotification,
 } from '../../../dal/notification.js';
-import { CAR_TYPES, PASSENGER_ALLOWED } from '../../../enums/carType.js';
+import { CAR_TYPES, PASSENGER_ALLOWED } from '../../../enums/vehicleEnums.js';
+import { PAYMENT_METHODS } from '../../../enums/paymentEnums.js';
+import { scheduledRideQueue } from '../../../scheduled/queues/index.js';
+import {
+  holdRidePayment,
+  cancelPaymentHold,
+  getPassengerWallet,
+} from '../../../dal/stripe.js';
 
-// Calculate distance using simple Haversine formula (for estimation)
+export const getFareEstimate = async (
+  pickupLocation,
+  dropoffLocation,
+  carType,
+  promoCode = null,
+) => {
+  try {
+    if (!pickupLocation || !dropoffLocation || !carType) {
+      return {
+        success: false,
+        message: 'Invalid pickup location, dropoff location, or car type',
+      };
+    }
+
+    if (!pickupLocation.coordinates || !dropoffLocation.coordinates) {
+      return {
+        success: false,
+        message: 'Invalid pickup location or dropoff location',
+      };
+    }
+
+    if (!CAR_TYPES.includes(carType)) {
+      return {
+        success: false,
+        message: 'Invalid car type',
+      };
+    }
+
+    // Calculate distance and duration
+    const distance = await calculateDistance(pickupLocation, dropoffLocation);
+    const duration = estimateDuration(distance);
+
+    const fareConfig = await findFareConfigurationForLocation(
+      pickupLocation.coordinates,
+      carType,
+    );
+
+    if (!fareConfig) {
+      return {
+        success: false,
+        message: 'No fare configuration found for this location and car type',
+      };
+    }
+
+    const surgeMultiplier = 1;
+
+    // Calculate fare
+    const fareResult = await calculateEstimatedFare(
+      carType,
+      distance,
+      duration,
+      promoCode,
+      surgeMultiplier,
+      fareConfig,
+    );
+
+    if (!fareResult.success) {
+      return {
+        success: false,
+        message: fareResult.error,
+      };
+    }
+
+    return {
+      success: true,
+      estimate: {
+        distance: Math.round(distance * 100) / 100, // Round to 2 decimal places
+        estimatedDuration: duration,
+        fareBreakdown: fareResult.fareBreakdown,
+        estimatedFare: fareResult.estimatedFare,
+        promoDetails: fareResult.promoDetails,
+        currency: fareResult.currency,
+        passengersAllowed: PASSENGER_ALLOWED[carType].passengersAllowed,
+        patientsAllowed: PASSENGER_ALLOWED[carType].patientsAllowed,
+      },
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: 'Failed to calculate fare estimate',
+      error: error.message,
+    };
+  }
+};
+
+export const getAvailableCarTypes = async () => {
+  try {
+    return {
+      success: true,
+      carTypes: CAR_TYPES,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: 'Failed to get available car types',
+      error: error.message,
+    };
+  }
+};
+
 const calculateDistance = async (pickup, dropoff) => {
   try {
     const response = await fetch(
@@ -78,76 +179,15 @@ const calculateHaversineDistance = (pickup, dropoff) => {
   return distance;
 };
 
-// Estimate duration based on distance (simple calculation)
 const estimateDuration = (distance) => {
   const averageSpeed = 30; // km/h in city traffic
   return Math.ceil((distance / averageSpeed) * 60); // minutes
 };
 
-// Get fare estimate
-export const getFareEstimate = async (
-  pickupLocation,
-  dropoffLocation,
-  carType,
-  promoCode = null,
-) => {
-  try {
-    // Calculate distance and duration
-    const distance = await calculateDistance(pickupLocation, dropoffLocation);
-    const duration = estimateDuration(distance);
-
-    const fareConfig = await findFareConfigurationForLocation(
-      pickupLocation.coordinates,
-      carType,
-    );
-
-    const surgeMultiplier = 1;
-
-    // Calculate fare
-    const fareResult = await calculateEstimatedFare(
-      carType,
-      distance,
-      duration,
-      promoCode,
-      surgeMultiplier,
-      fareConfig,
-    );
-
-    if (!fareResult.success) {
-      return {
-        success: false,
-        message: fareResult.error,
-      };
-    }
-
-    // Get nearby drivers count
-    const driversInfo = await getNearbyDriversCount(pickupLocation, carType);
-
-    return {
-      success: true,
-      estimate: {
-        distance: Math.round(distance * 100) / 100, // Round to 2 decimal places
-        estimatedDuration: duration,
-        fareBreakdown: fareResult.fareBreakdown,
-        estimatedFare: fareResult.estimatedFare,
-        promoDetails: fareResult.promoDetails,
-        currency: fareResult.currency,
-        availableDrivers: driversInfo.count,
-        estimatedWaitTime: driversInfo.estimatedWaitTime,
-      },
-    };
-  } catch (error) {
-    return {
-      success: false,
-      message: 'Failed to calculate fare estimate',
-      error: error.message,
-    };
-  }
-};
-
 export const bookRide = async (userId, rideData) => {
   const startTime = Date.now();
   let ride = null;
+  let paymentHoldResult = null;
 
   try {
     const {
@@ -158,10 +198,10 @@ export const bookRide = async (userId, rideData) => {
       bookedForName,
       bookedForPhoneNumber,
       paymentMethod,
+      cardId,
       promoCode,
       scheduledTime,
       specialRequests,
-      cardId,
     } = rideData;
 
     // Input validation
@@ -277,24 +317,6 @@ export const bookRide = async (userId, rideData) => {
       );
     }
 
-    // Validate and apply promo code
-    // const promoValidation = await validateAndApplyPromoCode(promoCode);
-    // if (!promoValidation.success) return promoValidation;
-    // const { promoDetails, promoDiscount } = promoValidation;
-
-    // Get fare configuration (reuse from surge analysis if available, otherwise fetch)
-    // const fareConfig =
-    //   surgeAnalysis.fareConfigType === 'default'
-    //     ? await findFareConfigurationForLocation(
-    //         pickupLocation.coordinates,
-    //         carType,
-    //       )
-    //     : {
-    //         zone: surgeAnalysis.zoneName
-    //           ? { name: surgeAnalysis.zoneName }
-    //           : null,
-    //       };
-
     const fareConfig = await findFareConfigurationForLocation(
       pickupLocation.coordinates,
       carType,
@@ -317,7 +339,7 @@ export const bookRide = async (userId, rideData) => {
         };
       }
       const timeDifference = time - now;
-      if (timeDifference < 30 * 60 * 1000) {
+      if (timeDifference < 2 * 60 * 1000) {
         return {
           success: false,
           message: 'Scheduled time must be more than 30 minutes from now',
@@ -352,13 +374,37 @@ export const bookRide = async (userId, rideData) => {
     }
 
     // Validate payment method
-
     const paymentValidation = await validatePaymentMethod(
       passenger,
       paymentMethod,
       cardId,
     );
     if (!paymentValidation.success) return paymentValidation;
+
+    // Hold/authorize payment for card, Google Pay, and Apple Pay payments
+    if (
+      (paymentMethod === 'CARD' ||
+        paymentMethod === 'GOOGLE_PAY' ||
+        paymentMethod === 'APPLE_PAY') &&
+      cardId
+    ) {
+      const estimatedAmount = fareResult.estimatedFare;
+      paymentHoldResult = await holdRidePayment(
+        passenger,
+        estimatedAmount,
+        cardId,
+        paymentMethod,
+      );
+
+      if (!paymentHoldResult.success) {
+        return {
+          success: false,
+          message:
+            paymentHoldResult.error ||
+            'Failed to authorize payment. Please check your payment method and try again.',
+        };
+      }
+    }
 
     // Create ride record
     ride = await createRideRecord({
@@ -386,6 +432,7 @@ export const bookRide = async (userId, rideData) => {
       bookedForPhoneNumber,
       passengersAllowed: PASSENGER_ALLOWED[carType].passengersAllowed,
       patientsAllowed: PASSENGER_ALLOWED[carType].patientsAllowed,
+      paymentIntentId: paymentHoldResult?.paymentIntentId || null,
     });
 
     if (!ride) {
@@ -427,10 +474,13 @@ export const bookRide = async (userId, rideData) => {
         }
       }
 
+      // Add scheduled ride to queue for processing
+      await addScheduledRideToQueue(ride);
+
       return {
         success: true,
         message: 'Scheduling request sent successfully',
-        data: ride,
+        ride: ride,
       };
     }
 
@@ -457,7 +507,7 @@ export const bookRide = async (userId, rideData) => {
     return {
       success: true,
       message: 'Ride booked successfully. Searching for drivers...',
-      data: ride,
+      ride: ride,
       metadata: {
         processingTime: `${processingTime}ms`,
         surgeApplied: isSurgeApplied,
@@ -469,6 +519,16 @@ export const bookRide = async (userId, rideData) => {
     console.error('Ride booking error:', error);
 
     // Cleanup on error
+    // Release payment hold if it was created
+    if (paymentHoldResult?.success && paymentHoldResult?.paymentIntentId) {
+      await cancelPaymentHold(paymentHoldResult.paymentIntentId).catch(
+        (cancelError) => {
+          console.error('Failed to cancel payment hold:', cancelError);
+        },
+      );
+    }
+
+    // Cleanup ride if it was created
     if (ride?._id) {
       await cleanupFailedRide(ride._id).catch((cleanupError) => {
         console.error('Cleanup failed:', cleanupError);
@@ -483,7 +543,6 @@ export const bookRide = async (userId, rideData) => {
   }
 };
 
-// Helper functions for better organization
 const validateRideInput = (rideData) => {
   const { pickupLocation, dropoffLocation, carType, paymentMethod } = rideData;
 
@@ -513,49 +572,38 @@ const validateRideInput = (rideData) => {
   return null;
 };
 
-// const validateAndApplyPromoCode = async (promoCode) => {
-//   if (!promoCode) {
-//     return { success: true, promoDetails: null, promoDiscount: 0 };
-//   }
-
-//   const validPromo = await validatePromoCode(promoCode);
-//   if (!validPromo) {
-//     return {
-//       success: false,
-//       message: 'Invalid or expired promo code',
-//     };
-//   }
-
-//   return {
-//     success: true,
-//     promoDetails: {
-//       code: validPromo.code,
-//       discount: validPromo.discount,
-//       isApplied: true,
-//     },
-//     promoDiscount: validPromo.discount,
-//   };
-// };
-
 const validatePaymentMethod = async (passenger, paymentMethod, cardId) => {
-  if (paymentMethod === 'CARD') {
+  // Validate CARD, GOOGLE_PAY, or APPLE_PAY - all require a payment method ID
+  if (
+    paymentMethod === 'CARD' ||
+    paymentMethod === 'GOOGLE_PAY' ||
+    paymentMethod === 'APPLE_PAY'
+  ) {
     if (!cardId) {
       return {
         success: false,
-        message: 'Card ID is required',
+        message: 'Payment method ID is required',
       };
     } else if (!passenger.paymentMethodIds?.length) {
       return {
         success: false,
-        message: 'No cards available. Please add a card.',
+        message: 'No payment methods available. Please add a payment method.',
       };
     } else if (!passenger.paymentMethodIds.includes(cardId)) {
       return {
         success: false,
-        message: 'Please add a valid card',
+        message: 'Please add a valid payment method',
       };
     }
-  } else {
+  } else if (paymentMethod === 'WALLET') {
+    const wallet = await getPassengerWallet(passenger._id);
+    if (!wallet) {
+      return {
+        success: false,
+        message: 'Wallet not found',
+      };
+    }
+  } else if (paymentMethod !== 'CASH') {
     return {
       success: false,
       message: 'Invalid payment method',
@@ -591,6 +639,7 @@ const createRideRecord = async (params) => {
     bookedForPhoneNumber,
     passengersAllowed,
     patientsAllowed,
+    paymentIntentId,
   } = params;
 
   const ridePayload = {
@@ -599,7 +648,10 @@ const createRideRecord = async (params) => {
     dropoffLocation,
     carType,
     paymentMethod,
-    ...(paymentMethod === 'CARD' && { cardId }),
+    ...((paymentMethod === 'CARD' ||
+      paymentMethod === 'GOOGLE_PAY' ||
+      paymentMethod === 'APPLE_PAY') && { cardId }),
+    ...(paymentIntentId && { paymentTransactionId: paymentIntentId }),
     scheduledTime: scheduledTime ? new Date(scheduledTime) : null,
     ...(specialRequests && { specialRequests }),
     estimatedDistance: distance,
@@ -631,6 +683,93 @@ const createRideRecord = async (params) => {
   return await createRide(ridePayload);
 };
 
+const addScheduledRideToQueue = async (ride) => {
+  try {
+    if (!ride.scheduledTime || !ride.isScheduledRide) {
+      console.error('Ride is not a scheduled ride');
+      return;
+    }
+
+    const scheduledTime = new Date(ride.scheduledTime);
+    const now = new Date();
+    const timeUntilScheduled = scheduledTime.getTime() - now.getTime();
+
+    if (timeUntilScheduled <= 0) {
+      console.error('Scheduled time is in the past');
+      return;
+    }
+
+    // Calculate delays in milliseconds
+    const notificationDelay = Math.max(0, timeUntilScheduled - 5 * 60 * 1000); // 5 minutes before
+    const activationDelay = timeUntilScheduled; // At scheduled time
+    const cancellationDelay = timeUntilScheduled + 5 * 60 * 1000; // 5 minutes after scheduled time
+
+    // Job 1: Send notification (5 minutes before scheduled time, or immediately if less than 5 minutes)
+    await scheduledRideQueue.add(
+      'send-notification',
+      {
+        rideId: ride._id.toString(),
+        jobType: 'send_notification',
+      },
+      {
+        delay: notificationDelay,
+        jobId: `scheduled-ride-notification-${ride._id}`,
+        removeOnComplete: true,
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 2000,
+        },
+      },
+    );
+
+    // Job 2: Activate ride at scheduled time (change status to REQUESTED and start driver search)
+    await scheduledRideQueue.add(
+      'activate-ride',
+      {
+        rideId: ride._id.toString(),
+        jobType: 'activate_ride',
+      },
+      {
+        delay: activationDelay,
+        jobId: `scheduled-ride-activate-${ride._id}`,
+        removeOnComplete: true,
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 2000,
+        },
+      },
+    );
+
+    // Job 3: Cancel ride if no response after scheduled time + 5 minutes
+    await scheduledRideQueue.add(
+      'cancel-if-no-response',
+      {
+        rideId: ride._id.toString(),
+        jobType: 'cancel_if_no_response',
+      },
+      {
+        delay: cancellationDelay,
+        jobId: `scheduled-ride-cancel-${ride._id}`,
+        removeOnComplete: true,
+        attempts: 2,
+        backoff: {
+          type: 'exponential',
+          delay: 2000,
+        },
+      },
+    );
+
+    console.log(
+      `✅ Scheduled ride ${ride._id} added to queue. Notification: ${Math.floor(notificationDelay / 1000 / 60)}min, Activation: ${Math.floor(activationDelay / 1000 / 60)}min, Cancellation: ${Math.floor(cancellationDelay / 1000 / 60)}min`,
+    );
+  } catch (error) {
+    console.error('Error adding scheduled ride to queue:', error);
+    // Don't throw error - ride is already created, just log it
+  }
+};
+
 const cleanupFailedRide = async (rideId) => {
   try {
     await RideModel.findByIdAndDelete(rideId);
@@ -638,102 +777,5 @@ const cleanupFailedRide = async (rideId) => {
     console.log(`Cleaned up failed ride: ${rideId}`);
   } catch (error) {
     console.error(`Failed to cleanup ride ${rideId}:`, error);
-  }
-};
-
-export const cancelRide = async (rideId, userId, reason = null) => {
-  try {
-    // Find the ride
-    const ride = await findRideByRideId(rideId);
-    if (!ride) {
-      return {
-        success: false,
-        message: 'Ride not found',
-      };
-    }
-
-    // Check if user is the passenger
-    const passenger = await findPassengerByUserId(userId);
-    if (
-      !passenger ||
-      ride.passengerId.toString() !== passenger._id.toString()
-    ) {
-      return {
-        success: false,
-        message: 'Unauthorized to cancel this ride',
-      };
-    }
-
-    // Check if ride can be cancelled
-    const cancellableStatuses = [
-      'REQUESTED',
-      'DRIVER_ASSIGNED',
-      'DRIVER_ARRIVING',
-    ];
-    if (!cancellableStatuses.includes(ride.status)) {
-      return {
-        success: false,
-        message: `Cannot cancel ride. Current status: ${ride.status}`,
-      };
-    }
-
-    // Update ride status
-    const updatedRide = await updateRideByRideId(rideId, {
-      status: 'CANCELLED_BY_PASSENGER',
-      cancelledBy: 'passenger',
-      cancellationReason: reason,
-      paymentStatus: 'CANCELLED',
-    });
-
-    // Release driver if assigned
-    if (ride.driverId) {
-      const { releaseDriver } = await import('./driverMatchingService.js');
-      await releaseDriver(ride.driverId);
-    }
-
-    return {
-      success: true,
-      message: 'Ride cancelled successfully',
-      ride: updatedRide,
-    };
-  } catch (error) {
-    console.error('Ride cancellation error:', error);
-    return {
-      success: false,
-      message: 'Failed to cancel ride. Please try again.',
-      error: error.message,
-    };
-  }
-};
-
-// Get available car types with driver counts
-export const getAvailableCarTypes = async (pickupLocation) => {
-  try {
-    const { CAR_TYPES } = await import('../../../enums/carType.js');
-
-    const carTypesWithInfo = await Promise.all(
-      CAR_TYPES.map(async (carType) => {
-        const driversInfo = await getNearbyDriversCount(
-          pickupLocation,
-          carType,
-        );
-        return {
-          type: carType,
-          availableDrivers: driversInfo.count,
-          estimatedWaitTime: driversInfo.estimatedWaitTime,
-        };
-      }),
-    );
-
-    return {
-      success: true,
-      carTypes: carTypesWithInfo,
-    };
-  } catch (error) {
-    return {
-      success: false,
-      message: 'Failed to get available car types',
-      error: error.message,
-    };
   }
 };

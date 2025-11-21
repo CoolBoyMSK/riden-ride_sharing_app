@@ -11,12 +11,14 @@ import {
   getCardDetails,
   addFundsToWallet,
   getPassengerWallet,
+  setupPassengerWalletIntent,
+  deletePassengerWallet,
 } from '../../../dal/stripe.js';
 import mongoose from 'mongoose';
 
 export const addPaymentMethod = async (
   user,
-  { type, card, billing_details },
+  { type, card, billing_details, paymentMethodId },
   resp,
 ) => {
   try {
@@ -31,6 +33,7 @@ export const addPaymentMethod = async (
       type,
       card,
       billing_details,
+      paymentMethodId, // For Google Pay and Apple Pay
     };
 
     const success = await addPassengerPaymentMethod(passenger, payload);
@@ -42,6 +45,7 @@ export const addPaymentMethod = async (
 
     resp.data = {
       success: true,
+      paymentMethodId: success,
     };
     return resp;
   } catch (error) {
@@ -299,6 +303,67 @@ export const getTransactions = async (user, { page, limit }, resp) => {
     }
 
     resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'something went wrong';
+    return resp;
+  }
+};
+
+export const createWalletSetupIntent = async (user, { walletType }, resp) => {
+  try {
+    const passenger = await findPassengerByUserId(user._id);
+    if (!passenger) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch passenger';
+      return resp;
+    }
+
+    const result = await setupPassengerWalletIntent(
+      user,
+      passenger,
+      walletType,
+    );
+    if (!result.success) {
+      resp.error = true;
+      resp.error_message =
+        result.error || 'Failed to setup passenger wallet intent';
+      return resp;
+    }
+
+    resp.data = result;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'something went wrong';
+    return resp;
+  }
+};
+
+export const deleteWallet = async (user, { walletType }, resp) => {
+  try {
+    const passenger = await findPassengerByUserId(user._id);
+    if (!passenger) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch passenger';
+      return resp;
+    }
+
+    const result = await deletePassengerWallet(passenger, walletType);
+
+    if (!result.success) {
+      resp.error = true;
+      resp.error_message = result.error || 'Failed to delete wallet';
+      return resp;
+    }
+
+    resp.data = {
+      success: true,
+      message: result.message,
+    };
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);

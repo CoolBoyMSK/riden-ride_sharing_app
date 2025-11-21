@@ -1,11 +1,7 @@
 import mongoose from 'mongoose';
-import { CAR_TYPES } from '../enums/carType.js';
-import {
-  RIDE_STATUS,
-  PAYMENT_STATUS,
-  PAYMENT_METHODS,
-  BOOKED_FOR,
-} from '../enums/rideStatus.js';
+import { CAR_TYPES } from '../enums/vehicleEnums.js';
+import { RIDE_STATUS, RIDE_BOOKED_FOR } from '../enums/rideEnums.js';
+import { PAYMENT_STATUS, PAYMENT_METHODS } from '../enums/paymentEnums.js';
 
 const locationSchema = new mongoose.Schema(
   {
@@ -133,7 +129,7 @@ const rideSchema = new mongoose.Schema(
     },
     bookedFor: {
       type: String,
-      enum: BOOKED_FOR,
+      enum: RIDE_BOOKED_FOR,
       required: true,
       default: 'ME',
     },
@@ -283,6 +279,9 @@ const rideSchema = new mongoose.Schema(
     paymentTransactionId: {
       type: String,
       trim: true,
+    },
+    paymentIntentId: {
+      type: String,
     },
     cardId: {
       type: String,

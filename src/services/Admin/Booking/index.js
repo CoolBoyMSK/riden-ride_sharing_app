@@ -5,6 +5,7 @@ import {
   findBookingById,
   findNearestDriversForScheduledRide,
   assignDriverToScheduledRide,
+  updateScheduledRideStatus,
 } from '../../../dal/admin/index.js';
 
 export const getCompletedBookings = async (
@@ -155,6 +156,31 @@ export const assignDriver = async ({ id }, { driverId }, resp) => {
     if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to assign driver to scheduled ride';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'something went wrong';
+    return resp;
+  }
+};
+
+export const rejectScheduledRide = async ({ id }, { reason = '' }, resp) => {
+  try {
+    const success = await updateScheduledRideStatus(id, {
+      status: 'CANCELLED_BY_SYSTEM',
+      paymentStatus: 'CANCELLED',
+      cancelledBy: 'system',
+      cancellationReason: reason.trim(),
+      cancelledAt: new Date(),
+    });
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to reject scheduled ride';
       return resp;
     }
 

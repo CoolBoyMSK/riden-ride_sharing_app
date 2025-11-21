@@ -8,6 +8,8 @@ import {
   topUpInAppWallet,
   getInAppWallet,
   getTransactions,
+  createWalletSetupIntent,
+  deleteWallet,
 } from '../../../services/User/passenger/paymentManagement.js';
 import { handleResponse } from '../../../utils/handleRespone.js';
 import {
@@ -123,6 +125,30 @@ export const getTransactionsController = (req, res) =>
       validationFn: null,
       handlerParams: [req.user, req.query],
       successMessage: 'Wallet fetched successfully',
+    },
+    req,
+    res,
+  );
+
+export const createWalletSetupIntentController = (req, res) =>
+  handleResponse(
+    {
+      handler: createWalletSetupIntent,
+      validationFn: null,
+      handlerParams: [req.user, req.query],
+      successMessage: 'Wallet setup intent created successfully',
+    },
+    req,
+    res,
+  );
+
+export const deleteWalletController = (req, res) =>
+  handleResponse(
+    {
+      handler: deleteWallet,
+      validationFn: null,
+      handlerParams: [req.user, req.query],
+      successMessage: 'Wallet deleted successfully',
     },
     req,
     res,

@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import { uploadAdminImage } from '../../utils/s3Uploader.js';
-import { CAR_TYPES } from '../../enums/carType.js';
+import { CAR_TYPES } from '../../enums/vehicleEnums.js';
 import AdminModel from '../../models/Admin.js';
 import Booking from '../../models/Ride.js';
 import Feedback from '../../models/Feedback.js';
@@ -18,6 +18,7 @@ import User from '../../models/User.js';
 import { alertQueue } from '../../queues/alertQueue.js';
 import firebaseAdmin from '../../config/firebaseAdmin.js';
 import env from '../../config/envConfig.js';
+import { notifyUser } from '../notification.js';
 
 const BATCH_SIZE = Number(env.BATCH_SIZE || 500);
 const messaging = firebaseAdmin.messaging();
@@ -865,6 +866,48 @@ export const assignDriverToScheduledRide = async ({ rideId, driverId }) => {
   }
 
   return updatedRide;
+};
+
+export const updateScheduledRideStatus = async (rideId, data) => {
+  const ride = await Booking.findOne({
+    _id: rideId,
+    isScheduledRide: true,
+    driverId: { $exists: false },
+  }).populate('passengerId');
+
+  if (!ride) {
+    throw new Error('Ride not found');
+  } else if (!ride.passengerId?.userId) {
+    throw new Error('Passenger not found');
+  } else if (ride.status !== 'SCHEDULED') {
+    throw new Error(
+      `Cannot update status of a ride with status: ${ride.status}. Ride must be SCHEDULED`,
+    );
+  } else if (ride.driverId) {
+    throw new Error('Ride already has a driver assigned');
+  }
+
+  // Update ride fields
+  ride.status = data.status;
+  ride.paymentStatus = data.paymentStatus;
+  ride.cancelledBy = data.cancelledBy;
+  ride.cancellationReason = data.cancellationReason;
+  ride.cancelledAt = data.cancelledAt;
+  await ride.save();
+
+  const notify = await notifyUser({
+    userId: ride.passengerId?.userId,
+    title: 'Scheduled Ride Rejected',
+    message: 'Your ride scheduling request has been rejected by riden',
+    module: 'ride',
+    metadata: ride,
+    type: 'ALERT',
+  });
+  if (!notify) {
+    console.error('Failed to send notification');
+  }
+
+  return ride;
 };
 
 export const findDriverFeedbacks = async ({

@@ -355,44 +355,66 @@ export const addPassengerPaymentMethod = async (
   passenger,
   paymentMethodData,
 ) => {
-  // const paymentMethod = await stripe.paymentMethods.create({
-  //   type: paymentMethodData.type,
-  //   card: { token: '4000000000000077' }, // tok_mastercard, tok_amex, tok_visa, 4000000000000077
-  //   billing_details: {
-  //     name: paymentMethodData.name,
-  //     email: paymentMethodData.email,
-  //   },
-  // });
+  let paymentMethodId;
   const paymentMethod = await stripe.paymentMethods.create({
     type: 'card',
-    card: { token: 'tok_visa' },
+    card: {
+      number: paymentMethodData.card.number,
+      exp_month: paymentMethodData.card.exp_month,
+      exp_year: paymentMethodData.card.exp_year,
+      cvc: paymentMethodData.card.cvc,
+    },
+    billing_details: paymentMethodData.billing_details || {},
   });
 
+  // Attach the payment method to the customer
   await stripe.paymentMethods.attach(paymentMethod.id, {
     customer: passenger.stripeCustomerId,
   });
 
+  paymentMethodId = paymentMethod.id;
+
+  // Set as default if no default card exists
   const card = await getDefaultCard(passenger.stripeCustomerId);
   if (!card.defaultCardId) {
     await stripe.customers.update(passenger.stripeCustomerId, {
-      invoice_settings: { default_payment_method: paymentMethod.id },
+      invoice_settings: { default_payment_method: paymentMethodId },
     });
 
-    await setDefaultCard(passenger.stripeCustomerId, paymentMethod.id);
+    await setDefaultCard(passenger.stripeCustomerId, paymentMethodId);
   }
 
-  await savePassengerPaymentMethod(passenger._id, paymentMethod.id);
+  // Save payment method ID to passenger
+  await savePassengerPaymentMethod(passenger._id, paymentMethodId);
 
-  return paymentMethod.id;
+  return paymentMethodId;
 };
 
 export const getPassengerCards = async (passenger) => {
+  // Get all payment methods (cards, Google Pay, Apple Pay all show as type 'card' in Stripe)
   const paymentMethods = await stripe.paymentMethods.list({
     customer: passenger.stripeCustomerId,
-    type: 'card',
+    type: 'card', // Google Pay and Apple Pay payment methods are also type 'card' in Stripe
   });
 
-  return paymentMethods.data; // array of card objects
+  // Enrich payment methods with metadata to identify Google Pay/Apple Pay
+  const enrichedPaymentMethods = paymentMethods.data.map((pm) => {
+    const paymentMethod = { ...pm };
+
+    // Check if it's a Google Pay or Apple Pay payment method
+    // These are typically identified by the card.wallet property or metadata
+    if (pm.card?.wallet?.type === 'google_pay') {
+      paymentMethod.paymentType = 'GOOGLE_PAY';
+    } else if (pm.card?.wallet?.type === 'apple_pay') {
+      paymentMethod.paymentType = 'APPLE_PAY';
+    } else {
+      paymentMethod.paymentType = 'CARD';
+    }
+
+    return paymentMethod;
+  });
+
+  return enrichedPaymentMethods;
 };
 
 export const getCardDetails = async (paymentMethodId) => {
@@ -440,6 +462,388 @@ export const setDefaultPassengerCard = async (customerId, paymentMethodId) => {
   await setDefaultCard(customerId, paymentMethodId);
 
   return updatedCustomer;
+};
+
+export const setupPassengerWalletIntent = async (
+  user,
+  passenger,
+  walletType,
+) => {
+  try {
+    const normalizedWalletType = walletType.trim().toUpperCase();
+
+    if (!['APPLE_PAY', 'GOOGLE_PAY'].includes(normalizedWalletType)) {
+      return {
+        success: false,
+        error: 'Invalid wallet type. Must be APPLE_PAY or GOOGLE_PAY',
+      };
+    }
+
+    if (!passenger.stripeCustomerId) {
+      const customer = await stripe.customers.create({
+        name: user.name,
+        email: user.email,
+        metadata: {
+          userId: user._id.toString(),
+          passengerId: passenger._id.toString(),
+        },
+      });
+
+      if (!customer) {
+        throw new Error('Failed to create stripe customer');
+      }
+
+      await PassengerModel.findByIdAndUpdate(passenger._id, {
+        stripeCustomerId: customer.id,
+      });
+      passenger.stripeCustomerId = customer.id;
+    }
+
+    // Check for existing wallet payment methods
+    const existingPaymentMethods = await stripe.paymentMethods.list({
+      customer: passenger.stripeCustomerId,
+      type: 'card',
+    });
+
+    const walletTypeToCheck =
+      normalizedWalletType === 'GOOGLE_PAY' ? 'google_pay' : 'apple_pay';
+    const existingWalletPM = existingPaymentMethods.data.find(
+      (pm) => pm.card?.wallet?.type === walletTypeToCheck,
+    );
+
+    if (existingWalletPM) {
+      return {
+        success: false,
+        error: `You already have a ${normalizedWalletType === 'GOOGLE_PAY' ? 'Google Pay' : 'Apple Pay'} payment method. Please remove it before adding a new one.`,
+      };
+    }
+
+    // Create Setup Intent
+    const setupIntent = await stripe.setupIntents.create({
+      customer: passenger.stripeCustomerId,
+      payment_method_types: ['card'],
+      payment_method_options: {
+        card: {
+          request_three_d_secure: 'automatic',
+        },
+      },
+      usage: 'off_session',
+      metadata: {
+        userId: user._id.toString(),
+        passengerId: passenger._id.toString(),
+        walletType: normalizedWalletType,
+      },
+    });
+
+    // Store temporary setup intent data
+    await PassengerModel.findByIdAndUpdate(passenger._id, {
+      [`${normalizedWalletType === 'GOOGLE_PAY' ? 'isGooglePay' : 'isApplePay'}`]:
+        {
+          enabled: false,
+          setupIntentId: setupIntent.id,
+          clientSecret: setupIntent.client_secret,
+          paymentMethodCreatedAt: null,
+        },
+    });
+
+    return {
+      success: true,
+      data: {
+        clientSecret: setupIntent.client_secret,
+        setupIntentId: setupIntent.id,
+      },
+    };
+  } catch (error) {
+    console.error(`STRIPE ERROR: ${error}`);
+    return {
+      success: false,
+      error: error.message || 'Failed to create setup intent',
+    };
+  }
+};
+
+export const deletePassengerWallet = async (passenger, walletType) => {
+  try {
+    const normalizedWalletType = walletType.trim().toUpperCase();
+
+    if (!['APPLE_PAY', 'GOOGLE_PAY'].includes(normalizedWalletType)) {
+      return {
+        success: false,
+        error: 'Invalid wallet type. Must be APPLE_PAY or GOOGLE_PAY',
+      };
+    }
+
+    if (!passenger.stripeCustomerId) {
+      return {
+        success: false,
+        error: 'No Stripe customer found for this passenger',
+      };
+    }
+
+    // Check if wallet is enabled
+    const walletField =
+      normalizedWalletType === 'GOOGLE_PAY' ? 'isGooglePay' : 'isApplePay';
+    const walletData = passenger[walletField];
+
+    if (!walletData?.enabled) {
+      return {
+        success: false,
+        error: `No ${normalizedWalletType === 'GOOGLE_PAY' ? 'Google Pay' : 'Apple Pay'} wallet found or wallet is not enabled`,
+      };
+    }
+
+    // Get all payment methods for this customer
+    const existingPaymentMethods = await stripe.paymentMethods.list({
+      customer: passenger.stripeCustomerId,
+      type: 'card',
+    });
+
+    // Find the payment method associated with this wallet type
+    const walletTypeToCheck =
+      normalizedWalletType === 'GOOGLE_PAY' ? 'google_pay' : 'apple_pay';
+    const walletPaymentMethod = existingPaymentMethods.data.find(
+      (pm) => pm.card?.wallet?.type === walletTypeToCheck,
+    );
+
+    if (walletPaymentMethod) {
+      // Detach the payment method from Stripe
+      try {
+        await stripe.paymentMethods.detach(walletPaymentMethod.id);
+      } catch (detachError) {
+        // If payment method is already detached, that's okay
+        if (
+          detachError.code !== 'resource_missing' &&
+          !detachError.message.includes('already been detached')
+        ) {
+          throw detachError;
+        }
+      }
+
+      // Remove payment method ID from passenger's paymentMethodIds array
+      await updatePassengerPaymentMethod(passenger._id, walletPaymentMethod.id);
+
+      // Check if this was the default payment method
+      const defaultCard = await getDefaultCard(passenger.stripeCustomerId);
+      if (defaultCard?.defaultCardId === walletPaymentMethod.id) {
+        await setDefaultCard(passenger.stripeCustomerId, null);
+      }
+    }
+
+    // Update passenger model to disable the wallet and clear fields
+    await PassengerModel.findByIdAndUpdate(
+      passenger._id,
+      {
+        [walletField]: {
+          enabled: false,
+          setupIntentId: null,
+          clientSecret: null,
+          paymentMethodCreatedAt: null,
+        },
+      },
+      { new: true },
+    );
+
+    return {
+      success: true,
+      message: `${normalizedWalletType === 'GOOGLE_PAY' ? 'Google Pay' : 'Apple Pay'} wallet removed successfully`,
+    };
+  } catch (error) {
+    console.error(`STRIPE ERROR: ${error}`);
+    return {
+      success: false,
+      error: error.message || 'Failed to delete wallet',
+    };
+  }
+};
+
+// Hold/Authorize funds for a ride booking (without capturing)
+// Supports CARD, GOOGLE_PAY, and APPLE_PAY payment methods
+export const holdRidePayment = async (
+  passenger,
+  amount,
+  paymentMethodId,
+  paymentMethodType = 'CARD',
+) => {
+  try {
+    if (!passenger.stripeCustomerId) {
+      throw new Error('Passenger does not have a Stripe customer ID');
+    }
+
+    if (!paymentMethodId) {
+      throw new Error('Payment method ID is required');
+    }
+
+    if (!amount || amount <= 0) {
+      throw new Error('Invalid amount');
+    }
+
+    // Validate payment method type
+    const validPaymentMethods = ['CARD', 'GOOGLE_PAY', 'APPLE_PAY'];
+    if (!validPaymentMethods.includes(paymentMethodType)) {
+      throw new Error(`Invalid payment method type: ${paymentMethodType}`);
+    }
+
+    // Determine payment method description
+    const paymentMethodDescriptions = {
+      CARD: 'Card',
+      GOOGLE_PAY: 'Google Pay',
+      APPLE_PAY: 'Apple Pay',
+    };
+    const paymentDescription =
+      paymentMethodDescriptions[paymentMethodType] || 'Card';
+
+    // Create a Payment Intent with manual capture to hold/authorize funds
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: Math.round(amount * 100), // Convert to cents
+      currency: 'cad',
+      customer: passenger.stripeCustomerId,
+      payment_method: paymentMethodId,
+      capture_method: 'manual', // Authorize but don't capture yet
+      confirm: true, // Confirm immediately to authorize
+      off_session: true, // Customer is not present
+      description: `Ride booking authorization (${paymentDescription}) - Estimated fare: $${amount.toFixed(2)}`,
+      metadata: {
+        type: 'ride_authorization',
+        paymentMethodType: paymentMethodType,
+        passengerId: passenger._id.toString(),
+      },
+    });
+
+    // Check if authorization was successful
+    if (
+      paymentIntent.status !== 'requires_capture' &&
+      paymentIntent.status !== 'succeeded'
+    ) {
+      throw new Error(
+        `Payment authorization failed. Status: ${paymentIntent.status}`,
+      );
+    }
+
+    return {
+      success: true,
+      paymentIntentId: paymentIntent.id,
+      status: paymentIntent.status,
+      amount: amount,
+      paymentMethodType: paymentMethodType,
+    };
+  } catch (error) {
+    console.error('Error holding ride payment:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to authorize payment',
+      stripeError: error.type || null,
+    };
+  }
+};
+
+// Cancel/Release a payment hold (for payment intents that haven't been captured)
+export const cancelPaymentHold = async (paymentIntentId) => {
+  try {
+    if (!paymentIntentId) {
+      throw new Error('Payment intent ID is required');
+    }
+
+    // Cancel the payment intent to release the hold
+    const cancelledIntent = await stripe.paymentIntents.cancel(paymentIntentId);
+
+    return {
+      success: true,
+      paymentIntentId: cancelledIntent.id,
+      status: cancelledIntent.status,
+    };
+  } catch (error) {
+    console.error('Error cancelling payment hold:', error);
+    // If payment intent is already captured or cancelled, that's okay
+    if (
+      error.code === 'payment_intent_unexpected_state' ||
+      error.message.includes('already been canceled') ||
+      error.message.includes('already been captured')
+    ) {
+      return {
+        success: true,
+        message: 'Payment hold already released',
+      };
+    }
+    return {
+      success: false,
+      error: error.message || 'Failed to cancel payment hold',
+      stripeError: error.type || null,
+    };
+  }
+};
+
+// Capture held payment when ride completes
+export const captureHeldPayment = async (
+  paymentIntentId,
+  amount, // Actual fare (might differ from estimated)
+  rideId,
+) => {
+  try {
+    if (!paymentIntentId) {
+      throw new Error('Payment intent ID is required');
+    }
+
+    if (!amount || amount <= 0) {
+      throw new Error('Invalid amount');
+    }
+
+    // Retrieve payment intent to check status
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+
+    if (paymentIntent.status !== 'requires_capture') {
+      throw new Error(
+        `Payment intent is not in requires_capture state. Current status: ${paymentIntent.status}`,
+      );
+    }
+
+    // If actual amount differs from authorized amount, update first
+    const authorizedAmount = paymentIntent.amount / 100; // Convert from cents
+    if (Math.abs(authorizedAmount - amount) > 0.01) {
+      // Update payment intent with new amount
+      await stripe.paymentIntents.update(paymentIntentId, {
+        amount: Math.round(amount * 100),
+      });
+    }
+
+    // Capture the payment
+    const capturedPayment = await stripe.paymentIntents.capture(
+      paymentIntentId,
+      {
+        amount_to_capture: Math.round(amount * 100), // Optional: capture specific amount
+      },
+    );
+
+    if (capturedPayment.status !== 'succeeded') {
+      throw new Error(
+        `Payment capture failed. Status: ${capturedPayment.status}`,
+      );
+    }
+
+    return {
+      success: true,
+      paymentIntentId: capturedPayment.id,
+      status: capturedPayment.status,
+      amount: amount,
+      capturedAt: new Date(),
+    };
+  } catch (error) {
+    console.error('Error capturing held payment:', error);
+    // If payment intent is already captured, that's okay
+    if (
+      error.code === 'payment_intent_unexpected_state' ||
+      error.message.includes('already been captured')
+    ) {
+      return {
+        success: true,
+        message: 'Payment already captured',
+      };
+    }
+    return {
+      success: false,
+      error: error.message || 'Failed to capture payment',
+      stripeError: error.type || null,
+    };
+  }
 };
 
 export const addFundsToWallet = async (
@@ -1127,6 +1531,224 @@ export const passengerPaysDriver = async (
   }
 };
 
+// Process driver payout after payment is already captured (for held payments)
+export const processDriverPayoutAfterCapture = async (
+  passenger,
+  driver,
+  ride,
+  amount, // Driver's share (after commission)
+  actualAmount, // Total passenger paid (including commission)
+  paymentIntentId, // Already captured payment intent ID
+  category,
+) => {
+  const session = await mongoose.startSession();
+
+  try {
+    await session.withTransaction(async () => {
+      // Validate amounts
+      let parsedAmount = Number(amount);
+      let parsedActualAmount = Number(actualAmount);
+
+      if (
+        isNaN(parsedAmount) ||
+        parsedAmount <= 0 ||
+        isNaN(parsedActualAmount) ||
+        parsedActualAmount <= 0
+      ) {
+        throw new Error('Invalid amount provided');
+      }
+
+      // Commission calculation
+      const commissionAmount = parsedActualAmount - parsedAmount;
+      if (commissionAmount <= 0) {
+        throw new Error(
+          'Commission calculation error: actual amount cannot be less than driver amount',
+        );
+      }
+
+      // Retrieve the captured payment intent
+      const paymentIntent =
+        await stripe.paymentIntents.retrieve(paymentIntentId);
+      if (paymentIntent.status !== 'succeeded') {
+        throw new Error(
+          `Payment intent not succeeded. Status: ${paymentIntent.status}`,
+        );
+      }
+
+      // Get driver and passenger wallets
+      const [driverWallet, passengerWallet] = await Promise.all([
+        DriverWallet.findOne({ driverId: driver._id }).session(session),
+        PassengerWallet.findOne({ passengerId: passenger._id }).session(
+          session,
+        ),
+      ]);
+
+      if (!driverWallet) throw new Error('Driver wallet not found');
+      if (!passengerWallet) throw new Error('Passenger wallet not found');
+
+      // Clear negative balance if exists (from the captured payment)
+      const passengerNegativeBalance = passengerWallet.negativeBalance || 0;
+      if (passengerNegativeBalance > 0) {
+        await PassengerWallet.findOneAndUpdate(
+          { passengerId: passenger._id },
+          { $inc: { negativeBalance: -passengerNegativeBalance } },
+          { session },
+        );
+      }
+
+      // Handle driver balance updates
+      if (driverWallet.negativeBalance > 0) {
+        const negative = driverWallet.negativeBalance;
+
+        if (parsedAmount >= negative) {
+          await DriverWallet.findOneAndUpdate(
+            { driverId: driver._id },
+            { $inc: { negativeBalance: -negative } },
+            { session },
+          );
+          const remaining = parsedAmount - negative;
+          if (remaining > 0) {
+            await DriverWallet.findOneAndUpdate(
+              { driverId: driver._id },
+              { $inc: { pendingBalance: remaining } },
+              { session },
+            );
+          }
+        } else {
+          await DriverWallet.findOneAndUpdate(
+            { driverId: driver._id },
+            { $inc: { negativeBalance: -parsedAmount } },
+            { session },
+          );
+        }
+      } else {
+        await DriverWallet.findOneAndUpdate(
+          { driverId: driver._id },
+          { $inc: { pendingBalance: parsedAmount } },
+          { session },
+        );
+      }
+
+      // Create transactions
+      await Promise.all([
+        TransactionModel.create(
+          [
+            {
+              passengerId: passenger._id,
+              driverId: driver._id,
+              rideId: ride._id,
+              type: 'DEBIT',
+              category,
+              amount: parsedActualAmount,
+              for: 'passenger',
+              metadata: {
+                ...paymentIntent,
+                negativeBalanceCleared: passengerNegativeBalance,
+                paymentIntentId: paymentIntentId,
+                fromHeldPayment: true,
+              },
+              status: 'succeeded',
+              referenceId: paymentIntentId,
+              receiptUrl: paymentIntentId,
+            },
+          ],
+          { session },
+        ).then((res) => res[0]),
+
+        TransactionModel.create(
+          [
+            {
+              passengerId: passenger._id,
+              driverId: driver._id,
+              rideId: ride._id,
+              type: 'CREDIT',
+              category: 'PAYOUT',
+              amount: parsedAmount,
+              for: 'driver',
+              metadata: {
+                paymentIntentId: paymentIntentId,
+                fromHeldPayment: true,
+              },
+              status: 'succeeded',
+              referenceId: paymentIntentId,
+              receiptUrl: paymentIntentId,
+            },
+          ],
+          { session },
+        ).then((res) => res[0]),
+
+        ...(passengerNegativeBalance > 0
+          ? [
+              TransactionModel.create(
+                [
+                  {
+                    passengerId: passenger._id,
+                    type: 'CREDIT',
+                    category: 'NEGATIVE_BALANCE_CLEARANCE',
+                    amount: passengerNegativeBalance,
+                    for: 'passenger',
+                    metadata: {
+                      paymentIntent: paymentIntentId,
+                      rideId: ride._id,
+                      previousNegativeBalance: passengerNegativeBalance,
+                      fromHeldPayment: true,
+                    },
+                    status: 'succeeded',
+                    referenceId: `nb_clear_${paymentIntentId}`,
+                    receiptUrl: paymentIntentId,
+                  },
+                ],
+                { session },
+              ).then((res) => res[0]),
+            ]
+          : []),
+
+        RideTransaction.create(
+          [
+            {
+              rideId: ride._id,
+              driverId: driver._id,
+              passengerId: passenger._id,
+              amount: parsedActualAmount,
+              commission: commissionAmount,
+              discount: ride.fareBreakdown?.promoDiscount || 0,
+              tip: ride.tipBreakdown?.amount || 0,
+              driverEarning: parsedAmount,
+              paymentMethod: ride.paymentMethod,
+              status: 'COMPLETED',
+              isRefunded: false,
+              payoutWeek: new Date(),
+              metadata: {
+                paymentIntentId: paymentIntentId,
+                fromHeldPayment: true,
+              },
+            },
+          ],
+          { session },
+        ).then((res) => res[0]),
+      ]);
+    });
+
+    // Get the transaction for return value
+    const transaction = await TransactionModel.findOne({
+      rideId: ride._id,
+      type: 'DEBIT',
+      for: 'passenger',
+    });
+
+    return {
+      success: true,
+      transaction,
+      paymentIntentId: paymentIntentId,
+    };
+  } catch (error) {
+    console.error(`PAYOUT AFTER CAPTURE FAILED: ${error.message}`);
+    return { success: false, error: error.message };
+  } finally {
+    await session.endSession();
+  }
+};
+
 const handleInsufficientFunds = async (
   passenger,
   driver,
@@ -1367,7 +1989,6 @@ const processNegativeBalancePayment = async (
 };
 
 // Driver Flow
-
 export const createDriverStripeAccount = async (user, driver) => {
   const account = await stripe.accounts.create({
     type: 'custom', // or 'express'
@@ -1745,7 +2366,71 @@ export const payoutToDriverBank = async (driver, amount) => {
               method: payout.method,
             },
             status: payout.status === 'paid' ? 'succeeded' : 'pending',
-            referenceId: payout.id,
+            referenceId:
+              // export const instantPayoutDriver = async (driver, requestId) => {
+              //   const balance = driver.balance;
+              //   if (balance <= 10) throw new Error('Payout must be greater than $10');
+
+              //   const transfer = await stripe.transfers.create({
+              //     amount: Math.round(balance * 100),
+              //     currency: 'cad',
+              //     destination: driver.stripeAccountId,
+              //     description: `Driver payout transfer`,
+              //   });
+
+              //   const payout = await stripe.payouts.create(
+              //     {
+              //       amount: Math.round(balance * 100),
+              //       currency: 'cad',
+              //     },
+              //     {
+              //       stripeAccount: driver.stripeAccountId,
+              //     },
+              //   );
+
+              //   const rides = await findDriverHistory(driver._id);
+              //   await updateRequestedPayoutStatus(requestId);
+              //   await updateInstantPayoutStatuses(driver._id);
+
+              //   await createPayout(
+              //     driver._id,
+              //     balance,
+              //     'INSTANT',
+              //     rides.rideIds.length,
+              //     requestId,
+              //     'SUCCESS',
+              //   );
+
+              //   await Promise.all([
+              //     deleteDriverHistory(driver._id),
+              //     decreaseDriverBalance(driver._id, balance),
+              //     createTransaction({
+              //       driverId: driver._id,
+              //       type: 'DEBIT',
+              //       category: 'INSTANT-PAYOUT',
+              //       amount: balance,
+              //       for: 'admin',
+              //       metadata: { transfer, payout },
+              //       status: 'succeeded',
+              //       referenceId: payout.id,
+              //       receiptUrl: payout.id,
+              //     }),
+              //     createTransaction({
+              //       driverId: driver._id,
+              //       type: 'CREDIT',
+              //       category: 'INSTANT-PAYOUT',
+              //       amount: balance,
+              //       for: 'driver',
+              //       metadata: { transfer, payout },
+              //       status: 'succeeded',
+              //       referenceId: payout.id,
+              //       receiptUrl: payout.id,
+              //     }),
+              //   ]);
+
+              //   return { transfer, payout };
+              // };
+              payout.id,
             receiptUrl: payout.id,
           },
         ],
@@ -1833,70 +2518,6 @@ export const payoutToDriverBank = async (driver, amount) => {
 };
 
 // Admin Flow
-// export const instantPayoutDriver = async (driver, requestId) => {
-//   const balance = driver.balance;
-//   if (balance <= 10) throw new Error('Payout must be greater than $10');
-
-//   const transfer = await stripe.transfers.create({
-//     amount: Math.round(balance * 100),
-//     currency: 'cad',
-//     destination: driver.stripeAccountId,
-//     description: `Driver payout transfer`,
-//   });
-
-//   const payout = await stripe.payouts.create(
-//     {
-//       amount: Math.round(balance * 100),
-//       currency: 'cad',
-//     },
-//     {
-//       stripeAccount: driver.stripeAccountId,
-//     },
-//   );
-
-//   const rides = await findDriverHistory(driver._id);
-//   await updateRequestedPayoutStatus(requestId);
-//   await updateInstantPayoutStatuses(driver._id);
-
-//   await createPayout(
-//     driver._id,
-//     balance,
-//     'INSTANT',
-//     rides.rideIds.length,
-//     requestId,
-//     'SUCCESS',
-//   );
-
-//   await Promise.all([
-//     deleteDriverHistory(driver._id),
-//     decreaseDriverBalance(driver._id, balance),
-//     createTransaction({
-//       driverId: driver._id,
-//       type: 'DEBIT',
-//       category: 'INSTANT-PAYOUT',
-//       amount: balance,
-//       for: 'admin',
-//       metadata: { transfer, payout },
-//       status: 'succeeded',
-//       referenceId: payout.id,
-//       receiptUrl: payout.id,
-//     }),
-//     createTransaction({
-//       driverId: driver._id,
-//       type: 'CREDIT',
-//       category: 'INSTANT-PAYOUT',
-//       amount: balance,
-//       for: 'driver',
-//       metadata: { transfer, payout },
-//       status: 'succeeded',
-//       referenceId: payout.id,
-//       receiptUrl: payout.id,
-//     }),
-//   ]);
-
-//   return { transfer, payout };
-// };
-
 export const transferToDriverAccount = async (driver, requestId) => {
   if (!driver.stripeAccountId)
     throw new Error('Driver has no Stripe account linked');

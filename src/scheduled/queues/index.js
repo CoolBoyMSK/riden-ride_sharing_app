@@ -1,5 +1,4 @@
-import pkg from 'bullmq';
-const { Queue, QueueScheduler } = pkg;
+import { Queue } from 'bullmq';
 import IORedis from 'ioredis';
 import env from '../../config/envConfig.js';
 
@@ -16,28 +15,19 @@ export const driverQueue = new Queue('driver-transfer-queue', {
   prefix,
 });
 
-export const mainQueueScheduler = new QueueScheduler('weekly-payout-queue', {
+export const scheduledRideQueue = new Queue('scheduled-ride-queue', {
   connection,
   prefix,
 });
-await mainQueueScheduler.waitUntilReady();
-
-export const driverQueueScheduler = new QueueScheduler(
-  'driver-transfer-queue',
-  {
-    connection,
-    prefix,
-  },
-);
-await driverQueueScheduler.waitUntilReady();
 
 export default connection;
 
 // Optional cleanup for graceful shutdown
 process.on('SIGTERM', async () => {
   await Promise.all([
-    mainQueueScheduler.close(),
-    driverQueueScheduler.close(),
+    mainQueue.close(),
+    driverQueue.close(),
+    scheduledRideQueue.close(),
     connection.quit(),
   ]);
   console.log('✅ Queues and Redis connection closed gracefully');

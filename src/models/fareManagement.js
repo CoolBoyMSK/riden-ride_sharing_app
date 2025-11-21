@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
-import { CAR_TYPES } from '../enums/carType.js';
-import { ZONE_TYPES } from '../enums/zoneTypes.js';
+import { CAR_TYPES } from '../enums/vehicleEnums.js';
+import { ZONE_TYPES } from '../enums/zoneEnums.js';
 
 const { Schema, model } = mongoose;
 

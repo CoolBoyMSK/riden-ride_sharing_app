@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { ZONE_TYPES } from '../enums/zoneTypes.js';
+import { ZONE_TYPES } from '../enums/zoneEnums.js';
 
 const zoneSchema = new mongoose.Schema(
   {

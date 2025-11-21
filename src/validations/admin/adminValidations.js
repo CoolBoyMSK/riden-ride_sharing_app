@@ -1,5 +1,5 @@
 import Joi from 'joi';
-import { ADMIN_MODULES } from '../../enums/adminModules.js';
+import { ADMIN_MODULES } from '../../enums/adminEnums.js';
 
 const createAdminSchema = Joi.object({
   name: Joi.string().trim().required(),

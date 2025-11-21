@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import Zone from '../models/Zone.js';
 import ParkingQueue from '../models/ParkingQueue.js';
-import { ZONE_TYPES } from '../enums/zoneTypes.js';
+import { ZONE_TYPES } from '../enums/zoneEnums.js';
 
 export const createZone = async (payload) => {
   // Validate required fields

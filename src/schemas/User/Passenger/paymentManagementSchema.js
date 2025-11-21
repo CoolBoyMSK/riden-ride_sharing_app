@@ -52,13 +52,25 @@ const billingDetailsSchema = Joi.object({
 
 // Final schema
 export const addPaymentMethodSchema = Joi.object({
-  type: Joi.string().valid('card').default('card').required().messages({
-    'any.only': "Type must be 'card'",
-    'any.required': 'Payment method type is required',
-  }),
+  type: Joi.string()
+    .valid('card', 'google_pay', 'apple_pay')
+    .default('card')
+    .required()
+    .messages({
+      'any.only': "Type must be 'card', 'google_pay', or 'apple_pay'",
+      'any.required': 'Payment method type is required',
+    }),
 
   isDefault: Joi.boolean().default(false),
 
+  // For Google Pay and Apple Pay, payment method ID is provided directly
+  paymentMethodId: Joi.when('type', {
+    is: Joi.string().valid('google_pay', 'apple_pay'),
+    then: paymentMethodIdSchema.required(),
+    otherwise: Joi.forbidden(),
+  }),
+
+  // For card, card details are required
   card: Joi.when('type', {
     is: 'card',
     then: cardSchema.required(),

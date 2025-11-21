@@ -6,6 +6,7 @@ import {
   getBookingById,
   getNearestDriversForScheduledRide,
   assignDriver,
+  rejectScheduledRide,
 } from '../../../services/Admin/Booking/index.js';
 
 export const getCompletedBookingsController = (req, res) =>
@@ -69,6 +70,17 @@ export const assignDriverToScheduledRideController = (req, res) =>
       handler: assignDriver,
       handlerParams: [req.params, req.query],
       successMessage: 'Driver assigned to scheduled ride successfully',
+    },
+    req,
+    res,
+  );
+
+export const rejectScheduledRideController = (req, res) =>
+  handleResponse(
+    {
+      handler: rejectScheduledRide,
+      handlerParams: [req.params, req.body],
+      successMessage: 'Scheduled ride rejected successfully',
     },
     req,
     res,

@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import FareManagement from '../models/fareManagement.js';
-import { CAR_TYPES } from '../enums/carType.js';
+import { CAR_TYPES } from '../enums/vehicleEnums.js';
 
 // Helper functions
 const getNestedValue = (obj, path) => {
