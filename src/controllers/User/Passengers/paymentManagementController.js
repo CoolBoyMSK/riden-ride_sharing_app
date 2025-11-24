@@ -1,10 +1,10 @@
 import {
-  addPaymentMethod,
-  setDefaultPaymentMethod,
-  getPaymentMethods,
-  getPaymentMethodById,
-  updatePaymentMethod,
-  deletePaymentMethod,
+  addCardSetupIntent,
+  addCard,
+  setDefaultCard,
+  getCards,
+  getCardById,
+  deleteCard,
   topUpInAppWallet,
   getInAppWallet,
   getTransactions,
@@ -18,77 +18,73 @@ import {
   validateUpdatePaymentMethodId,
 } from '../../../validations/user/passenger/paymentManagementValidators.js';
 
-export const addPaymentMethodController = (req, res) =>
+export const addCardSetupIntentController = (req, res) =>
   handleResponse(
     {
-      handler: addPaymentMethod,
-      validationFn: () => validatePaymentMethod(req.body),
-      handlerParams: [req.user, req.body],
-      successMessage: 'Payment Method Added successfully',
-    },
-    req,
-    res,
-  );
-
-export const setDefaultPaymentMethodController = (req, res) =>
-  handleResponse(
-    {
-      handler: setDefaultPaymentMethod,
-      validationFn: () => validateSetDefaultPaymentMethod(req.params),
-      handlerParams: [req.user, req.params],
-      successMessage: 'Default Payment Method added successfully',
-    },
-    req,
-    res,
-  );
-
-export const getPaymentMethodsController = (req, res) =>
-  handleResponse(
-    {
-      handler: getPaymentMethods,
+      handler: addCardSetupIntent,
       validationFn: null,
       handlerParams: [req.user],
-      successMessage: 'Payment Methods fetched successfully',
+      successMessage: 'Setup intent created successfully',
     },
     req,
     res,
   );
 
-export const getPaymentMethodByIdController = (req, res) =>
+export const addCardController = (req, res) =>
   handleResponse(
     {
-      handler: getPaymentMethodById,
+      handler: addCard,
+      validationFn: null,
+      handlerParams: [req.user, req.body],
+      successMessage: 'Card Added successfully',
+    },
+    req,
+    res,
+  );
+
+export const getCardsController = (req, res) =>
+  handleResponse(
+    {
+      handler: getCards,
+      validationFn: null,
+      handlerParams: [req.user],
+      successMessage: 'Cards fetched successfully',
+    },
+    req,
+    res,
+  );
+
+export const getCardByIdController = (req, res) =>
+  handleResponse(
+    {
+      handler: getCardById,
       validationFn: () => validateSetDefaultPaymentMethod(req.params),
       handlerParams: [req.user, req.params],
-      successMessage: 'Payment Method fetched successfully',
+      successMessage: 'Card fetched successfully',
     },
     req,
     res,
   );
 
-export const updatePaymentMethodController = (req, res) =>
+export const deleteCardController = (req, res) =>
   handleResponse(
     {
-      handler: updatePaymentMethod,
-      validationFn: () =>
-        validateUpdatePaymentMethodId({
-          paymentMethodId: req.params.paymentMethodId,
-          card: req.body,
-        }),
-      handlerParams: [req.user, req.params, req.body],
-      successMessage: 'Payment Methods updated successfully',
+      handler: deleteCard,
+      validationFn: null,
+      handlerParams: [req.user, req.params],
+      successMessage: 'Card deleted successfully',
     },
     req,
     res,
   );
 
-export const deletePaymentMethodController = (req, res) =>
+export const setDefaultCardController = (req, res) =>
   handleResponse(
     {
-      handler: deletePaymentMethod,
+      handler: setDefaultCard,
       validationFn: () => validateSetDefaultPaymentMethod(req.params),
       handlerParams: [req.user, req.params],
-      successMessage: 'Payment Method deleted successfully',
+      successMessage: 'Default Card added successfully',
     },
     req,
     res,

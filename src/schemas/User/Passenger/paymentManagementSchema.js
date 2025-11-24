@@ -70,16 +70,27 @@ export const addPaymentMethodSchema = Joi.object({
     otherwise: Joi.forbidden(),
   }),
 
-  // For card, card details are required
+  // For card, card details are required (raw card data)
   card: Joi.when('type', {
     is: 'card',
     then: cardSchema.required(),
     otherwise: Joi.forbidden(),
   }),
 
+  // Billing details are required for card type
   billing_details: Joi.when('type', {
     is: 'card',
     then: billingDetailsSchema.required(),
+    otherwise: Joi.forbidden(),
+  }),
+
+  // Card type (e.g., 'PERSONAL', 'BUSINESS')
+  cardType: Joi.when('type', {
+    is: 'card',
+    then: Joi.string().valid('PERSONAL', 'BUSINESS').required().messages({
+      'any.only': "Card type must be 'PERSONAL' or 'BUSINESS'",
+      'any.required': 'Card type is required',
+    }),
     otherwise: Joi.forbidden(),
   }),
 });

@@ -1,103 +1,24 @@
+import mongoose from 'mongoose';
 import {
   findPassengerByUserId,
   findPassengerTransactions,
 } from '../../../dal/passenger.js';
 import {
-  addPassengerPaymentMethod,
+  cardSetupIntent,
+  addPassengerCard,
   setDefaultPassengerCard,
   getPassengerCards,
   deletePassengerCard,
-  updatePassengerCard,
-  getCardDetails,
+  getPassengerCardById,
   addFundsToWallet,
   getPassengerWallet,
   setupPassengerWalletIntent,
   deletePassengerWallet,
+  createPassengerStripeCustomer,
 } from '../../../dal/stripe.js';
-import mongoose from 'mongoose';
+import { CARD_TYPES } from '../../../enums/paymentEnums.js';
 
-export const addPaymentMethod = async (
-  user,
-  { type, card, billing_details, paymentMethodId },
-  resp,
-) => {
-  try {
-    const passenger = await findPassengerByUserId(user._id);
-    if (!passenger) {
-      resp.error = true;
-      resp.error_message = 'Failed to Fetch passenger';
-      return resp;
-    }
-
-    const payload = {
-      type,
-      card,
-      billing_details,
-      paymentMethodId, // For Google Pay and Apple Pay
-    };
-
-    const success = await addPassengerPaymentMethod(passenger, payload);
-    if (!success) {
-      resp.error = true;
-      resp.error_message = 'Failed to add payment method';
-      return resp;
-    }
-
-    resp.data = {
-      success: true,
-      paymentMethodId: success,
-    };
-    return resp;
-  } catch (error) {
-    console.error(`API ERROR: ${error}`);
-    resp.error = true;
-    resp.error_message = error.message || 'something went wrong';
-    return resp;
-  }
-};
-
-export const setDefaultPaymentMethod = async (
-  user,
-  { paymentMethodId },
-  resp,
-) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
-  try {
-    const passenger = await findPassengerByUserId(user._id);
-    if (!passenger) {
-      resp.error = true;
-      resp.error_message = 'Failed to Fetch passenger';
-      return resp;
-    }
-
-    const success = await setDefaultPassengerCard(
-      passenger.stripeCustomerId,
-      paymentMethodId,
-    );
-    if (!success) {
-      resp.error = true;
-      resp.error_message = 'Failed set default payment method';
-      return resp;
-    }
-
-    resp.data = {
-      success: true,
-    };
-    return resp;
-  } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-
-    console.error(`API ERROR: ${error}`);
-    resp.error = true;
-    resp.error_message = error.message || 'something went wrong';
-    return resp;
-  }
-};
-
-export const getPaymentMethods = async (user, resp) => {
+export const addCardSetupIntent = async (user, resp) => {
   try {
     const passenger = await findPassengerByUserId(user._id);
     if (!passenger) {
@@ -106,7 +27,93 @@ export const getPaymentMethods = async (user, resp) => {
       return resp;
     }
 
-    const success = await getPassengerCards(passenger);
+    const success = await cardSetupIntent(passenger.stripeCustomerId);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to create setup intent';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'something went wrong';
+    return resp;
+  }
+};
+
+export const addCard = async (user, { paymentMethodId, cardType }, resp) => {
+  try {
+    if (!paymentMethodId) {
+      resp.error = true;
+      resp.error_message = 'Payment method id is required';
+      return resp;
+    } else if (!CARD_TYPES.includes(cardType)) {
+      resp.error = true;
+      resp.error_message = 'Invalid card type';
+      return resp;
+    }
+
+    const passenger = await findPassengerByUserId(user._id);
+    if (!passenger) {
+      resp.error = true;
+      resp.error_message = 'Failed to Fetch passenger';
+      return resp;
+    }
+
+    // Ensure passenger has Stripe customer ID
+    if (!passenger.stripeCustomerId) {
+      await createPassengerStripeCustomer(user, passenger);
+      // Reload passenger to get updated stripeCustomerId
+      const updatedPassenger = await findPassengerByUserId(user._id);
+      if (updatedPassenger && updatedPassenger.stripeCustomerId) {
+        passenger.stripeCustomerId = updatedPassenger.stripeCustomerId;
+      }
+    }
+
+    // Prepare metadata for payment method
+    const metadata = {
+      passengerId: passenger._id.toString(),
+      userId: user._id.toString(),
+      userType: 'passenger',
+      addedAt: new Date().toISOString(),
+      cardType,
+    };
+
+    // Add card to Stripe and database
+    const result = await addPassengerCard(
+      passenger.stripeCustomerId,
+      paymentMethodId,
+      metadata,
+    );
+    if (!result.success) {
+      resp.error = true;
+      resp.error_message = result.error || 'Failed to add payment method';
+      return resp;
+    }
+
+    resp.data = result;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'something went wrong';
+    return resp;
+  }
+};
+
+export const getCards = async (user, resp) => {
+  try {
+    const passenger = await findPassengerByUserId(user._id);
+    if (!passenger) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch passenger';
+      return resp;
+    }
+
+    const success = await getPassengerCards(passenger.stripeCustomerId);
     if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to fetch payment methods';
@@ -123,7 +130,7 @@ export const getPaymentMethods = async (user, resp) => {
   }
 };
 
-export const getPaymentMethodById = async (user, { paymentMethodId }, resp) => {
+export const getCardById = async (user, { paymentMethodId }, resp) => {
   try {
     const passenger = await findPassengerByUserId(user._id);
     if (!passenger) {
@@ -132,14 +139,14 @@ export const getPaymentMethodById = async (user, { paymentMethodId }, resp) => {
       return resp;
     }
 
-    const success = await getCardDetails(paymentMethodId);
-    if (!success) {
+    const result = await getPassengerCardById(paymentMethodId);
+    if (!result.success) {
       resp.error = true;
-      resp.error_message = 'Failed to fetch payment method';
+      resp.error_message = result.error || 'Failed to fetch card by id';
       return resp;
     }
 
-    resp.data = success;
+    resp.data = result;
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);
@@ -149,14 +156,7 @@ export const getPaymentMethodById = async (user, { paymentMethodId }, resp) => {
   }
 };
 
-export const updatePaymentMethod = async (
-  user,
-  { paymentMethodId },
-  payload,
-  resp,
-) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
+export const deleteCard = async (user, { paymentMethodId }, resp) => {
   try {
     const passenger = await findPassengerByUserId(user._id);
     if (!passenger) {
@@ -165,21 +165,16 @@ export const updatePaymentMethod = async (
       return resp;
     }
 
-    const success = await updatePassengerCard(paymentMethodId, payload);
-    if (!success) {
+    const result = await deletePassengerCard(paymentMethodId);
+    if (!result.success) {
       resp.error = true;
-      resp.error_message = 'Failed to fetch passenger';
+      resp.error_message = result.error || 'Failed to delete payment method';
       return resp;
     }
 
-    await session.commitTransaction();
-    session.endSession();
-
-    resp.data = { success: true };
+    resp.data = result;
     return resp;
   } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
     console.error(`API ERROR: ${error}`);
     resp.error = true;
     resp.error_message = error.message || 'something went wrong';
@@ -187,36 +182,28 @@ export const updatePaymentMethod = async (
   }
 };
 
-export const deletePaymentMethod = async (user, { paymentMethodId }, resp) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
+export const setDefaultCard = async (user, { paymentMethodId }, resp) => {
   try {
     const passenger = await findPassengerByUserId(user._id);
     if (!passenger) {
       resp.error = true;
-      resp.error_message = 'Failed to fetch passenger';
+      resp.error_message = 'Failed to Fetch passenger';
       return resp;
     }
 
-    const success = await deletePassengerCard(passenger, paymentMethodId);
-    if (!success) {
+    const result = await setDefaultPassengerCard(
+      passenger.stripeCustomerId,
+      paymentMethodId,
+    );
+    if (!result.success) {
       resp.error = true;
-      resp.error_message = 'Failed to delete payment method';
+      resp.error_message = result.error || 'Failed set default payment method';
       return resp;
     }
 
-    await session.commitTransaction();
-    session.endSession();
-
-    resp.data = {
-      success: true,
-    };
+    resp.data = result;
     return resp;
   } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-
     console.error(`API ERROR: ${error}`);
     resp.error = true;
     resp.error_message = error.message || 'something went wrong';

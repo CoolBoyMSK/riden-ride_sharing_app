@@ -1,11 +1,11 @@
 import express from 'express';
 import {
-  addPaymentMethodController,
-  setDefaultPaymentMethodController,
-  getPaymentMethodsController,
-  getPaymentMethodByIdController,
-  updatePaymentMethodController,
-  deletePaymentMethodController,
+  addCardSetupIntentController,
+  addCardController,
+  setDefaultCardController,
+  getCardsController,
+  getCardByIdController,
+  deleteCardController,
   topUpInAppWalletController,
   getInAppWalletController,
   getTransactionsController,
@@ -18,23 +18,44 @@ const router = express.Router();
 
 registerRoute({
   router,
-  route: '/get',
+  route: '/card/intent',
   passenger_auth_enable: true,
-  get_method: getPaymentMethodsController,
+  post_method: addCardSetupIntentController,
 });
 
 registerRoute({
   router,
-  route: '/add',
+  route: '/card/add',
   passenger_auth_enable: true,
-  post_method: addPaymentMethodController,
+  post_method: addCardController,
 });
 
 registerRoute({
   router,
-  route: '/get/:paymentMethodId',
+  route: '/card/get',
   passenger_auth_enable: true,
-  get_method: getPaymentMethodByIdController,
+  get_method: getCardsController,
+});
+
+registerRoute({
+  router,
+  route: '/card/get/:paymentMethodId',
+  passenger_auth_enable: true,
+  get_method: getCardByIdController,
+});
+
+registerRoute({
+  router,
+  route: '/card/delete/:paymentMethodId',
+  passenger_auth_enable: true,
+  delete_method: deleteCardController,
+});
+
+registerRoute({
+  router,
+  route: '/card/default/:paymentMethodId',
+  passenger_auth_enable: true,
+  put_method: setDefaultCardController,
 });
 
 registerRoute({
@@ -42,27 +63,6 @@ registerRoute({
   route: '/fund/:paymentMethodId',
   passenger_auth_enable: true,
   put_method: topUpInAppWalletController,
-});
-
-registerRoute({
-  router,
-  route: '/set/:paymentMethodId',
-  passenger_auth_enable: true,
-  put_method: setDefaultPaymentMethodController,
-});
-
-registerRoute({
-  router,
-  route: '/edit/:paymentMethodId',
-  passenger_auth_enable: true,
-  put_method: updatePaymentMethodController,
-});
-
-registerRoute({
-  router,
-  route: '/delete/:paymentMethodId',
-  passenger_auth_enable: true,
-  delete_method: deletePaymentMethodController,
 });
 
 registerRoute({

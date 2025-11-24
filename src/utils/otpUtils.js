@@ -78,6 +78,7 @@ export const requestEmailOtp = async (
     await redisConfig.del(...keys);
 
     const otp = generateOtp();
+    console.log('otp:', otp);
     const hashed = hashOtp(otp);
 
     await setWithTTL(emailOtpKey(email), env.OTP_TTL_SECONDS, hashed);

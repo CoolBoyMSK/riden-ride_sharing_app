@@ -7,6 +7,8 @@ import {
   createTestRefund,
   createTestPaymentMethod,
   getAllTestPayments,
+  getAllTestTransactions,
+  getTestTransaction,
 } from '../../controllers/Test/stripeTestController.js';
 
 const router = express.Router();
@@ -31,5 +33,11 @@ router.post('/create-payment-method', createTestPaymentMethod);
 
 // Get all payment intents (for testing)
 router.get('/payments', getAllTestPayments);
+
+// Get all test transactions from database
+router.get('/transactions', getAllTestTransactions);
+
+// Get a single test transaction by ID
+router.get('/transactions/:transactionId', getTestTransaction);
 
 export default router;

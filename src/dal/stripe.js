@@ -17,6 +17,7 @@ import env from '../config/envConfig.js';
 import { notifyUser } from '../dal/notification.js';
 import { sendDriverPaymentProcessedEmail } from '../templates/emails/user/index.js';
 import { createAdminNotification } from './notification.js';
+import { CARD_TYPES } from '../enums/paymentEnums.js';
 
 const stripe = new Stripe(env.STRIPE_SECRET_KEY);
 
@@ -351,117 +352,128 @@ export const createPassengerStripeCustomer = async (user, passenger) => {
   return customer.id;
 };
 
-export const addPassengerPaymentMethod = async (
-  passenger,
-  paymentMethodData,
-) => {
-  let paymentMethodId;
-  const paymentMethod = await stripe.paymentMethods.create({
-    type: 'card',
-    card: {
-      number: paymentMethodData.card.number,
-      exp_month: paymentMethodData.card.exp_month,
-      exp_year: paymentMethodData.card.exp_year,
-      cvc: paymentMethodData.card.cvc,
-    },
-    billing_details: paymentMethodData.billing_details || {},
-  });
-
-  // Attach the payment method to the customer
-  await stripe.paymentMethods.attach(paymentMethod.id, {
-    customer: passenger.stripeCustomerId,
-  });
-
-  paymentMethodId = paymentMethod.id;
-
-  // Set as default if no default card exists
-  const card = await getDefaultCard(passenger.stripeCustomerId);
-  if (!card.defaultCardId) {
-    await stripe.customers.update(passenger.stripeCustomerId, {
-      invoice_settings: { default_payment_method: paymentMethodId },
+export const cardSetupIntent = async (stripeCustomerId) => {
+  try {
+    const setupIntent = await stripe.setupIntents.create({
+      customer: stripeCustomerId,
+      payment_method_types: ['card'],
     });
 
-    await setDefaultCard(passenger.stripeCustomerId, paymentMethodId);
+    return {
+      clientSecret: setupIntent.client_secret,
+    };
+  } catch (error) {
+    console.error(`STRIPE ERROR: ${error}`);
+    return {
+      success: false,
+      error: error.message || 'Failed to create setup intent',
+    };
   }
-
-  // Save payment method ID to passenger
-  await savePassengerPaymentMethod(passenger._id, paymentMethodId);
-
-  return paymentMethodId;
 };
 
-export const getPassengerCards = async (passenger) => {
-  // Get all payment methods (cards, Google Pay, Apple Pay all show as type 'card' in Stripe)
-  const paymentMethods = await stripe.paymentMethods.list({
-    customer: passenger.stripeCustomerId,
-    type: 'card', // Google Pay and Apple Pay payment methods are also type 'card' in Stripe
-  });
+export const addPassengerCard = async (
+  stripeCustomerId,
+  paymentMethodId,
+  metadata = {},
+) => {
+  try {
+    // Attach payment method to customer
+    await stripe.paymentMethods.attach(paymentMethodId, {
+      customer: stripeCustomerId,
+    });
 
-  // Enrich payment methods with metadata to identify Google Pay/Apple Pay
-  const enrichedPaymentMethods = paymentMethods.data.map((pm) => {
-    const paymentMethod = { ...pm };
-
-    // Check if it's a Google Pay or Apple Pay payment method
-    // These are typically identified by the card.wallet property or metadata
-    if (pm.card?.wallet?.type === 'google_pay') {
-      paymentMethod.paymentType = 'GOOGLE_PAY';
-    } else if (pm.card?.wallet?.type === 'apple_pay') {
-      paymentMethod.paymentType = 'APPLE_PAY';
-    } else {
-      paymentMethod.paymentType = 'CARD';
+    // Update payment method with metadata
+    if (Object.keys(metadata).length > 0) {
+      await stripe.paymentMethods.update(paymentMethodId, {
+        metadata: {
+          ...metadata,
+        },
+      });
     }
 
-    return paymentMethod;
-  });
-
-  return enrichedPaymentMethods;
-};
-
-export const getCardDetails = async (paymentMethodId) => {
-  const paymentMethod = await stripe.paymentMethods.retrieve(paymentMethodId);
-  return paymentMethod;
-};
-
-export const deletePassengerCard = async (passenger, paymentMethodId) => {
-  const detachedPaymentMethod =
-    await stripe.paymentMethods.detach(paymentMethodId);
-
-  await updatePassengerPaymentMethod(passenger._id, paymentMethodId);
-
-  const card = await getDefaultCard(passenger.stripeCustomerId);
-  if (card.defaultCardId === paymentMethodId) {
-    await setDefaultCard(passenger.stripeCustomerId, null);
+    return { success: true, paymentMethodId };
+  } catch (error) {
+    console.error(`STRIPE ERROR: ${error}`);
+    return {
+      success: false,
+      error: error.message || 'Failed to attach payment method',
+    };
   }
-
-  return detachedPaymentMethod;
 };
 
-export const updatePassengerCard = async (paymentMethodId, updates) => {
-  const updatedPaymentMethod = await stripe.paymentMethods.update(
-    paymentMethodId,
-    {
-      billing_details: {
-        name: updates.name,
-        email: updates.email,
-        address: updates.address,
+export const getPassengerCards = async (stripeCustomerId) => {
+  try {
+    const customer = await stripe.customers.retrieve(stripeCustomerId);
+    const defaultPaymentMethodId =
+      customer.invoice_settings.default_payment_method;
+
+    const paymentMethods = await stripe.paymentMethods.list({
+      customer: stripeCustomerId,
+      type: 'card',
+    });
+
+    const cards = paymentMethods.data.map((card) => ({
+      ...card,
+      isDefault: card.id === defaultPaymentMethodId,
+    }));
+
+    return {
+      success: true,
+      cards,
+    };
+  } catch (error) {
+    console.error('STRIPE ERROR:', error.message);
+    return {
+      success: false,
+      error: error.message,
+    };
+  }
+};
+
+export const getPassengerCardById = async (paymentMethodId) => {
+  try {
+    const paymentMethod = await stripe.paymentMethods.retrieve(paymentMethodId);
+
+    return { success: true, card: paymentMethod };
+  } catch (error) {
+    console.error('STRIPE ERROR:', error.message);
+    return {
+      success: false,
+      error: error.message || 'Failed to fetch card by id',
+    };
+  }
+};
+
+export const deletePassengerCard = async (paymentMethodId) => {
+  try {
+    const detached = await stripe.paymentMethods.detach(paymentMethodId);
+
+    return { success: true, detached };
+  } catch (error) {
+    console.error(`STRIPE ERROR: ${error.message}`);
+    return {
+      success: false,
+      error: error.message || 'Failed to delete card',
+    };
+  }
+};
+
+export const setDefaultPassengerCard = async (
+  stripeCustomerId,
+  paymentMethodId,
+) => {
+  try {
+    const customer = await stripe.customers.update(stripeCustomerId, {
+      invoice_settings: {
+        default_payment_method: paymentMethodId,
       },
-      metadata: updates.metadata || {},
-    },
-  );
+    });
 
-  return updatedPaymentMethod;
-};
-
-export const setDefaultPassengerCard = async (customerId, paymentMethodId) => {
-  const updatedCustomer = await stripe.customers.update(customerId, {
-    invoice_settings: {
-      default_payment_method: paymentMethodId,
-    },
-  });
-
-  await setDefaultCard(customerId, paymentMethodId);
-
-  return updatedCustomer;
+    return { success: true, defaultPaymentMethod: paymentMethodId };
+  } catch (error) {
+    console.error('STRIPE ERROR:', error.message);
+    return { success: false, error: error.message };
+  }
 };
 
 export const setupPassengerWalletIntent = async (
