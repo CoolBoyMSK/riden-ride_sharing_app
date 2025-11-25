@@ -33,6 +33,10 @@ const feedbackSchema = new mongoose.Schema(
       trim: true,
       maxlength: 500,
     },
+    isApproved: {
+      type: Boolean,
+      default: true,
+    },
   },
   { timestamps: true },
 );

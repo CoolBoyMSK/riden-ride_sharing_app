@@ -199,6 +199,7 @@ export const bookRide = async (userId, rideData) => {
       bookedForPhoneNumber,
       paymentMethod,
       cardId,
+      cardType,
       promoCode,
       scheduledTime,
       specialRequests,
@@ -386,7 +387,8 @@ export const bookRide = async (userId, rideData) => {
       (paymentMethod === 'CARD' ||
         paymentMethod === 'GOOGLE_PAY' ||
         paymentMethod === 'APPLE_PAY') &&
-      cardId
+      cardId &&
+      cardType
     ) {
       const estimatedAmount = fareResult.estimatedFare;
       paymentHoldResult = await holdRidePayment(
@@ -394,6 +396,7 @@ export const bookRide = async (userId, rideData) => {
         estimatedAmount,
         cardId,
         paymentMethod,
+        cardType,
       );
 
       if (!paymentHoldResult.success) {

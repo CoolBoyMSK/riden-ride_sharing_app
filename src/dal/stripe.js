@@ -17,7 +17,7 @@ import env from '../config/envConfig.js';
 import { notifyUser } from '../dal/notification.js';
 import { sendDriverPaymentProcessedEmail } from '../templates/emails/user/index.js';
 import { createAdminNotification } from './notification.js';
-import { CARD_TYPES } from '../enums/paymentEnums.js';
+import { CARD_TYPES, PAYMENT_METHODS } from '../enums/paymentEnums.js';
 
 const stripe = new Stripe(env.STRIPE_SECRET_KEY);
 
@@ -543,20 +543,23 @@ export const setupPassengerWalletIntent = async (
       metadata: {
         userId: user._id.toString(),
         passengerId: passenger._id.toString(),
+        userType: 'passenger',
+        addedAt: new Date().toISOString(),
+        isWallet: true,
         walletType: normalizedWalletType,
       },
     });
 
-    // Store temporary setup intent data
-    await PassengerModel.findByIdAndUpdate(passenger._id, {
-      [`${normalizedWalletType === 'GOOGLE_PAY' ? 'isGooglePay' : 'isApplePay'}`]:
-        {
-          enabled: false,
-          setupIntentId: setupIntent.id,
-          clientSecret: setupIntent.client_secret,
-          paymentMethodCreatedAt: null,
-        },
-    });
+    // // Store temporary setup intent data
+    // await PassengerModel.findByIdAndUpdate(passenger._id, {
+    //   [`${normalizedWalletType === 'GOOGLE_PAY' ? 'isGooglePay' : 'isApplePay'}`]:
+    //     {
+    //       enabled: false,
+    //       setupIntentId: setupIntent.id,
+    //       clientSecret: setupIntent.client_secret,
+    //       paymentMethodCreatedAt: null,
+    //     },
+    // });
 
     return {
       success: true,
@@ -674,7 +677,8 @@ export const holdRidePayment = async (
   passenger,
   amount,
   paymentMethodId,
-  paymentMethodType = 'CARD',
+  paymentMethodType = null,
+  cardType = null,
 ) => {
   try {
     if (!passenger.stripeCustomerId) {
@@ -690,8 +694,7 @@ export const holdRidePayment = async (
     }
 
     // Validate payment method type
-    const validPaymentMethods = ['CARD', 'GOOGLE_PAY', 'APPLE_PAY'];
-    if (!validPaymentMethods.includes(paymentMethodType)) {
+    if (!PAYMENT_METHODS.includes(paymentMethodType)) {
       throw new Error(`Invalid payment method type: ${paymentMethodType}`);
     }
 
@@ -718,6 +721,12 @@ export const holdRidePayment = async (
         type: 'ride_authorization',
         paymentMethodType: paymentMethodType,
         passengerId: passenger._id.toString(),
+        userId: passenger.userId.toString(),
+        userType: 'passenger',
+        addedAt: new Date().toISOString(),
+        ...(paymentMethodType === 'CARD'
+          ? { isWallet: false, cardType: paymentMethodType }
+          : { isWallet: true, walletType: paymentMethodType }),
       },
     });
 

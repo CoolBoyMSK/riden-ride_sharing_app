@@ -946,6 +946,7 @@ export const findDriverFeedbacks = async ({
   // --- Build match filter ---
   const matchFilter = {
     type,
+    isApproved: true,
     ...(Object.keys(dateFilter).length ? { createdAt: dateFilter } : {}),
     ...(Object.keys(searchMatch).length ? searchMatch : {}),
   };
@@ -1160,6 +1161,72 @@ export const getFeedbackStats = async (type = 'by_passenger') => {
       currentYearGrowthRate: null,
     }
   );
+};
+
+export const findRequestedFeedbacks = async (
+  page = 1,
+  limit = 10,
+  type = 'by_passenger',
+) => {
+  const safePage = Math.max(parseInt(page, 10) || 1, 1);
+  const safeLimit = Math.max(parseInt(limit, 10) || 10, 1);
+  const skip = (safePage - 1) * safeLimit;
+
+  // Fetch feedbacks with isApproved: false
+  const feedbacks = await Feedback.find({ isApproved: false, type })
+    .populate({
+      path: 'passengerId',
+      select: 'uniqueId',
+      populate: {
+        path: 'userId',
+        select: 'name email profileImg',
+      },
+    })
+    .populate({
+      path: 'driverId',
+      select: 'uniqueId',
+      populate: {
+        path: 'userId',
+        select: 'name email profileImg',
+      },
+    })
+    .populate({
+      path: 'rideId',
+      select: 'rideId',
+    })
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(safeLimit)
+    .lean();
+
+  // Get total count
+  const total = await Feedback.countDocuments({ isApproved: false, type });
+
+  return {
+    data: feedbacks,
+    total,
+    page: safePage,
+    limit: safeLimit,
+    totalPages: Math.ceil(total / safeLimit),
+  };
+};
+
+export const toggleFeedbackById = async (id, { status }) => {
+  if (status === 'reject') {
+    const result = await Feedback.findByIdAndDelete(id);
+    if (!result) return false;
+    return true;
+  } else if (status === 'approve') {
+    const result = await Feedback.findByIdAndUpdate(
+      id,
+      { isApproved: true },
+      { new: true },
+    ).lean();
+    if (!result) return false;
+    return true;
+  } else {
+    return false;
+  }
 };
 
 export const findActiveDriversCount = async () =>

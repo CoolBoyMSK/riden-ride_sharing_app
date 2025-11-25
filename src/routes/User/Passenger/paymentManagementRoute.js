@@ -81,7 +81,7 @@ registerRoute({
 
 registerRoute({
   router,
-  route: '/wallet/add',
+  route: '/wallet/intent',
   passenger_auth_enable: true,
   post_method: createWalletSetupIntentController,
 });

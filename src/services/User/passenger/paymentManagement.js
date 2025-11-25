@@ -79,6 +79,7 @@ export const addCard = async (user, { paymentMethodId, cardType }, resp) => {
       userId: user._id.toString(),
       userType: 'passenger',
       addedAt: new Date().toISOString(),
+      isWallet: false,
       cardType,
     };
 
