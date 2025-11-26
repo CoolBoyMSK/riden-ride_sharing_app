@@ -15,6 +15,7 @@ import {
   deleteMessage,
 } from '../dal/chat.js';
 import {
+  findRide,
   findRideByRideId,
   findDriverLocation,
   findPendingRides,
@@ -105,7 +106,7 @@ export const initSocket = (server) => {
     io.adapter(createAdapter(pubClient, subClient));
   }
 
-  // JWT Authentication middleware for socket connections
+  // JWT Authentication middleware for socket connections (optional)
   io.use((socket, next) => {
     const authHeader =
       socket.handshake.auth?.token || socket.handshake.headers?.authorization;
@@ -114,27 +115,40 @@ export const initSocket = (server) => {
       : authHeader;
     const payload = token ? verifyAccessToken(token) : null;
 
-    if (!payload?.id) {
-      return next(new Error('Unauthorized'));
+    // Allow connections without tokens, but set user if token is valid
+    if (payload?.id) {
+      socket.user = { id: payload.id, roles: payload.roles || [] };
+    } else {
+      socket.user = null;
     }
-
-    socket.user = { id: payload.id, roles: payload.roles || [] };
     next();
   });
 
   io.on('connection', (socket) => {
-    const userId = socket.user.id;
-    const userRole = socket.user.roles[0];
-    console.log(`🔌 User ${userId} connected to socket`);
+    const userId = socket.user?.id;
+    const userRole = socket.user?.roles?.[0];
 
-    // add to online registry
-    addSocket(userId, socket.id).catch(console.error);
+    if (userId) {
+      console.log(`🔌 User ${userId} connected to socket`);
+      // add to online registry
+      addSocket(userId, socket.id).catch(console.error);
+      // Join user's personal room for direct notifications
+      socket.join(`user:${userId}`);
+    } else {
+      console.log(`🔌 Anonymous user connected to socket`);
+    }
 
-    // Join user's personal room for direct notifications
-    socket.join(`user:${userId}`);
-
-    if (userRole === 'driver') {
+    if (userRole && userRole === 'driver') {
       socket.on('driver:update_status', async () => {
+        if (!userId) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required',
+          });
+        }
+
         const objectType = 'driver-update-status';
         try {
           const driver = await findDriverByUserId(userId);
@@ -328,6 +342,15 @@ export const initSocket = (server) => {
       });
 
       socket.on('driver:status', async () => {
+        if (!userId) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required',
+          });
+        }
+
         const objectType = 'driver-status';
         try {
           const driver = await findDriverByUserId(userId);
@@ -360,6 +383,14 @@ export const initSocket = (server) => {
 
     socket.on('ride:active', async () => {
       const objectType = 'active-ride';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
       try {
         let user;
         if (['driver'].includes(socket.user.roles[0])) {
@@ -407,9 +438,107 @@ export const initSocket = (server) => {
       }
     });
 
+    socket.on('share:ride_data', async ({ rideId }) => {
+      const objectType = 'share-ride-data';
+      try {
+        const ride = await findRide(rideId);
+        if (!ride) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'NOT_FOUND',
+            message: 'Ride not found',
+          });
+        } else if (!ride.driverId) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver not found',
+          });
+        } else if (!ride.passengerId) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Passenger not found',
+          });
+        } else if (ride.status === 'RIDE_COMPLETED') {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Ride is completed',
+          });
+        } else if (ride.status === 'CANCELLED_BY_DRIVER') {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Ride is cancelled by driver',
+          });
+        } else if (ride.status === 'CANCELLED_BY_PASSENGER') {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Ride is cancelled by passenger',
+          });
+        } else if (ride.status === 'CANCELLED_BY_SYSTEM') {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Ride is cancelled by system',
+          });
+        } else if (ride.status === 'REQUESTED') {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Ride is requested',
+          });
+        }
+
+        const driverLocation = await getDriverLocation(ride.driverId?._id);
+        if (!driverLocation) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver location not found',
+          });
+        }
+
+        socket.emit('share:ride_data', {
+          success: true,
+          objectType,
+          data: { ride, location: driverLocation },
+          message: 'Ride data shared successfully',
+        });
+      } catch (error) {
+        console.error(`SOCKET ERROR: ${error}`);
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: error.code || 'SOCKET_ERROR',
+          message: `SOCKET ERROR: ${error.message}`,
+        });
+      }
+    });
+
     // Driver Events
     socket.on('ride:find', async () => {
       const objectType = 'find-ride';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       try {
         const driver = await findDriverByUserId(userId);
         if (!driver) {
@@ -505,6 +634,15 @@ export const initSocket = (server) => {
 
     socket.on('ride:find_airport_ride', async () => {
       const objectType = 'find-airport-ride';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       try {
         const driver = await findDriverByUserId(userId);
         if (!driver) {
@@ -628,6 +766,14 @@ export const initSocket = (server) => {
 
     socket.on('ride:parking_queue', async () => {
       const objectType = 'parking-queue';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
       try {
         const driver = await findDriverByUserId(userId);
         if (!driver) {
@@ -737,6 +883,15 @@ export const initSocket = (server) => {
 
     socket.on('ride:response', async ({ rideId, driverResponse }) => {
       const objectType = 'airport-parking-offer-response';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       try {
         const driver = await findDriverByUserId(userId);
         if (
@@ -776,6 +931,15 @@ export const initSocket = (server) => {
 
     socket.on('ride:decline_ride', async ({ rideId }) => {
       const objectType = 'decline-ride';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       try {
         const driver = await findDriverByUserId(userId);
         if (!driver) {
@@ -892,6 +1056,15 @@ export const initSocket = (server) => {
 
     socket.on('ride:accept_ride', async ({ rideId }) => {
       const objectType = 'accept-ride';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       try {
         const driver = await findDriverByUserId(userId);
         if (!driver) {
@@ -1163,6 +1336,15 @@ export const initSocket = (server) => {
 
     socket.on('ride:driver_cancel_ride', async ({ rideId, reason }) => {
       const objectType = 'cancel-ride-driver';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       const session = await mongoose.startSession();
       try {
         const driver = await findDriverByUserId(userId);
@@ -1324,6 +1506,27 @@ export const initSocket = (server) => {
           });
         }
 
+        if (updatedRide.paymentIntentId) {
+          try {
+            const cancelResult = await cancelPaymentHold(
+              updatedRide.paymentIntentId,
+            );
+            if (!cancelResult.success) {
+              // Log error but don't fail the cancellation
+              console.error(
+                `Failed to cancel payment hold for ride ${updatedRide._id}:`,
+                cancelResult.error,
+              );
+            }
+          } catch (cancelError) {
+            // Log error but don't fail the cancellation
+            console.error(
+              `Error cancelling payment hold for ride ${updatedRide._id}:`,
+              cancelError,
+            );
+          }
+        }
+
         await session.commitTransaction();
 
         const mailTo = await findUserById(ride.driverId?.userId);
@@ -1422,6 +1625,15 @@ export const initSocket = (server) => {
 
     socket.on('ride:driver_arriving', async ({ rideId }) => {
       const objectType = 'driver-arriving';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       try {
         const driver = await findDriverByUserId(userId);
         if (!driver) {
@@ -1518,6 +1730,15 @@ export const initSocket = (server) => {
 
     socket.on('ride:driver_arrived', async ({ rideId }) => {
       const objectType = 'driver-arrived';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       try {
         const driver = await findDriverData(userId);
         if (!driver) {
@@ -1624,6 +1845,15 @@ export const initSocket = (server) => {
 
     socket.on('ride:driver_start_ride', async ({ rideId }) => {
       const objectType = 'driver-start-ride';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       try {
         const driver = await findDriverByUserId(userId);
         if (!driver) {
@@ -1731,6 +1961,15 @@ export const initSocket = (server) => {
       'ride:driver_complete_ride',
       async ({ rideId, actualDistance, earlyCompleteReason }) => {
         const objectType = 'driver-complete-ride';
+        if (!userId) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required',
+          });
+        }
+
         try {
           const driver = await findDriverByUserId(userId);
           if (!driver) {
@@ -1966,6 +2205,15 @@ export const initSocket = (server) => {
       'ride:driver_rate_passenger',
       async ({ rideId, rating, feedback }) => {
         const objectType = 'driver-rate-passenger';
+        if (!userId) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required',
+          });
+        }
+
         try {
           const driver = await findDriverByUserId(userId);
           if (!driver) {
@@ -2041,7 +2289,7 @@ export const initSocket = (server) => {
           }
 
           let isApproved = true;
-          if(rating < 5) {
+          if (rating < 5) {
             isApproved = false;
           }
 
@@ -2052,7 +2300,7 @@ export const initSocket = (server) => {
             type: 'by_driver',
             rating,
             feedback,
-            
+            isApproved,
           };
           const driverFeedback = await createFeedback(payload);
           if (!driverFeedback) {
@@ -2137,6 +2385,15 @@ export const initSocket = (server) => {
       'ride:driver_update_location',
       async ({ location, isAvailable, speed, heading }) => {
         const objectType = 'driver-update-location';
+        if (!userId) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required',
+          });
+        }
+
         try {
           if (
             !location ||
@@ -2436,6 +2693,15 @@ export const initSocket = (server) => {
 
     socket.on('ride:find_destination_rides', async () => {
       const objectType = 'find-destination-rides';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       const MAX_RIDES = 10;
       const MAX_RADIUS = 10;
 
@@ -2559,6 +2825,15 @@ export const initSocket = (server) => {
 
     socket.on('ride:driver_join_ride', async ({ rideId }) => {
       const objectType = 'driver-join-ride';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       try {
         const driver = await findDriverByUserId(userId);
         if (!driver) {
@@ -2662,6 +2937,15 @@ export const initSocket = (server) => {
     // Passenger Events
     socket.on('ride:passenger_join_ride', async ({ rideId }) => {
       const objectType = 'passenger-join-ride';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       try {
         const passenger = await findPassengerByUserId(userId);
         if (!passenger) {
@@ -2757,6 +3041,15 @@ export const initSocket = (server) => {
 
     socket.on('ride:passenger_cancel_ride', async ({ rideId, reason }) => {
       const objectType = 'cancel-ride-passenger';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       const session = await mongoose.startSession();
       try {
         const passenger = await findPassengerByUserId(userId);
@@ -3018,6 +3311,15 @@ export const initSocket = (server) => {
       'ride:passenger_rate_driver',
       async ({ rideId, rating, feedback }) => {
         const objectType = 'passenger-rate-driver';
+        if (!userId) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required',
+          });
+        }
+
         try {
           const passenger = await findPassengerByUserId(userId);
           if (!passenger) {
@@ -3090,7 +3392,7 @@ export const initSocket = (server) => {
             type: 'by_passenger',
             rating,
             feedback,
-            isApproved
+            isApproved,
           };
           const passengerFeedback = await createFeedback(payload);
           if (!passengerFeedback) {
@@ -3158,6 +3460,15 @@ export const initSocket = (server) => {
 
     socket.on('ride:tip_driver', async ({ rideId, percent, isApplied }) => {
       const objectType = 'tip-driver';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       try {
         const ride = await findRideById(rideId);
         const amount = Math.floor(
@@ -3278,6 +3589,15 @@ export const initSocket = (server) => {
 
     socket.on('ride:pay_driver', async ({ rideId }) => {
       const objectType = 'pay-driver';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       try {
         const ride = await findRideById(rideId);
         if (!ride) {
@@ -3579,6 +3899,15 @@ export const initSocket = (server) => {
     // Chat Events
     socket.on('ride:get_chat', async ({ rideId }) => {
       const objectType = 'ride-chat';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       try {
         const ride = await findRideById(rideId);
         if (
@@ -3665,6 +3994,14 @@ export const initSocket = (server) => {
       'ride:send_message',
       async ({ rideId, text, messageType = 'text', attachments }) => {
         const objectType = 'ride-send-message';
+        if (!userId) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required',
+          });
+        }
 
         try {
           let sender;
@@ -3786,12 +4123,14 @@ export const initSocket = (server) => {
             });
           }
 
+          const receiverId =
+            role === 'driver'
+              ? ride.passengerId?.userId
+              : ride.driverId?.userId;
+
           // Notification Logic Start
           const notify = await notifyUser({
-            userId:
-              role === 'driver'
-                ? ride.passengerId?.userId
-                : ride.driverId?.userId,
+            userId: receiverId,
             title:
               role === 'driver' ? 'Your Driver Wants to Chat' : 'New Message',
             message:
@@ -3801,13 +4140,20 @@ export const initSocket = (server) => {
             module: 'chat',
             metadata: updatedChat,
             type: 'ALERT',
-            actionLink: `new_message`,
+            actionLink: `ride:get_chat`,
             storeInDB: false,
           });
           if (!notify) {
             console.error('Failed to send notification');
           }
           // Notification Logic End
+
+          socket.to(`user:${receiverId}`).emit('chat:new_message', {
+            success: true,
+            objectType,
+            data: newMsg,
+            message: `${role === 'driver' ? 'Your Driver' : 'Your Passenger'} has sent you a message`,
+          });
 
           socket.join(`ride:${rideId}`);
           io.to(`ride:${rideId}`).emit('ride:send_message', {
@@ -3830,6 +4176,15 @@ export const initSocket = (server) => {
 
     socket.on('ride:read_messages', async ({ rideId }) => {
       const objectType = 'read-message';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       try {
         let reader;
         if (socket.user.roles.includes('driver')) {
@@ -3928,6 +4283,15 @@ export const initSocket = (server) => {
 
     socket.on('ride:edit_message', async ({ messageId, text }) => {
       const objectType = 'edit-message';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       try {
         let sender;
         if (socket.user.roles.includes('driver')) {
@@ -4034,6 +4398,15 @@ export const initSocket = (server) => {
         messageId,
       }) => {
         const objectType = 'reply-message';
+        if (!userId) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required',
+          });
+        }
+
         try {
           let sender;
           if (socket.user.roles.includes('driver')) {
@@ -4190,6 +4563,15 @@ export const initSocket = (server) => {
 
     socket.on('ride:delete_message', async ({ messageId }) => {
       const objectType = 'delete-message';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       try {
         let sender;
         if (socket.user.roles.includes('driver')) {
@@ -4290,6 +4672,15 @@ export const initSocket = (server) => {
       'ride:start_call',
       async ({ rideId, callType = 'audio', metadata = {} }) => {
         const objectType = 'start-call';
+        if (!userId) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required',
+          });
+        }
+
         try {
           let caller;
           let role;
@@ -4510,6 +4901,15 @@ export const initSocket = (server) => {
 
     socket.on('ride:accept_call', async ({ callLogId }) => {
       const objectType = 'accept-ride';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       try {
         let receiver;
         let role;
@@ -4664,6 +5064,15 @@ export const initSocket = (server) => {
 
     socket.on('ride:decline_call', async ({ callLogId }) => {
       const objectType = 'decline-call';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       try {
         let receiver;
         let role;
@@ -4834,6 +5243,15 @@ export const initSocket = (server) => {
 
     socket.on('ride:cancel_call', async ({ callLogId }) => {
       const objectType = 'cancel-call';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       try {
         let caller;
         let role;
@@ -5004,6 +5422,15 @@ export const initSocket = (server) => {
 
     socket.on('ride:end_call', async ({ callLogId }) => {
       const objectType = 'end-call';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       try {
         let member;
         let role;
@@ -5167,6 +5594,15 @@ export const initSocket = (server) => {
 
     socket.on('ride:join_call', async ({ callLogId }) => {
       const objectType = 'join-call';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       try {
         let member;
         let role;
@@ -5308,6 +5744,15 @@ export const initSocket = (server) => {
 
     socket.on('ride:leave_call', async ({ callLogId }) => {
       const objectType = 'leave-call';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       try {
         let member;
         let role;
@@ -5443,6 +5888,15 @@ export const initSocket = (server) => {
     // Admin Events
     socket.on('admin:dashboard', async () => {
       const objectType = 'get-dashboard-data';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       try {
         const data = await findDashboardData();
         if (!data) {
@@ -5473,6 +5927,15 @@ export const initSocket = (server) => {
 
     socket.on('admin:get_notifications', async ({ page = 1, limit = 10 }) => {
       const objectType = 'get-notifications';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       try {
         const data = await findAdminNotifications(userId, page, limit);
         if (!data) {
@@ -5505,6 +5968,15 @@ export const initSocket = (server) => {
       'admin:toggle_notification_status',
       async ({ notificationId }) => {
         const objectType = 'toggle-notification-status';
+        if (!userId) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required',
+          });
+        }
+
         try {
           const data = await toggleNotificationReadStatus(
             userId,
@@ -5539,6 +6011,15 @@ export const initSocket = (server) => {
 
     socket.on('admin:read_all_notifications', async () => {
       const objectType = 'read-all-notifications';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       try {
         const data = await markAllNotificationsAsRead(userId);
         if (!data) {
@@ -5569,6 +6050,15 @@ export const initSocket = (server) => {
 
     socket.on('admin:get_unread_notifications_count', async () => {
       const objectType = 'get-unread-notifications-count';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
       try {
         const data = await findUnreadNotificationsCount(userId);
         if (!data) {
