@@ -33,6 +33,22 @@ export const createRide = async (rideData) => {
   return ride;
 };
 
+export const findRide = async (rideId) => {
+  return await RideModel.findById(rideId)
+    .populate({
+      path: 'driverId',
+      populate: {
+        path: 'userId',
+      },
+    })
+    .populate({
+      path: 'passengerId',
+      populate: {
+        path: 'userId',
+      },
+    });
+};
+
 export const findRideById = async (rideId, { session } = {}) => {
   let query = RideModel.findById(rideId)
     .populate('passengerId', 'userId isActive isBlocked isOnRide')
@@ -566,7 +582,6 @@ export const haversineDistance = (coord1, coord2) => {
 
   return R * c;
 };
-
 
 export const isDriverInParkingLot = async (coords) => {
   if (
