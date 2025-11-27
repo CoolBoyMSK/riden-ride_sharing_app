@@ -698,6 +698,10 @@ export const holdRidePayment = async (
       throw new Error(`Invalid payment method type: ${paymentMethodType}`);
     }
 
+    if (cardType && !CARD_TYPES.includes(cardType)) {
+      throw new Error(`Invalid card type: ${cardType}`);
+    }
+
     // Determine payment method description
     const paymentMethodDescriptions = {
       CARD: 'Card',
@@ -725,7 +729,7 @@ export const holdRidePayment = async (
         userType: 'passenger',
         addedAt: new Date().toISOString(),
         ...(paymentMethodType === 'CARD'
-          ? { isWallet: false, cardType: paymentMethodType }
+          ? { isWallet: false, cardType: cardType }
           : { isWallet: true, walletType: paymentMethodType }),
       },
     });

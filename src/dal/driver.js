@@ -14,9 +14,11 @@ import { findUserById } from './user/index.js';
 import { sendDocumentEditRequestApprovalEmail } from '../templates/emails/user/index.js';
 import { emitToUser, emitToRide } from '../realtime/socket.js';
 import { notifyUser, createAdminNotification } from '../dal/notification.js';
+import { PASSENGER_ALLOWED } from '../enums/vehicleEnums.js';
 import env from '../config/envConfig.js';
 import Queue from 'bull';
 import Redis from 'ioredis';
+import axios from 'axios';
 
 export const findDriverByUserId = (userId, { session } = {}) => {
   let query = DriverModel.findOne({ userId });
@@ -137,6 +139,28 @@ export const findDriver = async (driverId) => {
       },
     },
 
+    // Lookup driver ratings from Feedback collection
+    {
+      $lookup: {
+        from: 'feedbacks',
+        let: { driverId: '$_id' },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ['$driverId', '$$driverId'] },
+                  { $eq: ['$type', 'by_passenger'] },
+                  { $eq: ['$isApproved', true] },
+                ],
+              },
+            },
+          },
+        ],
+        as: 'ratings',
+      },
+    },
+
     // Add statistics
     {
       $addFields: {
@@ -183,6 +207,35 @@ export const findDriver = async (driverId) => {
             },
           },
         },
+        averageRating: {
+          $cond: {
+            if: { $gt: [{ $size: '$ratings' }, 0] },
+            then: {
+              $divide: [{ $sum: '$ratings.rating' }, { $size: '$ratings' }],
+            },
+            else: 0,
+          },
+        },
+        cancellationRatio: {
+          $cond: {
+            if: { $gt: ['$totalBookings', 0] },
+            then: {
+              $divide: ['$canceledBookings', '$totalBookings'],
+            },
+            else: 0,
+          },
+        },
+        daysSinceCreated: {
+          $round: [
+            {
+              $divide: [
+                { $subtract: [new Date(), '$createdAt'] },
+                1000 * 60 * 60 * 24, // milliseconds to days
+              ],
+            },
+            2,
+          ],
+        },
       },
     },
 
@@ -198,6 +251,9 @@ export const findDriver = async (driverId) => {
         completedBookings: 1,
         canceledBookings: 1,
         totalRevenue: 1,
+        averageRating: 1,
+        cancellationRatio: 1,
+        daysSinceCreated: 1,
       },
     },
   ]);
@@ -272,10 +328,258 @@ export const findDriverDocuments = (driverId) =>
   DriverModel.findById(driverId, { documents: 1, _id: 0 }).lean();
 
 export const findWayBill = async (driverId, docType) => {
-  return DriverModel.findById(driverId, {
+  const waybill = await DriverModel.findById(driverId, {
     [`wayBill.${docType}`]: 1,
+    vehicle: 1,
     _id: 0,
   }).lean();
+
+  const recentRide = await RideModel.findOne(
+    {
+      driverId,
+      status: {
+        $in: [
+          'DRIVER_ASSIGNED',
+          'DRIVER_ARRIVING',
+          'DRIVER_ARRIVED',
+          'RIDE_STARTED',
+          'RIDE_IN_PROGRESS',
+          'RIDE_COMPLETED',
+        ],
+      },
+    },
+    { createdAt: -1 },
+  ).lean();
+
+  if (recentRide) {
+    waybill.recentRide = recentRide;
+
+    // Fetch timezone from pickup location coordinates
+    if (recentRide.pickupLocation?.coordinates) {
+      try {
+        const [longitude, latitude] = recentRide.pickupLocation.coordinates;
+
+        // Use a free timezone API service
+        // Try TimeZoneDB API first (requires free API key in env.TIMEZONE_API_KEY)
+        // If no API key, fallback to longitude-based estimation
+        if (env.TIMEZONE_API_KEY && env.TIMEZONE_API_KEY !== 'demo') {
+          try {
+            const response = await axios.get(
+              `http://api.timezonedb.com/v2.1/get-time-zone`,
+              {
+                params: {
+                  key: env.TIMEZONE_API_KEY,
+                  format: 'json',
+                  by: 'position',
+                  lat: latitude,
+                  lng: longitude,
+                },
+                timeout: 5000,
+              },
+            );
+
+            if (response.data?.status === 'OK' && response.data?.zoneName) {
+              waybill.timezone = response.data.zoneName;
+            } else {
+              throw new Error('Timezone API returned invalid response');
+            }
+          } catch (apiError) {
+            console.error('Timezone API error:', apiError.message);
+            throw apiError; // Fall through to fallback
+          }
+        } else {
+          throw new Error('No timezone API key configured');
+        }
+      } catch (error) {
+        // Fallback: estimate timezone from longitude
+        // Each 15 degrees of longitude represents approximately 1 hour timezone difference
+        try {
+          const [longitude] = recentRide.pickupLocation.coordinates;
+          const timezoneOffset = Math.round(longitude / 15);
+          waybill.timezone = `UTC${timezoneOffset >= 0 ? '+' : ''}${timezoneOffset}`;
+        } catch {
+          waybill.timezone = 'UTC'; // Default fallback
+        }
+      }
+    }
+  }
+
+  if (waybill.vehicle?.type) {
+    waybill.capacity =
+      PASSENGER_ALLOWED[waybill.vehicle.type]?.passengersAllowed || 0;
+  }
+
+  return waybill;
+};
+
+export const findDriverWayBill = async (driverId) => {
+  const driverObjectId = new mongoose.Types.ObjectId(driverId);
+
+  const result = await DriverModel.aggregate([
+    {
+      $match: { _id: driverObjectId },
+    },
+    // Get driver user info
+    {
+      $lookup: {
+        from: 'users',
+        localField: 'userId',
+        foreignField: '_id',
+        as: 'driverUser',
+      },
+    },
+    { $unwind: { path: '$driverUser', preserveNullAndEmptyArrays: true } },
+
+    // Get current ride if any
+    {
+      $lookup: {
+        from: 'rides',
+        let: { dId: '$_id' },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ['$driverId', '$$dId'] },
+                  {
+                    $in: [
+                      '$status',
+                      [
+                        'DRIVER_ASSIGNED',
+                        'DRIVER_ARRIVING',
+                        'DRIVER_ARRIVED',
+                        'RIDE_STARTED',
+                        'RIDE_IN_PROGRESS',
+                        'RIDE_COMPLETED',
+                      ],
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+          { $sort: { createdAt: -1 } }, // latest ride if multiple
+          { $limit: 1 },
+          {
+            $lookup: {
+              from: 'users',
+              localField: 'passengerId',
+              foreignField: '_id',
+              as: 'passenger',
+            },
+          },
+          { $unwind: { path: '$passenger', preserveNullAndEmptyArrays: true } },
+          {
+            $project: {
+              rideId: 1,
+              pickupLocation: { $ifNull: ['$pickupLocation', 'N/A'] },
+              dropOffLocation: { $ifNull: ['$dropOffLocation', 'N/A'] },
+              driverAssignedAt: { $ifNull: ['$driverAssignedAt', 'N/A'] },
+              passenger: {
+                userId: { $ifNull: ['$passenger.userId', 'N/A'] },
+                name: { $ifNull: ['$passenger.name', 'N/A'] },
+                email: { $ifNull: ['$passenger.email', 'N/A'] },
+                profileImg: { $ifNull: ['$passenger.profileImg', 'N/A'] },
+              },
+            },
+          },
+        ],
+        as: 'ride',
+      },
+    },
+    { $unwind: { path: '$ride', preserveNullAndEmptyArrays: true } },
+
+    // Final projection
+    {
+      $project: {
+        ride: { $ifNull: ['$ride', null] },
+        driver: {
+          _id: { $ifNull: ['$_id', 'N/A'] },
+          vehicle: { $ifNull: ['$vehicle', 'N/A'] },
+          rideType: { $ifNull: ['$vehicle.type', 'N/A'] },
+          insurance: {
+            $ifNull: ['$wayBill.certificateOfInsurance', 'N/A'],
+          },
+          documents: {
+            $ifNull: [{ $mergeObjects: ['$wayBill', '$documents'] }, 'N/A'],
+          },
+          profile: {
+            name: { $ifNull: ['$driverUser.name', 'N/A'] },
+            email: { $ifNull: ['$driverUser.email', 'N/A'] },
+            phoneNumber: { $ifNull: ['$driverUser.phoneNumber', 'N/A'] },
+            profileImg: { $ifNull: ['$driverUser.profileImg', 'N/A'] },
+          },
+        },
+      },
+    },
+  ]);
+
+  if (!result.length) return null;
+
+  const waybillData = result[0];
+
+  // Calculate passenger capacity based on vehicle type
+  if (
+    waybillData.driver?.vehicleType &&
+    waybillData.driver.vehicleType !== 'N/A' &&
+    PASSENGER_ALLOWED[waybillData.driver.vehicleType]
+  ) {
+    waybillData.driver.capacity =
+      PASSENGER_ALLOWED[waybillData.driver.vehicleType].passengersAllowed || 0;
+  } else {
+    waybillData.driver.capacity = 0;
+  }
+
+  // Fetch timezone from pickup location coordinates if ride exists
+  if (waybillData.ride && waybillData.ride.pickupLocation?.coordinates) {
+    try {
+      const [longitude, latitude] = waybillData.ride.pickupLocation.coordinates;
+
+      // Use a free timezone API service
+      // Try TimeZoneDB API first (requires free API key in env.TIMEZONE_API_KEY)
+      // If no API key, fallback to longitude-based estimation
+      if (env.TIMEZONE_API_KEY && env.TIMEZONE_API_KEY !== 'demo') {
+        try {
+          const response = await axios.get(
+            `http://api.timezonedb.com/v2.1/get-time-zone`,
+            {
+              params: {
+                key: env.TIMEZONE_API_KEY,
+                format: 'json',
+                by: 'position',
+                lat: latitude,
+                lng: longitude,
+              },
+              timeout: 5000,
+            },
+          );
+
+          if (response.data?.status === 'OK' && response.data?.zoneName) {
+            waybillData.timezone = response.data.zoneName;
+          } else {
+            throw new Error('Timezone API returned invalid response');
+          }
+        } catch (apiError) {
+          console.error('Timezone API error:', apiError.message);
+          throw apiError; // Fall through to fallback
+        }
+      } else {
+        throw new Error('No timezone API key configured');
+      }
+    } catch (error) {
+      // Fallback: estimate timezone from longitude
+      // Each 15 degrees of longitude represents approximately 1 hour timezone difference
+      try {
+        const [longitude] = waybillData.ride.pickupLocation.coordinates;
+        const timezoneOffset = Math.round(longitude / 15);
+        waybillData.timezone = `UTC${timezoneOffset >= 0 ? '+' : ''}${timezoneOffset}`;
+      } catch {
+        waybillData.timezone = 'UTC'; // Default fallback
+      }
+    }
+  }
+
+  return waybillData;
 };
 
 export const updateDriverDocumentRecord = (driverId, docType, imageUrl) =>
@@ -798,109 +1102,6 @@ export const updateDriverById = async (id, update, options = {}) =>
 
 export const sendInstantPayoutRequest = async (driverId) =>
   PayoutRequest.create();
-
-export const findDriverWayBill = async (driverId) => {
-  const driverObjectId = new mongoose.Types.ObjectId(driverId);
-
-  const result = await DriverModel.aggregate([
-    {
-      $match: { _id: driverObjectId },
-    },
-    // Get driver user info
-    {
-      $lookup: {
-        from: 'users',
-        localField: 'userId',
-        foreignField: '_id',
-        as: 'driverUser',
-      },
-    },
-    { $unwind: { path: '$driverUser', preserveNullAndEmptyArrays: true } },
-
-    // Get current ride if any
-    {
-      $lookup: {
-        from: 'rides',
-        let: { dId: '$_id' },
-        pipeline: [
-          {
-            $match: {
-              $expr: {
-                $and: [
-                  { $eq: ['$driverId', '$$dId'] },
-                  {
-                    $in: [
-                      '$status',
-                      [
-                        'DRIVER_ASSIGNED',
-                        'DRIVER_ARRIVING',
-                        'DRIVER_ARRIVED',
-                        'RIDE_STARTED',
-                        'RIDE_IN_PROGRESS',
-                      ],
-                    ],
-                  },
-                ],
-              },
-            },
-          },
-          { $sort: { createdAt: -1 } }, // latest ride if multiple
-          { $limit: 1 },
-          {
-            $lookup: {
-              from: 'users',
-              localField: 'passengerId',
-              foreignField: '_id',
-              as: 'passenger',
-            },
-          },
-          { $unwind: { path: '$passenger', preserveNullAndEmptyArrays: true } },
-          {
-            $project: {
-              rideId: 1,
-              pickupLocation: { $ifNull: ['$pickupLocation', 'N/A'] },
-              dropOffLocation: { $ifNull: ['$dropOffLocation', 'N/A'] },
-              driverAssignedAt: { $ifNull: ['$driverAssignedAt', 'N/A'] },
-              passenger: {
-                userId: { $ifNull: ['$passenger.userId', 'N/A'] },
-                name: { $ifNull: ['$passenger.name', 'N/A'] },
-                email: { $ifNull: ['$passenger.email', 'N/A'] },
-                profileImg: { $ifNull: ['$passenger.profileImg', 'N/A'] },
-              },
-            },
-          },
-        ],
-        as: 'ride',
-      },
-    },
-    { $unwind: { path: '$ride', preserveNullAndEmptyArrays: true } },
-
-    // Final projection
-    {
-      $project: {
-        ride: { $ifNull: ['$ride', null] },
-        driver: {
-          _id: { $ifNull: ['$_id', 'N/A'] },
-          vehicle: { $ifNull: ['$vehicle', 'N/A'] },
-          insurance: {
-            $ifNull: ['$wayBill.certificateOfInsurance', 'N/A'],
-          },
-          documents: {
-            $ifNull: [{ $mergeObjects: ['$wayBill', '$documents'] }, 'N/A'],
-          },
-          profile: {
-            name: { $ifNull: ['$driverUser.name', 'N/A'] },
-            email: { $ifNull: ['$driverUser.email', 'N/A'] },
-            phoneNumber: { $ifNull: ['$driverUser.phoneNumber', 'N/A'] },
-            profileImg: { $ifNull: ['$driverUser.profileImg', 'N/A'] },
-          },
-        },
-      },
-    },
-  ]);
-
-  return result.length ? result[0] : null;
-};
 
 export const findCompletedRide = async (rideId) => {
   const ride = await RideModel.findOne({

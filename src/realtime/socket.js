@@ -89,7 +89,7 @@ let ioInstance = null;
 export const initSocket = (server) => {
   if (ioInstance) return ioInstance;
 
-  const io = new Server(server, {
+ c onst io = new Server(server, {
     pingTimeout: 60000,
     pingInterval: 25000,
     cors: {

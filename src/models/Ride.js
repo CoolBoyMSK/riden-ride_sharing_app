@@ -280,10 +280,13 @@ const rideSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    paymentMethodId: {
+      type: String,
+    },
     paymentIntentId: {
       type: String,
     },
-    cardId: {
+    cardType: {
       type: String,
       required: function () {
         return this.paymentMethod === 'CARD';

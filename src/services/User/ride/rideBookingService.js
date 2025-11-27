@@ -19,7 +19,7 @@ import {
   createAdminNotification,
 } from '../../../dal/notification.js';
 import { CAR_TYPES, PASSENGER_ALLOWED } from '../../../enums/vehicleEnums.js';
-import { PAYMENT_METHODS } from '../../../enums/paymentEnums.js';
+import { PAYMENT_METHODS, CARD_TYPES } from '../../../enums/paymentEnums.js';
 import { scheduledRideQueue } from '../../../scheduled/queues/index.js';
 import {
   holdRidePayment,
@@ -198,7 +198,7 @@ export const bookRide = async (userId, rideData) => {
       bookedForName,
       bookedForPhoneNumber,
       paymentMethod,
-      cardId,
+      paymentMethodId,
       cardType,
       promoCode,
       scheduledTime,
@@ -378,27 +378,30 @@ export const bookRide = async (userId, rideData) => {
     const paymentValidation = await validatePaymentMethod(
       passenger,
       paymentMethod,
-      cardId,
+      paymentMethodId,
     );
     if (!paymentValidation.success) return paymentValidation;
 
+    if (paymentMethod === 'CARD' && !CARD_TYPES.includes(cardType)) {
+      return {
+        success: false,
+        message: 'Invalid card type',
+      };
+    }
+
     // Hold/authorize payment for card, Google Pay, and Apple Pay payments
-    if (
-      (paymentMethod === 'CARD' ||
-        paymentMethod === 'GOOGLE_PAY' ||
-        paymentMethod === 'APPLE_PAY') &&
-      cardId &&
-      cardType
-    ) {
+    if (PAYMENT_METHODS.includes(paymentMethod) && paymentMethodId) {
       const estimatedAmount = fareResult.estimatedFare;
+      console.log('Start');
       paymentHoldResult = await holdRidePayment(
         passenger,
         estimatedAmount,
-        cardId,
+        paymentMethodId,
         paymentMethod,
         cardType,
       );
-
+      console.log('paymentHoldResult:', paymentHoldResult);
+      console.log('end');
       if (!paymentHoldResult.success) {
         return {
           success: false,
@@ -407,6 +410,11 @@ export const bookRide = async (userId, rideData) => {
             'Failed to authorize payment. Please check your payment method and try again.',
         };
       }
+    } else {
+      return {
+        success: false,
+        message: 'Payment method not supported',
+      };
     }
 
     // Create ride record
@@ -416,7 +424,7 @@ export const bookRide = async (userId, rideData) => {
       dropoffLocation,
       carType,
       paymentMethod,
-      cardId,
+      paymentMethodId,
       scheduledTime,
       specialRequests,
       distance,
@@ -436,6 +444,7 @@ export const bookRide = async (userId, rideData) => {
       passengersAllowed: PASSENGER_ALLOWED[carType].passengersAllowed,
       patientsAllowed: PASSENGER_ALLOWED[carType].patientsAllowed,
       paymentIntentId: paymentHoldResult?.paymentIntentId || null,
+      cardType,
     });
 
     if (!ride) {
@@ -575,27 +584,21 @@ const validateRideInput = (rideData) => {
   return null;
 };
 
-const validatePaymentMethod = async (passenger, paymentMethod, cardId) => {
+const validatePaymentMethod = async (
+  passenger,
+  paymentMethod,
+  paymentMethodId,
+) => {
   // Validate CARD, GOOGLE_PAY, or APPLE_PAY - all require a payment method ID
   if (
     paymentMethod === 'CARD' ||
     paymentMethod === 'GOOGLE_PAY' ||
     paymentMethod === 'APPLE_PAY'
   ) {
-    if (!cardId) {
+    if (!paymentMethodId) {
       return {
         success: false,
         message: 'Payment method ID is required',
-      };
-    } else if (!passenger.paymentMethodIds?.length) {
-      return {
-        success: false,
-        message: 'No payment methods available. Please add a payment method.',
-      };
-    } else if (!passenger.paymentMethodIds.includes(cardId)) {
-      return {
-        success: false,
-        message: 'Please add a valid payment method',
       };
     }
   } else if (paymentMethod === 'WALLET') {
@@ -623,7 +626,7 @@ const createRideRecord = async (params) => {
     dropoffLocation,
     carType,
     paymentMethod,
-    cardId,
+    paymentMethodId,
     scheduledTime,
     specialRequests,
     distance,
@@ -643,6 +646,7 @@ const createRideRecord = async (params) => {
     passengersAllowed,
     patientsAllowed,
     paymentIntentId,
+    cardType,
   } = params;
 
   const ridePayload = {
@@ -651,10 +655,9 @@ const createRideRecord = async (params) => {
     dropoffLocation,
     carType,
     paymentMethod,
-    ...((paymentMethod === 'CARD' ||
-      paymentMethod === 'GOOGLE_PAY' ||
-      paymentMethod === 'APPLE_PAY') && { cardId }),
-    ...(paymentIntentId && { paymentTransactionId: paymentIntentId }),
+    paymentIntentId,
+    paymentMethodId,
+    ...(cardType && { cardType }),
     scheduledTime: scheduledTime ? new Date(scheduledTime) : null,
     ...(specialRequests && { specialRequests }),
     estimatedDistance: distance,

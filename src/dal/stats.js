@@ -2,6 +2,7 @@ import Ride from '../models/Ride.js';
 import Driver from '../models/Driver.js';
 import RideModel from '../models/Ride.js';
 import DriverPayout from '../models/DriverPayout.js';
+import Feedback from '../models/Feedback.js';
 import mongoose from 'mongoose';
 
 const formatDate = (date) => {
@@ -219,11 +220,44 @@ export const findStats = async (id, options = {}) => {
   const totalRevenue =
     revenueResult.length > 0 ? revenueResult[0].totalRevenue : 0;
 
+  // --- Cancellation ratio ---
+  const cancellationRatio = totalRides > 0 ? cancelledRides / totalRides : 0;
+
+  // --- Average rating (only approved feedbacks) ---
+  const feedbackDateQuery = Object.keys(dateFilter).length
+    ? { createdAt: dateFilter }
+    : {};
+
+  const ratingResult = await Feedback.aggregate([
+    {
+      $match: {
+        driverId,
+        type: 'by_passenger',
+        isApproved: true,
+        ...feedbackDateQuery,
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        averageRating: { $avg: '$rating' },
+        totalRatings: { $sum: 1 },
+      },
+    },
+  ]);
+
+  const averageRating =
+    ratingResult.length > 0 && ratingResult[0].totalRatings > 0
+      ? ratingResult[0].averageRating
+      : 0;
+
   return {
     totalRides,
     completedRides,
     cancelledRides,
     totalRevenue,
+    cancellationRatio,
+    averageRating,
     period: period || 'lifetime',
     ...(fromDate || toDate ? { fromDate, toDate } : {}),
   };
