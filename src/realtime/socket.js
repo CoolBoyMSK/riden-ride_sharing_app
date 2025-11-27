@@ -93,7 +93,7 @@ export const initSocket = (server) => {
     pingTimeout: 60000,
     pingInterval: 25000,
     cors: {
-      origin: env.FRONTEND_URL || '*',
+      origin: '*',
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
       allowedHeaders: ['Content-Type', 'Authorization'],
       credentials: true,
