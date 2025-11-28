@@ -19,6 +19,7 @@ import { alertQueue } from '../../queues/alertQueue.js';
 import firebaseAdmin from '../../config/firebaseAdmin.js';
 import env from '../../config/envConfig.js';
 import { notifyUser } from '../notification.js';
+import { getDriverLocation } from '../ride.js';
 
 const BATCH_SIZE = Number(env.BATCH_SIZE || 500);
 const messaging = firebaseAdmin.messaging();
@@ -1256,22 +1257,30 @@ export const findDashboardData = async () => {
   // Get driverIds from rides
   const driverIds = rides.map((r) => r.driverId);
 
-  // Fetch driver locations in a single query
-  const locations = await DriverLocation.find({
-    driverId: { $in: driverIds },
-  }).lean();
+  // Fetch driver locations using getDriverLocation function (from Redis)
+  const locationPromises = driverIds.map((driverId) =>
+    getDriverLocation(driverId),
+  );
+  const locationResults = await Promise.all(locationPromises);
+
+  // Create a map of driverId to location for efficient lookup
+  const locationMap = new Map();
+  driverIds.forEach((driverId, index) => {
+    const location = locationResults[index];
+    if (location && location.coordinates) {
+      locationMap.set(driverId.toString(), location);
+    }
+  });
 
   // Merge ride with driver location
   const rideData = rides.map((ride) => {
-    const loc = locations.find(
-      (l) => l.driverId.toString() === ride.driverId.toString(),
-    );
+    const loc = locationMap.get(ride.driverId?.toString());
     return {
       rideId: ride._id,
       status: ride.status,
       driverId: ride.driverId,
       location: loc
-        ? { lng: loc.location.coordinates[0], lat: loc.location.coordinates[1] }
+        ? { lng: loc.coordinates[0], lat: loc.coordinates[1] }
         : null,
     };
   });
