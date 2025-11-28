@@ -128,6 +128,235 @@ export const initSocket = (server) => {
     const userId = socket.user?.id;
     const userRole = socket.user?.roles?.[0];
 
+    // Helper function to process payment for a completed ride
+    const processRidePayment = async (rideId) => {
+      const objectType = 'pay-driver';
+      try {
+        const ride = await findRideById(rideId);
+        if (
+          !ride ||
+          ride.status !== 'RIDE_COMPLETED' ||
+          !ride.actualFare ||
+          ride.actualFare <= 0 ||
+          ride.paymentStatus === 'COMPLETED'
+        ) {
+          return {
+            success: false,
+            error: 'Invalid ride state for payment processing',
+          };
+        }
+
+        const passenger = await findPassengerById(ride.passengerId._id);
+        const driver = await findDriverById(ride.driverId._id);
+        if (!passenger || !driver) {
+          return { success: false, error: 'Driver or Passenger not found' };
+        }
+
+        socket.join(`ride:${ride._id}`);
+
+        if (ride.paymentMethod === 'WALLET') {
+          const adminCommission = await deductRidenCommission(
+            ride.carType,
+            ride.actualFare,
+            ride.fareBreakdown?.promoDiscount,
+            ride._id,
+          );
+
+          const fare = await payDriverFromWallet(
+            passenger,
+            driver,
+            ride,
+            ride.actualFare - adminCommission,
+            ride.actualFare,
+            'RIDE',
+          );
+          if (fare.success) {
+            await createRideTransaction({
+              rideId: ride._id,
+              driverId: ride.driverId,
+              passengerId: ride.passengerId,
+              amount: ride.actualFare,
+              commission: adminCommission,
+              discount: ride.fareBreakdown?.promoDiscount || 0,
+              tip: ride.tipBreakdown?.amount || 0,
+              driverEarning: ride.actualFare - adminCommission,
+              paymentMethod: ride.paymentMethod,
+              status: 'COMPLETED',
+              payoutWeek: getPayoutWeek(new Date()),
+            });
+
+            await updateRideById(ride._id, {
+              paymentStatus: 'COMPLETED',
+              driverPaidAt: new Date(),
+            });
+
+            const receipt = await generateRideReceipt(ride._id);
+            if (receipt) {
+              await notifyUser({
+                userId: ride.passengerId?.userId,
+                title: 'Payment Successful!',
+                message: `Thanks for riding with RIDEN. Your payment of ${ride.actualAmount} was completed successfully. Receipts are available in your ride history`,
+                module: 'payment',
+                metadata: ride,
+                type: 'ALERT',
+                actionLink: `pay_driver`,
+                isPush: false,
+              });
+
+              await notifyUser({
+                userId: ride.driverId?.userId,
+                title: 'Payment Done',
+                message: `Payment successful! ${fare} has been added to your Riden wallet`,
+                module: 'payment',
+                metadata: ride,
+                type: 'ALERT',
+                actionLink: `driver_get_paid`,
+              });
+
+              io.to(`ride:${ride._id}`).emit('ride:pay_driver', {
+                success: true,
+                objectType,
+                data: {
+                  ride,
+                  transaction: fare.transaction,
+                },
+                message: 'Fare successfully paid to driver',
+              });
+              return { success: true };
+            } else {
+              return {
+                success: false,
+                error: fare.error || 'Payment processing failed',
+              };
+            }
+          } else {
+            return {
+              success: false,
+              error: fare.error || 'Payment processing failed',
+            };
+          }
+        } else if (
+          ride.paymentMethod === 'CARD' ||
+          ride.paymentMethod === 'GOOGLE_PAY' ||
+          ride.paymentMethod === 'APPLE_PAY'
+        ) {
+          const adminCommission = await deductRidenCommission(
+            ride.carType,
+            ride.actualFare,
+            ride.fareBreakdown?.promoDiscount,
+            ride._id,
+          );
+
+          let fare;
+          if (ride.paymentIntentId) {
+            const captureResult = await captureHeldPayment(
+              ride.paymentIntentId,
+              ride.actualFare,
+              ride._id,
+            );
+
+            if (captureResult.success) {
+              fare = await processDriverPayoutAfterCapture(
+                passenger,
+                driver,
+                ride,
+                ride.actualFare - adminCommission,
+                ride.actualFare,
+                ride.paymentIntentId,
+                'RIDE',
+              );
+            } else {
+              return {
+                success: false,
+                error: captureResult.error || 'Failed to capture payment',
+              };
+            }
+          } else {
+            const paymentMethodId =
+              ride.cardId || passenger.defaultCardId || ride.paymentMethod;
+            fare = await passengerPaysDriver(
+              passenger,
+              driver,
+              ride,
+              ride.actualFare - adminCommission,
+              ride.actualFare,
+              paymentMethodId,
+              'RIDE',
+            );
+          }
+
+          if (fare && fare.success) {
+            await createRideTransaction({
+              rideId: ride._id,
+              driverId: ride.driverId,
+              passengerId: ride.passengerId,
+              amount: ride.actualFare,
+              commission: adminCommission,
+              discount: ride.fareBreakdown?.promoDiscount || 0,
+              tip: ride.tipBreakdown?.amount || 0,
+              driverEarning: ride.actualFare - adminCommission,
+              paymentMethod: ride.paymentMethod,
+              status: 'COMPLETED',
+              payoutWeek: getPayoutWeek(new Date()),
+            });
+
+            await updateRideById(ride._id, {
+              paymentStatus: 'COMPLETED',
+              driverPaidAt: new Date(),
+            });
+
+            const receipt = await generateRideReceipt(ride._id);
+            if (receipt) {
+              await notifyUser({
+                userId: ride.passengerId?.userId,
+                title: 'Payment Successful!',
+                message: `Thanks for riding with RIDEN. Your payment of ${ride.actualAmount} was completed successfully. Receipts are available in your ride history`,
+                module: 'payment',
+                metadata: ride,
+                type: 'ALERT',
+                actionLink: `pay_driver`,
+                isPush: false,
+              });
+
+              await notifyUser({
+                userId: ride.driverId?.userId,
+                title: 'Payment Done',
+                message: `Payment successful! ${fare} has been added to your Riden wallet`,
+                module: 'payment',
+                metadata: ride,
+                type: 'ALERT',
+                actionLink: `driver_get_paid`,
+              });
+
+              io.to(`ride:${ride._id}`).emit('ride:pay_driver', {
+                success: true,
+                objectType,
+                data: {
+                  ride,
+                  transaction: fare.transaction,
+                  paymentIntentId: ride.paymentIntentId || undefined,
+                },
+                message: 'Driver Paid Successfully',
+              });
+              return { success: true };
+            }
+          } else {
+            return {
+              success: false,
+              error: fare.error || 'Payment processing failed',
+            };
+          }
+        }
+        return { success: false, error: 'Unsupported payment method' };
+      } catch (error) {
+        console.error(`SOCKET ERROR in payment processing: ${error}`);
+        return {
+          success: false,
+          error: error.message || 'Payment processing failed',
+        };
+      }
+    };
+
     if (userId) {
       console.log(`🔌 User ${userId} connected to socket`);
       // add to online registry
@@ -500,7 +729,9 @@ export const initSocket = (server) => {
           });
         }
 
-        const driverLocation = await getDriverLocation(ride.driverId?._id.toString());
+        const driverLocation = await getDriverLocation(
+          ride.driverId?._id.toString(),
+        );
         if (!driverLocation) {
           return socket.emit('error', {
             success: false,
@@ -515,7 +746,7 @@ export const initSocket = (server) => {
           objectType,
           data: {
             ride,
-            driverLocation: driverLocation || "Driver Location not available",
+            driverLocation: driverLocation || 'Driver Location not available',
           },
           message: 'Ride data shared successfully',
         });
@@ -2189,8 +2420,9 @@ export const initSocket = (server) => {
             message: 'Ride status updated to RIDE_COMPLETED',
           });
 
+          // Trigger payment processing directly
           setImmediate(() => {
-            socket.emit('ride:pay_driver', { rideId: updatedRide._id });
+            processRidePayment(updatedRide._id);
           });
         } catch (error) {
           console.error(`SOCKET ERROR: ${error}`);
@@ -3751,248 +3983,15 @@ export const initSocket = (server) => {
           });
         }
 
-        socket.join(`ride:${ride._id}`);
-        if (ride.paymentMethod === 'WALLET') {
-          const adminCommission = await deductRidenCommission(
-            ride.carType,
-            ride.actualFare,
-            ride.fareBreakdown?.promoDiscount,
-            ride._id,
-          );
-
-          const fare = await payDriverFromWallet(
-            passenger,
-            driver,
-            ride,
-            ride.actualFare - adminCommission,
-            ride.actualFare,
-            'RIDE',
-          );
-          if (!fare.success) {
-            return socket.emit('error', {
-              success: false,
-              objectType,
-              code: 'FORBIDDEN',
-              message: fare.error,
-            });
-          } else if (fare.success) {
-            await createRideTransaction({
-              rideId: ride._id,
-              driverId: ride.driverId,
-              passengerId: ride.passengerId,
-              amount: ride.actualFare,
-              commission: adminCommission,
-              discount: ride.fareBreakdown?.promoDiscount || 0,
-              tip: ride.tipBreakdown?.amount || 0,
-              driverEarning: ride.actualFare - adminCommission,
-              paymentMethod: ride.paymentMethod,
-              status: 'COMPLETED',
-              payoutWeek: getPayoutWeek(new Date()),
-            });
-
-            await updateRideById(ride._id, {
-              paymentStatus: 'COMPLETED',
-              driverPaidAt: new Date(),
-            });
-
-            const receipt = await generateRideReceipt(ride._id);
-            if (!receipt) {
-              return socket.emit('error', {
-                success: false,
-                objectType,
-                code: 'FORBIDDEN',
-                message: 'Failed to generate the receipt',
-              });
-            }
-
-            // Notification Logic Start
-            const notifyPassenger = await notifyUser({
-              userId: ride.passengerId?.userId,
-              title: 'Payment Successful!',
-              message: `Thanks for riding with RIDEN. Your payment of ${ride.actualAmount} was completed successfully. Receipts are available in your ride history`,
-              module: 'payment',
-              metadata: ride,
-              type: 'ALERT',
-              actionLink: `pay_driver`,
-              isPush: false,
-            });
-            if (!notifyPassenger) {
-              console.error('Failed to send notification');
-            }
-
-            const notifyDriver = await notifyUser({
-              userId: ride.driverId?.userId,
-              title: 'Payment Done',
-              message: `Payment successful! ${fare} has been added to your Riden wallet`,
-              module: 'payment',
-              metadata: ride,
-              type: 'ALERT',
-              actionLink: `driver_get_paid`,
-            });
-            if (!notifyDriver) {
-              console.error('Failed to send notification');
-            }
-            // Notification Logic End
-
-            io.to(`ride:${ride._id}`).emit('ride:pay_driver', {
-              success: true,
-              objectType,
-              data: {
-                ride,
-                transaction: fare.transaction,
-              },
-              message: 'Fare successfully paid to driver',
-            });
-          } else {
-            return socket.emit('error', {
-              success: false,
-              objectType,
-              code: 'FORBIDDEN',
-              message: fare.error || 'something went wrong',
-            });
-          }
-        }
-
-        // Handle payment for CARD, GOOGLE_PAY, and APPLE_PAY
-        if (
-          ride.paymentMethod === 'CARD' ||
-          ride.paymentMethod === 'GOOGLE_PAY' ||
-          ride.paymentMethod === 'APPLE_PAY'
-        ) {
-          const adminCommission = await deductRidenCommission(
-            ride.carType,
-            ride.actualFare,
-            ride.fareBreakdown?.promoDiscount,
-            ride._id,
-          );
-
-          let fare;
-          // Check if payment was held (paymentIntentId exists)
-          if (ride.paymentIntentId) {
-            // Capture the held payment first
-            const captureResult = await captureHeldPayment(
-              ride.paymentIntentId,
-              ride.actualFare,
-              ride._id,
-            );
-
-            if (!captureResult.success) {
-              return socket.emit('error', {
-                success: false,
-                objectType,
-                code: 'FORBIDDEN',
-                message:
-                  captureResult.error ||
-                  'Failed to capture payment. Please contact support.',
-              });
-            }
-
-            // After successful capture, payment is already charged from passenger
-            // Process driver payout using the captured payment intent (no new charge)
-            fare = await processDriverPayoutAfterCapture(
-              passenger,
-              driver,
-              ride,
-              ride.actualFare - adminCommission,
-              ride.actualFare,
-              ride.paymentIntentId,
-              'RIDE',
-            );
-          } else {
-            // No payment hold - process payment normally (creates new payment intent)
-            const paymentMethodId =
-              ride.cardId || passenger.defaultCardId || ride.paymentMethod;
-            fare = await passengerPaysDriver(
-              passenger,
-              driver,
-              ride,
-              ride.actualFare - adminCommission,
-              ride.actualFare,
-              paymentMethodId,
-              'RIDE',
-            );
-          }
-
-          if (!fare.success) {
-            return socket.emit('error', {
-              success: false,
-              objectType,
-              code: 'FORBIDDEN',
-              message: fare.error,
-            });
-          }
-
-          // Process successful payment (common for both captured and normal payments)
-          if (fare.success) {
-            await createRideTransaction({
-              rideId: ride._id,
-              driverId: ride.driverId,
-              passengerId: ride.passengerId,
-              amount: ride.actualFare,
-              commission: adminCommission,
-              discount: ride.fareBreakdown?.promoDiscount || 0,
-              tip: ride.tipBreakdown?.amount || 0,
-              driverEarning: ride.actualFare - adminCommission,
-              paymentMethod: ride.paymentMethod,
-              status: 'COMPLETED',
-              payoutWeek: getPayoutWeek(new Date()),
-            });
-
-            await updateRideById(ride._id, {
-              paymentStatus: 'COMPLETED',
-              driverPaidAt: new Date(),
-            });
-
-            const receipt = await generateRideReceipt(ride._id);
-            if (!receipt) {
-              return socket.emit('error', {
-                success: false,
-                objectType,
-                code: 'FORBIDDEN',
-                message: 'Failed to generate the receipt',
-              });
-            }
-
-            // Notification Logic Start
-            const notifyPassenger = await notifyUser({
-              userId: ride.passengerId?.userId,
-              title: 'Payment Successful!',
-              message: `Thanks for riding with RIDEN. Your payment of ${ride.actualAmount} was completed successfully. Receipts are available in your ride history`,
-              module: 'payment',
-              metadata: ride,
-              type: 'ALERT',
-              actionLink: `pay_driver`,
-              isPush: false,
-            });
-            if (!notifyPassenger) {
-              console.error('Failed to send notification');
-            }
-
-            const notifyDriver = await notifyUser({
-              userId: ride.driverId?.userId,
-              title: 'Payment Done',
-              message: `Payment successful! ${fare} has been added to your Riden wallet`,
-              module: 'payment',
-              metadata: ride,
-              type: 'ALERT',
-              actionLink: `driver_get_paid`,
-            });
-            if (!notifyDriver) {
-              console.error('Failed to send notification');
-            }
-            // Notification Logic End
-
-            io.to(`ride:${ride._id}`).emit('ride:pay_driver', {
-              success: true,
-              objectType,
-              data: {
-                ride,
-                transaction: fare.transaction,
-                paymentIntentId: ride.paymentIntentId || undefined,
-              },
-              message: 'Driver Paid Successfully',
-            });
-          }
+        // Process payment using the helper function
+        const result = await processRidePayment(rideId);
+        if (!result || !result.success) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: result?.error || 'Failed to process payment',
+          });
         }
       } catch (error) {
         console.error(`SOCKET ERROR: ${error}`);
