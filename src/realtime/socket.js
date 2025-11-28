@@ -514,7 +514,7 @@ export const initSocket = (server) => {
           success: true,
           objectType,
           data: {
-            ...ride,
+            ride,
             driverLocation: driverLocation || "Driver Location not available",
           },
           message: 'Ride data shared successfully',
