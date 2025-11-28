@@ -520,15 +520,24 @@ export const findDriverWayBill = async (driverId) => {
   const waybillData = result[0];
 
   // Calculate passenger capacity based on vehicle type
+  console.log('Waybill Data: ', waybillData);
   if (
-    waybillData.driver?.vehicleType &&
-    waybillData.driver.vehicleType !== 'N/A' &&
-    PASSENGER_ALLOWED[waybillData.driver.vehicleType]
+    waybillData.driver?.vehicle.type &&
+    waybillData.driver.vehicle.type !== 'N/A' &&
+    PASSENGER_ALLOWED[waybillData.driver.vehicle.type]
   ) {
-    waybillData.driver.capacity =
-      PASSENGER_ALLOWED[waybillData.driver.vehicleType].passengersAllowed || 0;
+    waybillData.driver.capacity = {
+      passengersAllowed:
+        PASSENGER_ALLOWED[waybillData.driver.vehicle.type]?.passengersAllowed ||
+        0,
+      patientsAllowed:
+        PASSENGER_ALLOWED[waybillData.driver.vehicle.type]?.patientsAllowed || 0,
+    };
   } else {
-    waybillData.driver.capacity = 0;
+    waybillData.driver.capacity = {
+      passengersAllowed: 0,
+      patientsAllowed: 0,
+    };
   }
 
   // Fetch timezone from pickup location coordinates if ride exists
