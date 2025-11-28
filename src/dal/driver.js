@@ -443,17 +443,7 @@ export const findDriverWayBill = async (driverId) => {
                 $and: [
                   { $eq: ['$driverId', '$$dId'] },
                   {
-                    $in: [
-                      '$status',
-                      [
-                        'DRIVER_ASSIGNED',
-                        'DRIVER_ARRIVING',
-                        'DRIVER_ARRIVED',
-                        'RIDE_STARTED',
-                        'RIDE_IN_PROGRESS',
-                        'RIDE_COMPLETED',
-                      ],
-                    ],
+                    $in: ['$status', ['RIDE_COMPLETED']],
                   },
                 ],
               },
@@ -476,6 +466,8 @@ export const findDriverWayBill = async (driverId) => {
               pickupLocation: { $ifNull: ['$pickupLocation', 'N/A'] },
               dropOffLocation: { $ifNull: ['$dropOffLocation', 'N/A'] },
               driverAssignedAt: { $ifNull: ['$driverAssignedAt', 'N/A'] },
+              rideCompletedAt: { $ifNull: ['$rideCompletedAt', 'N/A'] },
+              status: 1,
               passenger: {
                 userId: { $ifNull: ['$passenger.userId', 'N/A'] },
                 name: { $ifNull: ['$passenger.name', 'N/A'] },
@@ -531,7 +523,8 @@ export const findDriverWayBill = async (driverId) => {
         PASSENGER_ALLOWED[waybillData.driver.vehicle.type]?.passengersAllowed ||
         0,
       patientsAllowed:
-        PASSENGER_ALLOWED[waybillData.driver.vehicle.type]?.patientsAllowed || 0,
+        PASSENGER_ALLOWED[waybillData.driver.vehicle.type]?.patientsAllowed ||
+        0,
     };
   } else {
     waybillData.driver.capacity = {
