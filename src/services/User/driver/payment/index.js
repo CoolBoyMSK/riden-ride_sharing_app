@@ -11,38 +11,11 @@ import {
   checkConnectedAccountStatus,
   getAllExternalAccounts,
   getExternalAccountById,
-  updateExternalAccount,
   deleteExternalAccount,
   setDefaultExternalAccount,
   createPayoutRequest,
   payoutToDriverBank,
 } from '../../../../dal/stripe.js';
-
-export const addPayoutMethod = async (user, { bankDetails }, resp) => {
-  try {
-    const driver = await findDriverByUserId(user._id);
-    if (!driver) {
-      resp.error = true;
-      resp.error_message = 'Failed to fetch driver';
-      return resp;
-    }
-
-    const success = await addDriverExternalAccount(driver, bankDetails);
-    if (!success) {
-      resp.error = true;
-      resp.error_message = 'Failed to add payout method';
-      return resp;
-    }
-
-    resp.data = success;
-    return resp;
-  } catch (error) {
-    console.error(`API ERROR: ${error}`);
-    resp.error = true;
-    resp.error_message = error.message || 'Something went wrong';
-    return resp;
-  }
-};
 
 export const onBoardDriver = async (user, { data }, ip, resp) => {
   try {
@@ -259,6 +232,32 @@ export const getDriverStripeAccount = async (user, resp) => {
   }
 };
 
+export const addPayoutMethod = async (user, { bankDetails }, resp) => {
+  try {
+    const driver = await findDriverByUserId(user._id);
+    if (!driver) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch driver';
+      return resp;
+    }
+
+    const result = await addDriverExternalAccount(driver, bankDetails);
+    if (!result.success) {
+      resp.error = true;
+      resp.error_message = 'Failed to add payout method';
+      return resp;
+    }
+
+    resp.data = result;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
+    return resp;
+  }
+};
+
 export const getAllPayoutMethods = async (user, resp) => {
   try {
     const driver = await findDriverByUserId(user._id);
@@ -268,14 +267,14 @@ export const getAllPayoutMethods = async (user, resp) => {
       return resp;
     }
 
-    const success = await getAllExternalAccounts(driver.stripeAccountId);
-    if (!success) {
+    const result = await getAllExternalAccounts(driver.stripeAccountId);
+    if (!result.success) {
       resp.error = true;
       resp.error_message = 'Failed to fetch payout methods';
       return resp;
     }
 
-    resp.data = success.data;
+    resp.data = result;
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);
@@ -294,44 +293,14 @@ export const getPayoutMethodById = async (user, { id }, resp) => {
       return resp;
     }
 
-    const success = await getExternalAccountById(driver.stripeAccountId, id);
-    if (!success) {
+    const result = await getExternalAccountById(driver.stripeAccountId, id);
+    if (!result.success) {
       resp.error = true;
       resp.error_message = 'Failed to fetch payout method';
       return resp;
     }
 
-    resp.data = success;
-    return resp;
-  } catch (error) {
-    console.error(`API ERROR: ${error}`);
-    resp.error = true;
-    resp.error_message = error.message || 'Something went wrong';
-    return resp;
-  }
-};
-
-export const updatePayoutMethod = async (user, { id }, { payload }, resp) => {
-  try {
-    const driver = await findDriverByUserId(user._id);
-    if (!driver) {
-      resp.error = true;
-      resp.error_message = 'Failed to fetch driver';
-      return resp;
-    }
-
-    const success = await updateExternalAccount(
-      driver.stripeAccountId,
-      id,
-      payload,
-    );
-    if (!success) {
-      resp.error = true;
-      resp.error_message = 'Failed to update payout method';
-      return resp;
-    }
-
-    resp.data = success;
+    resp.data = result;
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);
@@ -350,18 +319,14 @@ export const deletePayoutMethod = async (user, { id }, resp) => {
       return resp;
     }
 
-    const success = await deleteExternalAccount(
-      driver,
-      driver.stripeAccountId,
-      id,
-    );
-    if (!success) {
+    const result = await deleteExternalAccount(driver.stripeAccountId, id);
+    if (!result.success) {
       resp.error = true;
       resp.error_message = 'Failed to delete payout method';
       return resp;
     }
 
-    resp.data = success;
+    resp.data = result;
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);
@@ -380,14 +345,14 @@ export const setDefaultPayoutMethod = async (user, { id }, resp) => {
       return resp;
     }
 
-    const success = await setDefaultExternalAccount(driver.stripeAccountId, id);
-    if (!success) {
+    const result = await setDefaultExternalAccount(driver.stripeAccountId, id);
+    if (!result.success) {
       resp.error = true;
       resp.error_message = 'Failed to set default payout method';
       return resp;
     }
 
-    resp.data = success;
+    resp.data = result;
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);

@@ -15,6 +15,7 @@ import { sendDocumentEditRequestApprovalEmail } from '../templates/emails/user/i
 import { emitToUser, emitToRide } from '../realtime/socket.js';
 import { notifyUser, createAdminNotification } from '../dal/notification.js';
 import { PASSENGER_ALLOWED } from '../enums/vehicleEnums.js';
+import { cancelPaymentHold } from './stripe.js';
 import env from '../config/envConfig.js';
 import Queue from 'bull';
 import Redis from 'ioredis';
@@ -3836,6 +3837,28 @@ const cancelExpiredRide = async (rideId) => {
     );
 
     if (cancelledRide) {
+      // Cancel payment hold if payment was held (paymentIntentId exists)
+      if (cancelledRide.paymentIntentId) {
+        try {
+          const cancelResult = await cancelPaymentHold(
+            cancelledRide.paymentIntentId,
+          );
+          if (!cancelResult.success) {
+            // Log error but don't fail the cancellation
+            console.error(
+              `Failed to cancel payment hold for ride ${rideId}:`,
+              cancelResult.error,
+            );
+          }
+        } catch (cancelError) {
+          // Log error but don't fail the cancellation
+          console.error(
+            `Error cancelling payment hold for ride ${rideId}:`,
+            cancelError,
+          );
+        }
+      }
+
       // Notify passenger about cancellation
       emitToUser(cancelledRide.passengerId?.userId, 'ride:system_cancel_ride', {
         success: false,

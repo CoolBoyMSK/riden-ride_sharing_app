@@ -10,13 +10,9 @@ import {
   getTransactions,
   createWalletSetupIntent,
   deleteWallet,
+  getPaymentIntent
 } from '../../../services/User/passenger/paymentManagement.js';
 import { handleResponse } from '../../../utils/handleRespone.js';
-import {
-  validatePaymentMethod,
-  validateSetDefaultPaymentMethod,
-  validateUpdatePaymentMethodId,
-} from '../../../validations/user/passenger/paymentManagementValidators.js';
 
 export const addCardSetupIntentController = (req, res) =>
   handleResponse(
@@ -145,6 +141,18 @@ export const deleteWalletController = (req, res) =>
       validationFn: null,
       handlerParams: [req.user, req.query],
       successMessage: 'Wallet deleted successfully',
+    },
+    req,
+    res,
+  );
+
+export const getPaymentIntentController = (req, res) =>
+  handleResponse(
+    {
+      handler: getPaymentIntent,
+      validationFn: null,
+      handlerParams: [req.user, req.query],
+      successMessage: 'Payment intent fetched successfully',
     },
     req,
     res,

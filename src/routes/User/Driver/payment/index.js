@@ -13,7 +13,6 @@ import {
   getDriverStripeAccountController,
   getAllPayoutMethodsController,
   getPayoutMethodByIdController,
-  updatePayoutMethodController,
   deletePayoutMethodController,
   setDefaultPayoutMethodController,
   sendInstantPayoutRequestController,
@@ -100,13 +99,6 @@ registerRoute({
   route: '/get/:id',
   driver_auth_enable: true,
   get_method: getPayoutMethodByIdController,
-});
-
-registerRoute({
-  router,
-  route: '/edit/:id',
-  driver_auth_enable: true,
-  put_method: updatePayoutMethodController,
 });
 
 registerRoute({

@@ -11,7 +11,6 @@ import {
   getDriverStripeAccount,
   getAllPayoutMethods,
   getPayoutMethodById,
-  updatePayoutMethod,
   deletePayoutMethod,
   setDefaultPayoutMethod,
   sendInstantPayoutRequest,
@@ -146,18 +145,6 @@ export const getPayoutMethodByIdController = (req, res) =>
       validationFn: null,
       handlerParams: [req.user, req.params],
       successMessage: 'Payout method fetched successfully',
-    },
-    req,
-    res,
-  );
-
-export const updatePayoutMethodController = (req, res) =>
-  handleResponse(
-    {
-      handler: updatePayoutMethod,
-      validationFn: null,
-      handlerParams: [req.user, req.params, req.body],
-      successMessage: 'Payout method updated successfully',
     },
     req,
     res,

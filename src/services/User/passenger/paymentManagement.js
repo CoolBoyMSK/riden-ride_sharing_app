@@ -15,6 +15,7 @@ import {
   setupPassengerWalletIntent,
   deletePassengerWallet,
   createPassengerStripeCustomer,
+  getPassengerPaymentIntent,
 } from '../../../dal/stripe.js';
 import { CARD_TYPES } from '../../../enums/paymentEnums.js';
 
@@ -140,7 +141,16 @@ export const getCardById = async (user, { paymentMethodId }, resp) => {
       return resp;
     }
 
-    const result = await getPassengerCardById(paymentMethodId);
+    if (!passenger.stripeCustomerId) {
+      resp.error = true;
+      resp.error_message = 'Passenger does not have a Stripe customer ID';
+      return resp;
+    }
+
+    const result = await getPassengerCardById(
+      passenger.stripeCustomerId,
+      paymentMethodId,
+    );
     if (!result.success) {
       resp.error = true;
       resp.error_message = result.error || 'Failed to fetch card by id';
@@ -166,7 +176,16 @@ export const deleteCard = async (user, { paymentMethodId }, resp) => {
       return resp;
     }
 
-    const result = await deletePassengerCard(paymentMethodId);
+    if (!passenger.stripeCustomerId) {
+      resp.error = true;
+      resp.error_message = 'Passenger does not have a Stripe customer ID';
+      return resp;
+    }
+
+    const result = await deletePassengerCard(
+      passenger.stripeCustomerId,
+      paymentMethodId,
+    );
     if (!result.success) {
       resp.error = true;
       resp.error_message = result.error || 'Failed to delete payment method';
@@ -352,6 +371,47 @@ export const deleteWallet = async (user, { walletType }, resp) => {
       success: true,
       message: result.message,
     };
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'something went wrong';
+    return resp;
+  }
+};
+
+export const getPaymentIntent = async (user, { paymentIntentId }, resp) => {
+  try {
+    const passenger = await findPassengerByUserId(user._id);
+    if (!passenger) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch passenger';
+      return resp;
+    }
+
+    if (!passenger.stripeCustomerId) {
+      resp.error = true;
+      resp.error_message = 'Passenger does not have a Stripe customer ID';
+      return resp;
+    }
+
+    if (!paymentIntentId) {
+      resp.error = true;
+      resp.error_message = 'Payment intent ID is required';
+      return resp;
+    }
+
+    const result = await getPassengerPaymentIntent(
+      passenger.stripeCustomerId,
+      paymentIntentId,
+    );
+    if (!result.success) {
+      resp.error = true;
+      resp.error_message = result.error || 'Failed to fetch payment intent';
+      return resp;
+    }
+
+    resp.data = result;
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);

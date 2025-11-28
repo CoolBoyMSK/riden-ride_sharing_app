@@ -21,6 +21,32 @@ import { CARD_TYPES, PAYMENT_METHODS } from '../enums/paymentEnums.js';
 
 const stripe = new Stripe(env.STRIPE_SECRET_KEY);
 
+const sanitizeMetadataValue = (value, maxLength = 500) => {
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  // Handle ObjectId or populated Mongoose objects
+  if (mongoose.Types.ObjectId.isValid(value)) {
+    return value.toString();
+  }
+
+  // If it's an object with _id, extract the _id
+  if (value && typeof value === 'object' && value._id) {
+    return value._id.toString();
+  }
+
+  // Convert to string
+  const stringValue = String(value);
+
+  // Truncate if exceeds max length
+  if (stringValue.length > maxLength) {
+    return stringValue.substring(0, maxLength);
+  }
+
+  return stringValue;
+};
+
 export const getWeekRange = (date = new Date()) => {
   // Clone the input date to avoid mutating it
   const current = new Date(date);
@@ -391,6 +417,20 @@ export const addPassengerCard = async (
       });
     }
 
+    // Check if customer has a default payment method
+    const customer = await stripe.customers.retrieve(stripeCustomerId);
+    const defaultPaymentMethodId =
+      customer.invoice_settings.default_payment_method;
+
+    // If no default card exists, set the newly added card as default
+    if (!defaultPaymentMethodId) {
+      await stripe.customers.update(stripeCustomerId, {
+        invoice_settings: {
+          default_payment_method: paymentMethodId,
+        },
+      });
+    }
+
     return { success: true, paymentMethodId };
   } catch (error) {
     console.error(`STRIPE ERROR: ${error}`);
@@ -430,23 +470,115 @@ export const getPassengerCards = async (stripeCustomerId) => {
   }
 };
 
-export const getPassengerCardById = async (paymentMethodId) => {
+export const getPassengerCardById = async (
+  stripeCustomerId,
+  paymentMethodId,
+) => {
   try {
+    if (!stripeCustomerId) {
+      return {
+        success: false,
+        error: 'Stripe customer ID is required',
+      };
+    }
+
+    if (!paymentMethodId) {
+      return {
+        success: false,
+        error: 'Payment method ID is required',
+      };
+    }
+
+    // Retrieve the payment method
     const paymentMethod = await stripe.paymentMethods.retrieve(paymentMethodId);
 
-    return { success: true, card: paymentMethod };
+    // Verify the payment method belongs to this customer
+    if (paymentMethod.customer !== stripeCustomerId) {
+      return {
+        success: false,
+        error: 'Payment method does not belong to this customer',
+      };
+    }
+
+    // Get customer to check if this is the default payment method
+    const customer = await stripe.customers.retrieve(stripeCustomerId);
+    const defaultPaymentMethodId =
+      customer.invoice_settings.default_payment_method;
+
+    return {
+      success: true,
+      card: {
+        ...paymentMethod,
+        isDefault: paymentMethod.id === defaultPaymentMethodId,
+      },
+    };
   } catch (error) {
     console.error('STRIPE ERROR:', error.message);
     return {
       success: false,
-      error: error.message || 'Failed to fetch card by id',
+      error: error.message || 'Failed to fetch payment method',
     };
   }
 };
 
-export const deletePassengerCard = async (paymentMethodId) => {
+export const deletePassengerCard = async (
+  stripeCustomerId,
+  paymentMethodId,
+) => {
   try {
+    if (!stripeCustomerId) {
+      return {
+        success: false,
+        error: 'Stripe customer ID is required',
+      };
+    }
+
+    if (!paymentMethodId) {
+      return {
+        success: false,
+        error: 'Payment method ID is required',
+      };
+    }
+
+    // Get customer to check if this is the default payment method
+    const customer = await stripe.customers.retrieve(stripeCustomerId);
+    const defaultPaymentMethodId =
+      customer.invoice_settings.default_payment_method;
+    const isDeletingDefault = defaultPaymentMethodId === paymentMethodId;
+
+    // Retrieve the payment method to verify ownership
+    const paymentMethod = await stripe.paymentMethods.retrieve(paymentMethodId);
+
+    // Verify the payment method belongs to this customer
+    if (paymentMethod.customer !== stripeCustomerId) {
+      return {
+        success: false,
+        error: 'Payment method does not belong to this customer',
+      };
+    }
+
+    // Detach the payment method from the customer
     const detached = await stripe.paymentMethods.detach(paymentMethodId);
+
+    // If we deleted the default card, set a new default if available
+    if (isDeletingDefault) {
+      // Get remaining payment methods
+      const remainingPaymentMethods = await stripe.paymentMethods.list({
+        customer: stripeCustomerId,
+        type: 'card',
+      });
+
+      if (remainingPaymentMethods.data.length > 0) {
+        // Set the first remaining card as default
+        const newDefaultPaymentMethodId = remainingPaymentMethods.data[0].id;
+        await stripe.customers.update(stripeCustomerId, {
+          invoice_settings: {
+            default_payment_method: newDefaultPaymentMethodId,
+          },
+        });
+      }
+      // If no cards left, Stripe will automatically clear the default
+    }
 
     return { success: true, detached };
   } catch (error) {
@@ -473,6 +605,51 @@ export const setDefaultPassengerCard = async (
   } catch (error) {
     console.error('STRIPE ERROR:', error.message);
     return { success: false, error: error.message };
+  }
+};
+
+export const getPassengerPaymentIntent = async (
+  stripeCustomerId,
+  paymentIntentId,
+) => {
+  try {
+    if (!stripeCustomerId) {
+      return {
+        success: false,
+        error: 'Stripe customer ID is required',
+      };
+    }
+
+    if (!paymentIntentId) {
+      return {
+        success: false,
+        error: 'Payment intent ID is required',
+      };
+    }
+
+    // Retrieve the payment intent from Stripe
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+
+    // Verify the payment intent belongs to this customer
+    if (paymentIntent.customer !== stripeCustomerId) {
+      return {
+        success: false,
+        error: 'Payment intent does not belong to this customer',
+      };
+    }
+
+    // Format the payment intent data for response
+    return {
+      success: true,
+      paymentIntent,
+    };
+  } catch (error) {
+    console.error('STRIPE ERROR:', error.message);
+    return {
+      success: false,
+      error: error.message || 'Failed to fetch payment intent',
+      stripeError: error.type || null,
+    };
   }
 };
 
@@ -671,8 +848,6 @@ export const deletePassengerWallet = async (passenger, walletType) => {
   }
 };
 
-// Hold/Authorize funds for a ride booking (without capturing)
-// Supports CARD, GOOGLE_PAY, and APPLE_PAY payment methods
 export const holdRidePayment = async (
   passenger,
   amount,
@@ -711,6 +886,14 @@ export const holdRidePayment = async (
     const paymentDescription =
       paymentMethodDescriptions[paymentMethodType] || 'Card';
 
+    // Safely extract userId - handle both populated and non-populated cases
+    const userId = passenger.userId?._id
+      ? passenger.userId._id.toString()
+      : sanitizeMetadataValue(passenger.userId);
+
+    // Safely extract passengerId
+    const passengerId = sanitizeMetadataValue(passenger._id);
+
     // Create a Payment Intent with manual capture to hold/authorize funds
     const paymentIntent = await stripe.paymentIntents.create({
       amount: Math.round(amount * 100), // Convert to cents
@@ -723,14 +906,20 @@ export const holdRidePayment = async (
       description: `Ride booking authorization (${paymentDescription}) - Estimated fare: $${amount.toFixed(2)}`,
       metadata: {
         type: 'ride_authorization',
-        paymentMethodType: paymentMethodType,
-        passengerId: passenger._id.toString(),
-        userId: passenger.userId.toString(),
+        paymentMethodType: sanitizeMetadataValue(paymentMethodType),
+        passengerId: passengerId,
+        userId: userId,
         userType: 'passenger',
         addedAt: new Date().toISOString(),
         ...(paymentMethodType === 'CARD'
-          ? { isWallet: false, cardType: cardType }
-          : { isWallet: true, walletType: paymentMethodType }),
+          ? {
+              isWallet: 'false',
+              cardType: sanitizeMetadataValue(cardType),
+            }
+          : {
+              isWallet: 'true',
+              walletType: sanitizeMetadataValue(paymentMethodType),
+            }),
       },
     });
 
@@ -761,7 +950,6 @@ export const holdRidePayment = async (
   }
 };
 
-// Cancel/Release a payment hold (for payment intents that haven't been captured)
 export const cancelPaymentHold = async (paymentIntentId) => {
   try {
     if (!paymentIntentId) {
@@ -797,7 +985,6 @@ export const cancelPaymentHold = async (paymentIntentId) => {
   }
 };
 
-// Capture held payment when ride completes
 export const captureHeldPayment = async (
   paymentIntentId,
   amount, // Actual fare (might differ from estimated)
@@ -810,6 +997,31 @@ export const captureHeldPayment = async (
 
     if (!amount || amount <= 0) {
       throw new Error('Invalid amount');
+    }
+
+    if (!rideId) {
+      throw new Error('Ride ID is required');
+    }
+
+    // Fetch ride to get driver information
+    const ride = await RideModel.findById(rideId).populate('driverId');
+    if (!ride) {
+      throw new Error('Ride not found');
+    }
+
+    if (!ride.driverId) {
+      throw new Error('Ride does not have a driver assigned');
+    }
+
+    const driver = await DriverModel.findById(
+      ride.driverId._id || ride.driverId,
+    );
+    if (!driver) {
+      throw new Error('Driver not found');
+    }
+
+    if (!driver.stripeAccountId) {
+      throw new Error('Driver does not have a Stripe connected account');
     }
 
     // Retrieve payment intent to check status
@@ -830,11 +1042,38 @@ export const captureHeldPayment = async (
       });
     }
 
-    // Capture the payment
+    // Calculate admin commission
+    // Check if commission was already calculated
+    let adminCommission = 0;
+    const existingCommission = await AdminCommission.findOne({ rideId });
+    if (existingCommission) {
+      adminCommission = existingCommission.commissionAmount;
+    } else {
+      // Calculate commission if not already done
+      // Import Commission model dynamically
+      const Commission = (await import('../models/Commission.js')).default;
+      const commission = await Commission.findOne({
+        carType: ride.carType,
+      }).lean();
+      if (commission) {
+        let driverDistanceCommission = 0;
+        if (ride.driverDistance && ride.driverDistance > 5) {
+          driverDistanceCommission = 5 - Math.ceil(ride.driverDistance);
+        }
+        // Commission calculation matches deductRidenCommission logic
+        adminCommission =
+          Math.floor((amount / 100) * commission.percentage) -
+          driverDistanceCommission;
+      }
+    }
+
+    const driverAmount = amount - adminCommission;
+
+    // Capture the payment to platform account
     const capturedPayment = await stripe.paymentIntents.capture(
       paymentIntentId,
       {
-        amount_to_capture: Math.round(amount * 100), // Optional: capture specific amount
+        amount_to_capture: Math.round(amount * 100),
       },
     );
 
@@ -844,29 +1083,38 @@ export const captureHeldPayment = async (
       );
     }
 
+    // Transfer driver's share to driver's connected account
+    const transfer = await stripe.transfers.create({
+      amount: Math.round(driverAmount * 100), // Driver's share after commission
+      currency: 'cad',
+      destination: driver.stripeAccountId,
+      source_transaction: capturedPayment.latest_charge, // Link to the captured payment
+      description: `Ride payment transfer for ride ${rideId}`,
+      metadata: {
+        rideId: rideId.toString(),
+        paymentIntentId: paymentIntentId,
+        driverId: driver._id.toString(),
+        amount: driverAmount.toString(),
+        commission: adminCommission.toString(),
+      },
+    });
+
     return {
       success: true,
       paymentIntentId: capturedPayment.id,
       status: capturedPayment.status,
       amount: amount,
+      driverAmount: driverAmount,
+      commission: adminCommission,
+      transferId: transfer.id,
+      driverStripeAccountId: driver.stripeAccountId,
       capturedAt: new Date(),
     };
   } catch (error) {
-    console.error('Error capturing held payment:', error);
-    // If payment intent is already captured, that's okay
-    if (
-      error.code === 'payment_intent_unexpected_state' ||
-      error.message.includes('already been captured')
-    ) {
-      return {
-        success: true,
-        message: 'Payment already captured',
-      };
-    }
+    console.error('STRIPE ERROR: ', error);
     return {
       success: false,
       error: error.message || 'Failed to capture payment',
-      stripeError: error.type || null,
     };
   }
 };
@@ -2203,83 +2451,315 @@ export const checkConnectedAccountStatus = async (accountId) => {
 };
 
 export const addDriverExternalAccount = async (driver, bankAccountData) => {
-  const bankAccount = await stripe.accounts.createExternalAccount(
-    driver.stripeAccountId,
-    {
-      external_account: bankAccountData,
-    },
-  );
+  try {
+    // Validate driver has Stripe account
+    if (!driver.stripeAccountId) {
+      throw new Error('Driver has no Stripe account linked');
+    }
 
-  await saveDriverPayoutMethod(driver._id, bankAccount.id);
+    // Validate bank account data
+    if (!bankAccountData) {
+      throw new Error('Bank account data is required');
+    }
 
-  const account = await getDefaultAccount(driver.stripeAccountId);
-  if (!account.defaultAccountId) {
-    await setDefaultAccount(driver.stripeAccountId, bankAccount.id);
+    // Create external account in Stripe
+    const bankAccount = await stripe.accounts.createExternalAccount(
+      driver.stripeAccountId,
+      {
+        external_account: bankAccountData,
+      },
+    );
+
+    if (!bankAccount || !bankAccount.id) {
+      throw new Error('Failed to create external account in Stripe');
+    }
+
+    // Check Stripe for existing external accounts to see if there's a default
+    const existingAccounts = await stripe.accounts.listExternalAccounts(
+      driver.stripeAccountId,
+      {
+        limit: 100, // Get all accounts
+      },
+    );
+
+    // Check if any account is set as default for the currency (CAD)
+    const hasDefaultAccount = existingAccounts.data.some(
+      (account) => account.default_for_currency === true,
+    );
+
+    // If no default account exists in Stripe, set the newly created one as default
+    if (!hasDefaultAccount) {
+      // Set as default in Stripe (for the currency)
+      await stripe.accounts.updateExternalAccount(
+        driver.stripeAccountId,
+        bankAccount.id,
+        { default_for_currency: true },
+      );
+    }
+
+    return {
+      success: true,
+      bankAccount,
+    };
+  } catch (error) {
+    console.error('STRIPE ERROR:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to add driver external account',
+    };
   }
-  return bankAccount;
 };
 
 export const getAllExternalAccounts = async (stripeAccountId) => {
-  const externalAccounts =
-    await stripe.accounts.listExternalAccounts(stripeAccountId);
-  return externalAccounts;
+  try {
+    if (!stripeAccountId) {
+      throw new Error('Stripe account ID is required');
+    }
+
+    // Get all external accounts from Stripe
+    const externalAccounts =
+      await stripe.accounts.listExternalAccounts(stripeAccountId);
+
+    // Find the default account ID (account with default_for_currency: true)
+    const defaultAccount = externalAccounts.data.find(
+      (account) => account.default_for_currency === true,
+    );
+    const defaultAccountId = defaultAccount?.id;
+
+    // Map accounts and add isDefault flag
+    const accountsWithDefaultFlag = externalAccounts.data.map((account) => ({
+      ...account,
+      isDefault: account.id === defaultAccountId,
+    }));
+
+    return {
+      success: true,
+      accounts: accountsWithDefaultFlag,
+    };
+  } catch (error) {
+    console.error('STRIPE ERROR:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to get all external accounts',
+    };
+  }
 };
 
 export const getExternalAccountById = async (
   stripeAccountId,
   externalAccountId,
 ) => {
-  const externalAccount = await stripe.accounts.retrieveExternalAccount(
-    stripeAccountId,
-    externalAccountId,
-  );
-  return externalAccount;
-};
+  try {
+    if (!stripeAccountId) {
+      throw new Error('Stripe account ID is required');
+    }
 
-export const updateExternalAccount = async (
-  stripeAccountId,
-  externalAccountId,
-  updates,
-) => {
-  const updatedAccount = await stripe.accounts.updateExternalAccount(
-    stripeAccountId,
-    externalAccountId,
-    updates,
-  );
-  return updatedAccount;
+    if (!externalAccountId) {
+      throw new Error('External account ID is required');
+    }
+
+    // Retrieve the external account from Stripe
+    const externalAccount = await stripe.accounts.retrieveExternalAccount(
+      stripeAccountId,
+      externalAccountId,
+    );
+
+    // Get all external accounts to find the default one
+    const allAccounts =
+      await stripe.accounts.listExternalAccounts(stripeAccountId);
+    const defaultAccount = allAccounts.data.find(
+      (account) => account.default_for_currency === true,
+    );
+    const defaultAccountId = defaultAccount?.id;
+
+    // Add isDefault flag
+    const account = {
+      ...externalAccount,
+      isDefault: externalAccount.id === defaultAccountId,
+    };
+    return {
+      success: true,
+      account,
+    };
+  } catch (error) {
+    console.error('STRIPE ERROR:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to get external account',
+    };
+  }
 };
 
 export const deleteExternalAccount = async (
-  driver,
   stripeAccountId,
   externalAccountId,
 ) => {
-  const deletedAccount = await stripe.accounts.deleteExternalAccount(
-    stripeAccountId,
-    externalAccountId,
-  );
+  try {
+    if (!stripeAccountId) {
+      throw new Error('Stripe account ID is required');
+    }
 
-  await updateDriverPayoutMethod(driver._id, externalAccountId);
+    if (!externalAccountId) {
+      throw new Error('External account ID is required');
+    }
 
-  const account = await getDefaultAccount(stripeAccountId);
-  if (account.defaultAccountId === externalAccountId) {
-    await setDefaultAccount(stripeAccountId, null);
+    // Check if this is the default account before deletion
+    const allAccounts =
+      await stripe.accounts.listExternalAccounts(stripeAccountId);
+    const defaultAccount = allAccounts.data.find(
+      (account) => account.default_for_currency === true,
+    );
+    const isDeletingDefault = defaultAccount?.id === externalAccountId;
+
+    // Delete the external account from Stripe
+    const deletedAccount = await stripe.accounts.deleteExternalAccount(
+      stripeAccountId,
+      externalAccountId,
+    );
+
+    // If we deleted the default account, set a new default if available
+    if (isDeletingDefault) {
+      // Get remaining accounts after deletion
+      const remainingAccounts =
+        await stripe.accounts.listExternalAccounts(stripeAccountId);
+
+      if (remainingAccounts.data.length > 0) {
+        // Set the first remaining account as default
+        const newDefaultAccountId = remainingAccounts.data[0].id;
+        await stripe.accounts.updateExternalAccount(
+          stripeAccountId,
+          newDefaultAccountId,
+          { default_for_currency: true },
+        );
+      }
+    }
+
+    return {
+      success: true,
+      deletedAccount,
+    };
+  } catch (error) {
+    console.error('STRIPE ERROR:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to delete external account',
+    };
   }
-  return deletedAccount;
 };
 
 export const setDefaultExternalAccount = async (
   stripeAccountId,
   externalAccountId,
 ) => {
-  const updatedAccount = await stripe.accounts.updateExternalAccount(
-    stripeAccountId,
-    externalAccountId,
-    { default_for_currency: true },
-  );
+  try {
+    if (!stripeAccountId) {
+      throw new Error('Stripe account ID is required');
+    }
 
-  await setDefaultAccount(stripeAccountId, externalAccountId);
-  return updatedAccount;
+    if (!externalAccountId) {
+      throw new Error('External account ID is required');
+    }
+
+    // Get all external accounts to find current default
+    const allAccounts =
+      await stripe.accounts.listExternalAccounts(stripeAccountId);
+
+    // Verify the account exists
+    const accountExists = allAccounts.data.some(
+      (account) => account.id === externalAccountId,
+    );
+    if (!accountExists) {
+      throw new Error('External account not found');
+    }
+
+    // Find current default account
+    const currentDefault = allAccounts.data.find(
+      (account) => account.default_for_currency === true,
+    );
+
+    // If there's a different default account, unset it first
+    if (currentDefault && currentDefault.id !== externalAccountId) {
+      await stripe.accounts.updateExternalAccount(
+        stripeAccountId,
+        currentDefault.id,
+        { default_for_currency: false },
+      );
+    }
+
+    // Set the new account as default
+    const updatedAccount = await stripe.accounts.updateExternalAccount(
+      stripeAccountId,
+      externalAccountId,
+      { default_for_currency: true },
+    );
+
+    return {
+      success: true,
+      updatedAccount,
+    };
+  } catch (error) {
+    console.error('STRIPE ERROR:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to set default external account',
+    };
+  }
+};
+
+export const getDriverBalanceFromStripe = async (stripeAccountId) => {
+  try {
+    if (!stripeAccountId) {
+      throw new Error('Stripe account ID is required');
+    }
+
+    // Retrieve balance from Stripe connected account
+    const balance = await stripe.balance.retrieve({
+      stripeAccount: stripeAccountId,
+    });
+
+    // Format balance data - convert amounts from cents to dollars
+    const formattedBalance = {
+      available: balance.available.map((item) => ({
+        amount: item.amount / 100, // Convert from cents to dollars
+        currency: item.currency,
+        source_types: item.source_types,
+      })),
+      pending: balance.pending.map((item) => ({
+        amount: item.amount / 100, // Convert from cents to dollars
+        currency: item.currency,
+        source_types: item.source_types,
+      })),
+      connect_reserved:
+        balance.connect_reserved?.map((item) => ({
+          amount: item.amount / 100, // Convert from cents to dollars
+          currency: item.currency,
+        })) || [],
+      issuing: balance.issuing || {},
+      livemode: balance.livemode,
+    };
+
+    // Calculate total available balance (sum of all available amounts)
+    const totalAvailable = formattedBalance.available.reduce(
+      (sum, item) => sum + item.amount,
+      0,
+    );
+
+    // Calculate total pending balance (sum of all pending amounts)
+    const totalPending = formattedBalance.pending.reduce(
+      (sum, item) => sum + item.amount,
+      0,
+    );
+
+    return {
+      ...formattedBalance,
+      totalAvailable,
+      totalPending,
+      totalBalance: totalAvailable + totalPending,
+    };
+  } catch (error) {
+    console.error('STRIPE ERROR:', error);
+    throw error;
+  }
 };
 
 export const createPayoutRequest = async (driverId) => {
@@ -2547,22 +3027,50 @@ export const transferToDriverAccount = async (driver, requestId) => {
   if (!driver.stripeAccountId)
     throw new Error('Driver has no Stripe account linked');
 
+  // Check Stripe directly for default external account
+  const externalAccounts = await stripe.accounts.listExternalAccounts(
+    driver.stripeAccountId,
+  );
+
+  const defaultAccount = externalAccounts.data.find(
+    (account) => account.default_for_currency === true,
+  );
+
+  if (!defaultAccount) {
+    throw new Error(
+      'Driver has no default external account (bank account) set up',
+    );
+  }
+
+  // Verify the default external account exists and is valid
+  if (defaultAccount.deleted) {
+    throw new Error('Default external account has been deleted');
+  }
+
   const wallet = await getDriverBalance(driver._id);
   if (wallet.pendingBalance <= 10)
     throw new Error('Transfer amount must be greater than $10');
 
-  const transfer = await stripe.transfers.create({
-    amount: Math.round(wallet.pendingBalance * 100),
-    currency: 'cad',
-    destination: driver.stripeAccountId,
-    description: `Driver payout transfer`,
-  });
+  // Create payout from driver's connected account to their default external account
+  // Stripe automatically uses the default external account if destination is not specified
+  const payout = await stripe.payouts.create(
+    {
+      amount: Math.round(wallet.pendingBalance * 100),
+      currency: 'cad',
+      method: 'instant', // or 'standard' for slower payouts
+      description: `Driver payout transfer for request ${requestId}`,
+      // destination is not specified, so Stripe will use the default external account
+    },
+    {
+      stripeAccount: driver.stripeAccountId, // Payout from connected account
+    },
+  );
 
-  if (!transfer || !transfer.id) {
+  if (!payout || !payout.id || payout.status === 'failed') {
     const notify = await createAdminNotification({
       title: 'Payment Failure',
-      message: `A payment for driver has failed. Action required.`,
-      metadata: { requestId, transfer },
+      message: `A payout for driver has failed. Action required.`,
+      metadata: { requestId, payout },
       module: 'payment_management',
       type: 'ALERT',
       actionLink: `${env.FRONTEND_URL}/api/admin/payout/previous?page=1&limit=10`,
@@ -2570,11 +3078,22 @@ export const transferToDriverAccount = async (driver, requestId) => {
     if (!notify) {
       console.error('Failed to send notification');
     }
+    throw new Error(
+      `Payout failed: ${payout?.failure_message || 'Unknown error'}`,
+    );
   }
 
-  if (transfer.id) {
+  // Move funds from pending to available balance (they're now in connected account)
+  // Then decrease available balance since payout was made
+  if (payout.id) {
+    // First move pending to available
     await increaseDriverAvailableBalance(driver._id, wallet.pendingBalance);
     await decreaseDriverPendingBalance(driver._id, wallet.pendingBalance);
+    // Then decrease available since payout was made
+    await DriverWallet.findOneAndUpdate(
+      { driverId: driver._id },
+      { $inc: { availableBalance: -wallet.pendingBalance } },
+    );
   }
 
   await updateRequestedPayoutStatus(requestId);
@@ -2591,7 +3110,7 @@ export const transferToDriverAccount = async (driver, requestId) => {
     status: 'paid',
     payoutMethod: 'instant',
     payoutDate: new Date(),
-    stripeTransferId: transfer.id,
+    stripeTransferId: payout.id, // Keep same field name for backward compatibility
   });
 
   await Promise.all([
@@ -2601,10 +3120,10 @@ export const transferToDriverAccount = async (driver, requestId) => {
       category: 'INSTANT-PAYOUT',
       amount: wallet.pendingBalance,
       for: 'admin',
-      metadata: { transfer },
+      metadata: { payout, requestId },
       status: 'succeeded',
-      referenceId: transfer.id,
-      receiptUrl: transfer.id,
+      referenceId: payout.id,
+      receiptUrl: payout.id,
     }),
     createTransaction({
       driverId: driver._id,
@@ -2612,14 +3131,14 @@ export const transferToDriverAccount = async (driver, requestId) => {
       category: 'INSTANT-PAYOUT',
       amount: wallet.pendingBalance,
       for: 'driver',
-      metadata: { transfer },
+      metadata: { payout, requestId },
       status: 'succeeded',
-      referenceId: transfer.id,
-      receiptUrl: transfer.id,
+      referenceId: payout.id,
+      receiptUrl: payout.id,
     }),
   ]);
 
-  return transfer;
+  return payout;
 };
 
 export const refundCardPaymentToPassenger = async (

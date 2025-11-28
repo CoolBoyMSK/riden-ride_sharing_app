@@ -467,9 +467,9 @@ export const uploadWayBillDocument = async (
     }
 
     const imageUrl = await uploadDriverDocumentToS3(id, docType, file);
-    if (imageUrl) {
+    if (!imageUrl) {
       resp.error = true;
-      resp.error_message = 'Failed to upload document';
+      resp.error_message = 'Failed to upload waybill document';
       return resp;
     }
 

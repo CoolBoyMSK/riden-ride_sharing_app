@@ -11,6 +11,7 @@ import {
   getTransactionsController,
   createWalletSetupIntentController,
   deleteWalletController,
+  getPaymentIntentController,
 } from '../../../controllers/User/Passengers/paymentManagementController.js';
 import { registerRoute } from '../../../utils/registerRoute.js';
 
@@ -91,6 +92,13 @@ registerRoute({
   route: '/wallet/delete',
   passenger_auth_enable: true,
   delete_method: deleteWalletController,
+});
+
+registerRoute({
+  router,
+  route: '/payment/intent',
+  passenger_auth_enable: true,
+  get_method: getPaymentIntentController,
 });
 
 export default router;
