@@ -501,23 +501,23 @@ export const initSocket = (server) => {
         }
 
         const driverLocation = await getDriverLocation(ride.driverId?._id.toString());
-        // if (!driverLocation) {
-        //   return socket.emit('error', {
-        //     success: false,
-        //     objectType,
-        //     code: 'FORBIDDEN',
-        //     message: 'Driver location not found',
-        //   });
-        // }
+        if (!driverLocation) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver location not found',
+          });
+        }
+
+        console.log('Driver Location: ', driverLocation);
 
         socket.emit('share:ride_data', {
           success: true,
           objectType,
           data: {
             ride,
-            driverLocation: driverLocation
-              ? driverLocation
-              : 'Driver Location not available',
+            driverLocation: driverLocation || "Driver Location not available",
           },
           message: 'Ride data shared successfully',
         });
