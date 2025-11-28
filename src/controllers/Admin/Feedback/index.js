@@ -61,7 +61,7 @@ export const toggleFeedbackRequestController = (req, res) =>
       handler: toggleFeedbackRequest,
       validationFn: null,
       handlerParams: [req.params, req.query],
-      successMessage: 'Feedback request approved successfully',
+      successMessage: 'Feedback request toggled successfully',
     },
     req,
     res,

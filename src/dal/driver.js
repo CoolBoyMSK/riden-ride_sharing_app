@@ -512,7 +512,6 @@ export const findDriverWayBill = async (driverId) => {
   const waybillData = result[0];
 
   // Calculate passenger capacity based on vehicle type
-  console.log('Waybill Data: ', waybillData);
   if (
     waybillData.driver?.vehicle.type &&
     waybillData.driver.vehicle.type !== 'N/A' &&
