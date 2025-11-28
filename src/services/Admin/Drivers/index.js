@@ -485,7 +485,7 @@ export const uploadWayBillDocument = async (
         resp.error = true;
         resp.error_message = 'Insurer cannot be empty';
         return resp;
-      } else if (NaN(naic)) {
+      } else if (isNaN(Number(naic))) {
         resp.error = true;
         resp.error_message = 'Invalid NAIC format, Must be a numeric value';
         return resp;
@@ -498,13 +498,13 @@ export const uploadWayBillDocument = async (
         resp.error_message = 'Operator cannot be empty';
         return resp;
       } else if (
-        NaN(Date.parse(policyStartDate)) ||
-        NaN(Date.parse(policyEndDate))
+        isNaN(Date.parse(policyStartDate)) ||
+        isNaN(Date.parse(policyEndDate))
       ) {
         resp.error = true;
         resp.error_message = 'Invalid policy start or end date';
         return resp;
-      } else if (NaN(Date.parse(coveredRideStartTime))) {
+      } else if (isNaN(Date.parse(coveredRideStartTime))) {
         resp.error = true;
         resp.error_message = 'Invalid covered ride start time';
         return resp;
