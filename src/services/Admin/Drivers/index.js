@@ -481,7 +481,7 @@ export const uploadWayBillDocument = async (
     }
 
     if (docType === 'certificateOfInsurance') {
-      if (insurer) {
+      if (!insurer) {
         resp.error = true;
         resp.error_message = 'Insurer cannot be empty';
         return resp;
@@ -489,11 +489,11 @@ export const uploadWayBillDocument = async (
         resp.error = true;
         resp.error_message = 'Invalid NAIC format, Must be a numeric value';
         return resp;
-      } else if (policy) {
+      } else if (!policy) {
         resp.error = true;
         resp.error_message = 'Policy cannot be empty';
         return resp;
-      } else if (operator) {
+      } else if (!operator) {
         resp.error = true;
         resp.error_message = 'Operator cannot be empty';
         return resp;
