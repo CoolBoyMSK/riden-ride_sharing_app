@@ -24,8 +24,8 @@
     "alert-worker:staging": "cross-env NODE_ENV=staging nodemon src/workers/alertWorker.js",
     "alert-worker:production": "cross-env NODE_ENV=production nodemon src/workers/alertWorker.js",
     "scheduled-worker": "node src/scheduled/workers/worker-start.js",
-    "scheduled-worker:staging": "cross-env NODE_ENV=staging nodemon node src/scheduled/workers/worker-start.js",
-    "scheduled-worker:production": "cross-env NODE_ENV=production nodemon node src/scheduled/workers/worker-start.js",
+    "scheduled-worker:staging": "cross-env NODE_ENV=staging nodemon src/scheduled/workers/worker-start.js",
+    "scheduled-worker:production": "cross-env NODE_ENV=production nodemon src/scheduled/workers/worker-start.js",
     "sms-worker": "node src/workers/smsWorker.js",
     "sms-worker:staging": "cross-env NODE_ENV=staging nodemon node src/workers/smsWorker.js",
     "sms-worker:production": "cross-env NODE_ENV=production nodemon node src/workers/smsWorker.js"

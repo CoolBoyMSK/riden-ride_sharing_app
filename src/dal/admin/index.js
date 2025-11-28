@@ -20,6 +20,7 @@ import firebaseAdmin from '../../config/firebaseAdmin.js';
 import env from '../../config/envConfig.js';
 import { notifyUser } from '../notification.js';
 import { getDriverLocation } from '../ride.js';
+import { emitToUser } from '../../realtime/socket.js';
 
 const BATCH_SIZE = Number(env.BATCH_SIZE || 500);
 const messaging = firebaseAdmin.messaging();
@@ -797,13 +798,16 @@ export const assignDriverToScheduledRide = async ({ rideId, driverId }) => {
     );
   }
 
-  // Find the driver
+  // Find the driver with userId populated
   const driver = await Driver.findById(driverId)
     .populate({
       path: 'userId',
-      select: 'name email phoneNumber',
+      select: 'name email phoneNumber _id',
     })
     .lean();
+
+  // Also fetch driver without lean to ensure we can get userId if populate fails
+  const driverDoc = await Driver.findById(driverId).select('userId').lean();
 
   if (!driver) {
     throw new Error('Driver not found');
@@ -864,6 +868,174 @@ export const assignDriverToScheduledRide = async ({ rideId, driverId }) => {
 
   if (!updatedRide) {
     throw new Error('Failed to update ride with driver assignment');
+  }
+
+  // Format scheduled time for notification
+  const scheduledTime = new Date(updatedRide.scheduledTime);
+  const scheduledTimeFormatted = scheduledTime.toLocaleString('en-US', {
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
+  // Get driver userId - extract from driver object (which is populated)
+  // When using .lean() with .populate(), userId can be an object with _id or just an ObjectId
+  let driverUserId = null;
+
+  // First try: from populated driver object
+  if (driver.userId) {
+    // If userId is an object (populated), get _id
+    if (typeof driver.userId === 'object' && driver.userId._id) {
+      driverUserId = driver.userId._id.toString();
+    }
+    // If userId is already an ObjectId or string
+    else if (driver.userId.toString) {
+      driverUserId = driver.userId.toString();
+    }
+    // Fallback: try to use it directly
+    else {
+      driverUserId = driver.userId;
+    }
+  }
+
+  // Second try: from driverDoc (non-populated, just the userId field)
+  if (
+    (!driverUserId || !mongoose.Types.ObjectId.isValid(driverUserId)) &&
+    driverDoc?.userId
+  ) {
+    if (driverDoc.userId.toString) {
+      driverUserId = driverDoc.userId.toString();
+    } else {
+      driverUserId = driverDoc.userId;
+    }
+  }
+
+  // Third try: from updatedRide if not found in driver
+  if (
+    (!driverUserId || !mongoose.Types.ObjectId.isValid(driverUserId)) &&
+    updatedRide.driverId?.userId
+  ) {
+    if (
+      typeof updatedRide.driverId.userId === 'object' &&
+      updatedRide.driverId.userId._id
+    ) {
+      driverUserId = updatedRide.driverId.userId._id.toString();
+    } else if (updatedRide.driverId.userId.toString) {
+      driverUserId = updatedRide.driverId.userId.toString();
+    } else {
+      driverUserId = updatedRide.driverId.userId;
+    }
+  }
+
+  console.log('🔍 Driver notification debug:', {
+    driverId: driverId.toString(),
+    driverUserIdRaw: driver.userId,
+    driverUserIdType: typeof driver.userId,
+    driverUserIdIsObject: driver.userId && typeof driver.userId === 'object',
+    driverUserIdId: driver.userId?._id,
+    extractedDriverUserId: driverUserId,
+    isValidObjectId:
+      driverUserId && mongoose.Types.ObjectId.isValid(driverUserId),
+  });
+
+  if (!driverUserId || !mongoose.Types.ObjectId.isValid(driverUserId)) {
+    console.error('❌ Failed to extract valid driver userId for notification', {
+      driverId: driverId.toString(),
+      driver: {
+        _id: driver._id?.toString(),
+        userId: driver.userId,
+        userIdType: typeof driver.userId,
+        userIdStringified: JSON.stringify(driver.userId),
+      },
+      updatedRideDriver: {
+        driverId: updatedRide.driverId?._id?.toString(),
+        userId: updatedRide.driverId?.userId,
+      },
+      extractedDriverUserId: driverUserId,
+    });
+    throw new Error('Failed to extract valid driver userId for notification');
+  }
+
+  const passengerName =
+    updatedRide.bookedFor === 'SOMEONE'
+      ? updatedRide.bookedForName
+      : updatedRide.passengerId?.userId?.name || 'Passenger';
+
+  try {
+    // Send push notification
+    console.log('📤 Sending notification to driver:', {
+      driverUserId,
+      rideId: updatedRide._id.toString(),
+      passengerName,
+    });
+
+    const notificationResult = await notifyUser({
+      userId: driverUserId,
+      title: 'Scheduled Ride Assigned',
+      message: `You have been assigned to a scheduled ride for ${passengerName}. Scheduled time: ${scheduledTimeFormatted}`,
+      module: 'ride',
+      metadata: updatedRide,
+      type: 'ALERT',
+      actionLink: 'scheduled_ride_assigned',
+    });
+
+    console.log('📬 Notification result:', {
+      success: notificationResult?.success,
+      message: notificationResult?.message,
+      hasDbNotification: !!notificationResult?.dbNotification,
+      hasPushNotification: !!notificationResult?.pushNotification,
+    });
+
+    if (!notificationResult || !notificationResult.success) {
+      console.error('❌ Failed to send notification to driver', {
+        driverUserId,
+        rideId: updatedRide._id.toString(),
+        result: notificationResult,
+      });
+    } else {
+      console.log('✅ Notification sent successfully to driver', {
+        driverUserId,
+        rideId: updatedRide._id.toString(),
+        dbNotification: notificationResult.dbNotification?._id,
+        pushSent: !!notificationResult.pushNotification,
+      });
+    }
+
+    // Send real-time socket notification
+    try {
+      emitToUser(driverUserId, 'ride:driver_assigned_to_scheduled_ride', {
+        success: true,
+        objectType: 'scheduled-ride-assigned',
+        data: {
+          ride: updatedRide,
+          scheduledTime: scheduledTimeFormatted,
+          passengerName,
+        },
+        message: `You have been assigned to a scheduled ride for ${passengerName}`,
+      });
+
+      console.log('✅ Socket notification sent to driver', {
+        driverUserId,
+        rideId: updatedRide._id.toString(),
+      });
+    } catch (socketError) {
+      console.error('❌ Error sending socket notification to driver', {
+        driverUserId,
+        rideId: updatedRide._id.toString(),
+        error: socketError.message,
+      });
+    }
+  } catch (notificationError) {
+    console.error('❌ Error sending notification to driver', {
+      driverUserId,
+      rideId: updatedRide._id.toString(),
+      error: notificationError.message,
+      stack: notificationError.stack,
+    });
+    // Don't throw error, just log it - ride assignment should still succeed
   }
 
   return updatedRide;

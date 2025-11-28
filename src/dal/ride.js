@@ -162,7 +162,6 @@ export const findActiveRideByPassenger = async (passengerId) => {
         'RIDE_IN_PROGRESS',
       ],
     },
-    isScheduledRide: false,
   })
     .populate('driverId')
     .lean();

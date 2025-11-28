@@ -7,9 +7,9 @@ import logger from '../lib/logger.js';
 
 (async () => {
   await connectDB();
-  await installWeeklyScheduler();
-  startMainProcessor();
-  startDriverProcessor();
+  // await installWeeklyScheduler();
+  // startMainProcessor();
+  // startDriverProcessor();
   startScheduledRideProcessor();
   logger.info('Worker service started');
 })();

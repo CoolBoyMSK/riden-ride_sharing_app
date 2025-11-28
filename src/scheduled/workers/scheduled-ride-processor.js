@@ -12,6 +12,7 @@ import {
   cancelPaymentHold,
   partialRefundPaymentHold,
 } from '../../dal/stripe.js';
+import { startProgressiveDriverSearch } from '../../dal/driver.js';
 
 const concurrency = 5; // Process multiple scheduled rides concurrently
 
@@ -91,19 +92,64 @@ export const startScheduledRideProcessor = () => {
           return { status: 'skipped', reason: 'ride_not_found' };
         }
 
-        // Check if ride is still scheduled (might have been cancelled)
+        logger.info('Processing scheduled ride job', {
+          rideId,
+          jobType,
+          rideStatus: ride.status,
+          isScheduledRide: ride.isScheduledRide,
+          scheduledTime: ride.scheduledTime,
+        });
+
+        // Check if ride is still scheduled based on job type
+        let shouldProcess = false;
+        switch (jobType) {
+          case 'send_notification':
+            // Only process if ride is SCHEDULED or DRIVER_ASSIGNED
+            shouldProcess =
+              ride.status === 'SCHEDULED' || ride.status === 'DRIVER_ASSIGNED';
+            break;
+          case 'activate_ride':
+            // Only process if ride is SCHEDULED or DRIVER_ASSIGNED
+            shouldProcess =
+              ride.status === 'SCHEDULED' || ride.status === 'DRIVER_ASSIGNED';
+            break;
+          case 'cancel_if_no_response':
+            // Process if ride is in any of these states
+            shouldProcess =
+              ride.status === 'SCHEDULED' ||
+              ride.status === 'DRIVER_ASSIGNED' ||
+              ride.status === 'DRIVER_ARRIVING' ||
+              ride.status === 'DRIVER_ARRIVED';
+            break;
+          default:
+            logger.warn('Unknown job type', { jobType, rideId });
+            return { status: 'skipped', reason: 'unknown_job_type' };
+        }
+
+        // Skip if ride has been cancelled or completed
         if (
-          ride.status !== 'SCHEDULED' &&
-          ride.status !== 'DRIVER_ASSIGNED' &&
-          ride.status !== 'CANCELLED_BY_SYSTEM' &&
-          ride.status !== 'CANCELLED_BY_PASSENGER' &&
-          ride.status !== 'CANCELLED_BY_DRIVER'
+          ride.status === 'CANCELLED_BY_SYSTEM' ||
+          ride.status === 'CANCELLED_BY_PASSENGER' ||
+          ride.status === 'CANCELLED_BY_DRIVER' ||
+          ride.status === 'RIDE_COMPLETED' ||
+          ride.status === 'RIDE_STARTED' ||
+          ride.status === 'RIDE_IN_PROGRESS'
         ) {
-          logger.info('Ride is no longer scheduled', {
+          logger.info('Ride already processed or cancelled', {
             rideId,
             currentStatus: ride.status,
+            jobType,
           });
-          return { status: 'skipped', reason: 'ride_not_scheduled' };
+          return { status: 'skipped', reason: 'ride_already_processed' };
+        }
+
+        if (!shouldProcess) {
+          logger.info('Ride status does not allow processing this job', {
+            rideId,
+            currentStatus: ride.status,
+            jobType,
+          });
+          return { status: 'skipped', reason: 'invalid_status_for_job' };
         }
 
         switch (jobType) {
@@ -211,65 +257,75 @@ const handleScheduledRideNotification = async (ride) => {
 // Activate scheduled ride: change status to REQUESTED and start driver search
 const handleScheduledRide = async (ride) => {
   try {
-    if (!ride.driverId) {
-      await cancelRideWithPaymentHold(
-        ride._id,
-        ride.paymentIntentId,
-        'No driver assigned to the scheduled ride',
-        'No Driver Assigned',
-        'No driver assigned to the ride you have scheduled. Please try again later.',
-        ride.passengerId?.userId,
+    // Check if passenger is available (not on another active ride)
+    // Only check if bookedFor is not SOMEONE (since SOMEONE rides don't check passenger availability)
+    if (ride.bookedFor !== 'SOMEONE' && ride.passengerId) {
+      const activeRide = await findActiveRideByPassenger(
+        ride.passengerId._id || ride.passengerId,
       );
-      throw new Error('No driver assigned to the ride');
+      // Check if there's an active ride that's not this scheduled ride
+      if (
+        activeRide &&
+        activeRide._id.toString() !== ride._id.toString() &&
+        !activeRide.isScheduledRide
+      ) {
+        await cancelRideWithPaymentHold(
+          ride._id,
+          ride.paymentIntentId,
+          'Passenger is already on another active ride',
+          'Passenger Not Available',
+          'Your scheduled ride has been cancelled as you are currently on another active ride. Full refund has been processed.',
+          ride.passengerId?.userId,
+        );
+        throw new Error('Passenger is already on another active ride');
+      }
     }
 
-    if (ride.driverId.status !== 'online') {
-      await cancelRideWithPaymentHold(
-        ride._id,
-        ride.paymentIntentId,
-        'The assigned driver is not available to accept the ride',
-        'No Driver Available',
-        'The assigned driver is not available to accept the ride. Please try again later.',
-        ride.passengerId?.userId,
-      );
-      throw new Error(
-        'The assigned driver is not available to accept the ride',
-      );
-    }
-
-    // if (ride.passengerId) {
-    //   await notifyUser({
-    //     userId: ride.passengerId?.userId,
-    //     title: 'Passenger Not Available',
-    //     message: `The passenger is already on another ride. Please try again later.`,
-    //     module: 'ride',
-    //     metadata: ride,
-    //     type: 'ALERT',
-    //   });
-    //   throw new Error('The passenger is already on another ride');
-    // }
-
-    // Update ride status to DRIVER_ARRIVING
+    // Update ride status to REQUESTED to start driver search
     const updatedRide = await updateRideById(ride._id, {
-      status: 'DRIVER_ARRIVING',
-      driverArrivingAt: new Date(),
+      status: 'REQUESTED',
+      requestedAt: new Date(),
     });
 
     if (!updatedRide) {
       throw new Error('Failed to update ride status');
     }
 
-    // Notify passenger that ride is now active
+    // Start driver search (non-blocking)
+    startProgressiveDriverSearch(updatedRide).catch((error) => {
+      logger.error('Error starting driver search for scheduled ride', {
+        rideId: ride._id,
+        error: error.message,
+      });
+      // If driver search fails, cancel the ride
+      cancelRideWithPaymentHold(
+        ride._id,
+        ride.paymentIntentId,
+        'Failed to start driver search',
+        'Ride Activation Failed',
+        'Your scheduled ride could not be activated due to a technical issue. Full refund has been processed.',
+        ride.passengerId?.userId,
+      ).catch((cancelError) => {
+        logger.error('Error cancelling ride after search failure', {
+          rideId: ride._id,
+          error: cancelError.message,
+        });
+      });
+    });
+
+    // Notify passenger that ride is now active and searching for drivers
     await notifyUser({
       userId: ride.passengerId?.userId,
       title: 'Scheduled Ride Activated',
       message:
-        'Your scheduled ride is now active, the driver is on the way to pick you up.',
+        'Your scheduled ride is now active. We are searching for available drivers near you.',
       module: 'ride',
       metadata: updatedRide,
     });
 
-    logger.info('Scheduled ride activated', { rideId: ride._id });
+    logger.info('Scheduled ride activated and driver search started', {
+      rideId: ride._id,
+    });
   } catch (error) {
     logger.error('Error activating scheduled ride', {
       rideId: ride._id,
