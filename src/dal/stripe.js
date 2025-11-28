@@ -609,16 +609,16 @@ export const setDefaultPassengerCard = async (
 };
 
 export const getPassengerPaymentIntent = async (
-  stripeCustomerId,
+  // stripeCustomerId,
   paymentIntentId,
 ) => {
   try {
-    if (!stripeCustomerId) {
-      return {
-        success: false,
-        error: 'Stripe customer ID is required',
-      };
-    }
+    // if (!stripeCustomerId) {
+    //   return {
+    //     success: false,
+    //     error: 'Stripe customer ID is required',
+    //   };
+    // }
 
     if (!paymentIntentId) {
       return {
@@ -631,12 +631,12 @@ export const getPassengerPaymentIntent = async (
     const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
 
     // Verify the payment intent belongs to this customer
-    if (paymentIntent.customer !== stripeCustomerId) {
-      return {
-        success: false,
-        error: 'Payment intent does not belong to this customer',
-      };
-    }
+    // if (paymentIntent.customer !== stripeCustomerId) {
+    //   return {
+    //     success: false,
+    //     error: 'Payment intent does not belong to this customer',
+    //   };
+    // }
 
     // Format the payment intent data for response
     return {
@@ -941,11 +941,10 @@ export const holdRidePayment = async (
       paymentMethodType: paymentMethodType,
     };
   } catch (error) {
-    console.error('Error holding ride payment:', error);
+    console.error('STRIPE ERROR: ', error);
     return {
       success: false,
       error: error.message || 'Failed to authorize payment',
-      stripeError: error.type || null,
     };
   }
 };
@@ -965,22 +964,82 @@ export const cancelPaymentHold = async (paymentIntentId) => {
       status: cancelledIntent.status,
     };
   } catch (error) {
-    console.error('Error cancelling payment hold:', error);
-    // If payment intent is already captured or cancelled, that's okay
-    if (
-      error.code === 'payment_intent_unexpected_state' ||
-      error.message.includes('already been canceled') ||
-      error.message.includes('already been captured')
-    ) {
-      return {
-        success: true,
-        message: 'Payment hold already released',
-      };
-    }
+    console.error('STRIPE ERROR: ', error);
     return {
       success: false,
       error: error.message || 'Failed to cancel payment hold',
-      stripeError: error.type || null,
+    };
+  }
+};
+
+export const partialRefundPaymentHold = async (
+  paymentIntentId,
+  estimatedFare,
+  rideId,
+) => {
+  try {
+    if (!paymentIntentId) {
+      throw new Error('Payment intent ID is required');
+    }
+
+    if (!estimatedFare || estimatedFare <= 0) {
+      throw new Error('Invalid estimated fare amount');
+    }
+
+    // Retrieve payment intent to check status
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+
+    if (paymentIntent.status !== 'requires_capture') {
+      throw new Error(
+        `Payment intent is not in requires_capture state. Current status: ${paymentIntent.status}`,
+      );
+    }
+
+    // Calculate amounts
+    const fullAmount = Math.round(estimatedFare * 100); // Convert to cents
+    const refundAmount = Math.round(estimatedFare * 0.9 * 100); // 90% refund
+    const cancellationFee = Math.round(estimatedFare * 0.1 * 100); // 10% cancellation fee
+
+    // Capture the full payment
+    const capturedPayment = await stripe.paymentIntents.capture(
+      paymentIntentId,
+      {
+        amount_to_capture: fullAmount,
+      },
+    );
+
+    if (capturedPayment.status !== 'succeeded') {
+      throw new Error(
+        `Payment capture failed. Status: ${capturedPayment.status}`,
+      );
+    }
+
+    // Refund 90% back to passenger
+    const refund = await stripe.refunds.create({
+      payment_intent: paymentIntentId,
+      amount: refundAmount,
+      reason: 'requested_by_customer',
+      metadata: {
+        rideId: rideId?.toString() || '',
+        cancellationFee: (cancellationFee / 100).toString(),
+        refundType: 'PARTIAL_CANCELLATION_FEE',
+      },
+    });
+
+    return {
+      success: true,
+      paymentIntentId: capturedPayment.id,
+      refundId: refund.id,
+      refundAmount: refundAmount / 100,
+      cancellationFee: cancellationFee / 100,
+      totalAmount: estimatedFare,
+      status: refund.status,
+    };
+  } catch (error) {
+    console.error('STRIPE ERROR: ', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to process partial refund',
     };
   }
 };
@@ -1804,7 +1863,6 @@ export const passengerPaysDriver = async (
   }
 };
 
-// Process driver payout after payment is already captured (for held payments)
 export const processDriverPayoutAfterCapture = async (
   passenger,
   driver,

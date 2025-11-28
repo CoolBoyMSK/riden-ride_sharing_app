@@ -749,6 +749,11 @@ const addScheduledRideToQueue = async (ride) => {
     );
 
     // Job 3: Cancel ride if no response after scheduled time + 5 minutes
+    // Cancellation logic:
+    // - If passenger is on another ride (and bookedFor is not SOMEONE): Partial refund (90% refund, 10% cancellation fee)
+    // - If driver is not ready: Full refund (cancel payment hold)
+    // - If passenger is not ready (but driver is ready): Partial refund (90% refund, 10% cancellation fee)
+    // - If both not ready: Full refund (cancel payment hold)
     await scheduledRideQueue.add(
       'cancel-if-no-response',
       {

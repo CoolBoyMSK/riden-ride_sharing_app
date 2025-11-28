@@ -1,6 +1,4 @@
-import {
-  findActivePromoCodes,
-} from '../../../dal/promo_code.js';
+import { findActivePromoCodes } from '../../../dal/promo_code.js';
 
 const isNightTime = (nightTimeConfig, scheduledTime = null) => {
   const now = scheduledTime ? new Date(scheduledTime) : new Date();
@@ -34,6 +32,9 @@ export const calculateEstimatedFare = async (
       throw new Error(`Fare configuration not found for car type: ${carType}`);
     }
 
+    // Helper function to round to 2 decimal places
+    const roundToTwoDecimals = (value) => Math.round((value || 0) * 100) / 100;
+
     // Find the car type configuration within dailyFares
     const carTypeFare = fareConfig.dailyFares.find(
       (fare) => fare.carType === carType,
@@ -42,25 +43,32 @@ export const calculateEstimatedFare = async (
       throw new Error(`Fare configuration not found for ${carType} car type.`);
     }
 
-    // Calculate base components (same calculations as before)
-    const rideSetupFee = carTypeFare.rideSetupFee;
-    const baseFare = carTypeFare.baseFare;
-    const surgeAmount = baseFare * surgeMultiplier - baseFare;
-    const distanceFare = distance * carTypeFare.perKmFare;
-    const timeFare = duration ? duration * carTypeFare.perMinuteFare : 0;
-    const nightCharge = isNightTime(carTypeFare.nightTime, scheduledTime)
-      ? carTypeFare.nightCharge
-      : 0;
+    // Calculate base components and round to 2 decimals
+    const rideSetupFee = roundToTwoDecimals(carTypeFare.rideSetupFee);
+    const baseFare = roundToTwoDecimals(carTypeFare.baseFare);
+    const surgeAmount = roundToTwoDecimals(
+      baseFare * surgeMultiplier - baseFare,
+    );
+    const distanceFare = roundToTwoDecimals(distance * carTypeFare.perKmFare);
+    const timeFare = roundToTwoDecimals(
+      duration ? duration * carTypeFare.perMinuteFare : 0,
+    );
+    const nightCharge = roundToTwoDecimals(
+      isNightTime(carTypeFare.nightTime, scheduledTime)
+        ? carTypeFare.nightCharge
+        : 0,
+    );
 
-    // Calculate subtotal (same calculation as before)
-    const subtotal =
+    // Calculate subtotal and round to 2 decimals
+    const subtotal = roundToTwoDecimals(
       rideSetupFee +
-      baseFare * surgeMultiplier +
-      distanceFare +
-      timeFare +
-      nightCharge;
+        baseFare * surgeMultiplier +
+        distanceFare +
+        timeFare +
+        nightCharge,
+    );
 
-    // Return the exact same structure as before
+    // Return the exact same structure as before with all amounts rounded
     return {
       success: true,
       fareBreakdown: {
@@ -102,6 +110,9 @@ export const calculateActualFare = async (rideData) => {
       fareConfig,
     } = rideData;
 
+    // Helper function to round to 2 decimal places
+    const roundToTwoDecimals = (value) => Math.round((value || 0) * 100) / 100;
+
     // Get fare configuration
     if (!fareConfig) {
       throw new Error(`Fare configuration not found for car type: ${carType}`);
@@ -110,39 +121,50 @@ export const calculateActualFare = async (rideData) => {
     // Determine the day based on ride start time
     const rideDate = new Date(rideStartedAt);
 
-    // Calculate components
-    const rideSetupFee = fareConfig.rideSetupFee;
-    const baseFare = fareConfig.baseFare;
-    const surgeAmount = baseFare * surgeMultiplier - baseFare;
-    const distanceFare = actualDistance * fareConfig.perKmFare;
-    const timeFare = actualDuration * fareConfig.perMinuteFare;
+    // Calculate components and round to 2 decimals
+    const rideSetupFee = roundToTwoDecimals(fareConfig.rideSetupFee);
+    const baseFare = roundToTwoDecimals(fareConfig.baseFare);
+    const surgeAmount = roundToTwoDecimals(
+      baseFare * surgeMultiplier - baseFare,
+    );
+    const distanceFare = roundToTwoDecimals(
+      actualDistance * fareConfig.perKmFare,
+    );
+    const timeFare = roundToTwoDecimals(
+      actualDuration * fareConfig.perMinuteFare,
+    );
 
     // Night charge based on ride start time
-    const nightCharge = isNightTimeForDate(rideDate, fareConfig.nightTime)
-      ? fareConfig.nightCharge * actualDistance
-      : 0;
+    const nightCharge = roundToTwoDecimals(
+      isNightTimeForDate(rideDate, fareConfig.nightTime)
+        ? fareConfig.nightCharge * actualDistance
+        : 0,
+    );
 
     // Waiting charge
-    const waitingCharge =
+    const waitingCharge = roundToTwoDecimals(
       waitingTime > fareConfig.waiting.seconds
         ? ((waitingTime - fareConfig.waiting.seconds) / 60) *
-          fareConfig.waiting.charge
-        : 0;
+            fareConfig.waiting.charge
+        : 0,
+    );
 
-    const discount =
+    const discount = roundToTwoDecimals(
       actualDuration <= fareConfig.discount?.minutes &&
-      actualDistance <= fareConfig.discount?.distance
+        actualDistance <= fareConfig.discount?.distance
         ? fareConfig.discount?.charge
-        : 0;
+        : 0,
+    );
 
-    const subtotal =
+    const subtotal = roundToTwoDecimals(
       rideSetupFee +
-      baseFare * surgeMultiplier +
-      distanceFare +
-      timeFare +
-      nightCharge +
-      waitingCharge -
-      discount;
+        baseFare * surgeMultiplier +
+        distanceFare +
+        timeFare +
+        nightCharge +
+        waitingCharge -
+        discount,
+    );
 
     console.log('Subtotal before promo discount: ', subtotal);
     console.log(typeof subtotal);
@@ -155,7 +177,9 @@ export const calculateActualFare = async (rideData) => {
     if (activePromoCodes.length > 0) {
       const validPromo = activePromoCodes[0];
       if (validPromo) {
-        promoDiscount = (subtotal * validPromo.discount) / 100;
+        promoDiscount = roundToTwoDecimals(
+          (subtotal * validPromo.discount) / 100,
+        );
         promoDetails = validPromo;
       }
     }
@@ -177,7 +201,9 @@ export const calculateActualFare = async (rideData) => {
     //   }
     // }
 
-    const finalAmount = Math.max(0, subtotal - promoDiscount);
+    const finalAmount = roundToTwoDecimals(
+      Math.max(0, subtotal - promoDiscount),
+    );
 
     return {
       success: true,
@@ -192,10 +218,10 @@ export const calculateActualFare = async (rideData) => {
         subtotal,
         promoDiscount,
         surgeMultiplier,
-        surgeAmount,
+        surgeAmount: surgeAmount > 0 ? surgeAmount : 0,
         finalAmount,
       },
-      actualFare: parseFloat(finalAmount),
+      actualFare: finalAmount,
       promoDetails,
     };
   } catch (error) {

@@ -1,11 +1,77 @@
 import { Worker } from 'bullmq';
 import { scheduledRideQueue } from '../queues/index.js';
 import logger from '../lib/logger.js';
-import { findRideById, updateRideById } from '../../dal/ride.js';
+import {
+  findRideById,
+  updateRideById,
+  findActiveRideByPassenger,
+} from '../../dal/ride.js';
 import { notifyUser } from '../../dal/notification.js';
 import { emitToUser } from '../../realtime/socket.js';
+import {
+  cancelPaymentHold,
+  partialRefundPaymentHold,
+} from '../../dal/stripe.js';
 
 const concurrency = 5; // Process multiple scheduled rides concurrently
+
+// Helper function to cancel payment hold and update ride status
+const cancelRideWithPaymentHold = async (
+  rideId,
+  paymentIntentId,
+  cancellationReason,
+  notificationTitle,
+  notificationMessage,
+  passengerId,
+) => {
+  // Cancel payment hold if payment intent exists
+  if (paymentIntentId) {
+    try {
+      const cancelResult = await cancelPaymentHold(paymentIntentId);
+      if (!cancelResult.success) {
+        logger.error('Failed to cancel payment hold for scheduled ride', {
+          rideId,
+          paymentIntentId,
+          error: cancelResult.error,
+        });
+      } else {
+        logger.info('Payment hold cancelled for scheduled ride', {
+          rideId,
+          paymentIntentId,
+        });
+      }
+    } catch (cancelError) {
+      logger.error('Error cancelling payment hold for scheduled ride', {
+        rideId,
+        paymentIntentId,
+        error: cancelError.message,
+      });
+    }
+  }
+
+  // Update ride status to cancelled
+  const cancelledRide = await updateRideById(rideId, {
+    status: 'CANCELLED_BY_SYSTEM',
+    cancelledBy: 'system',
+    cancellationReason,
+    paymentStatus: 'CANCELLED',
+    cancelledAt: new Date(),
+  });
+
+  // Notify passenger if passengerId is provided
+  if (passengerId) {
+    await notifyUser({
+      userId: passengerId,
+      title: notificationTitle,
+      message: notificationMessage,
+      module: 'ride',
+      metadata: cancelledRide,
+      type: 'ALERT',
+    });
+  }
+
+  return cancelledRide;
+};
 
 export const startScheduledRideProcessor = () => {
   const worker = new Worker(
@@ -146,26 +212,26 @@ const handleScheduledRideNotification = async (ride) => {
 const handleScheduledRide = async (ride) => {
   try {
     if (!ride.driverId) {
-      await notifyUser({
-        userId: ride.passengerId?.userId,
-        title: 'No Driver Assigned',
-        message: `No driver assigned to the ride you have scheduled. Please try again later.`,
-        module: 'ride',
-        metadata: ride,
-        type: 'ALERT',
-      });
+      await cancelRideWithPaymentHold(
+        ride._id,
+        ride.paymentIntentId,
+        'No driver assigned to the scheduled ride',
+        'No Driver Assigned',
+        'No driver assigned to the ride you have scheduled. Please try again later.',
+        ride.passengerId?.userId,
+      );
       throw new Error('No driver assigned to the ride');
     }
 
     if (ride.driverId.status !== 'online') {
-      await notifyUser({
-        userId: ride.passengerId?.userId,
-        title: 'No Driver Available',
-        message: `The assigned driver is not available to accept the ride. Please try again later.`,
-        module: 'ride',
-        metadata: ride,
-        type: 'ALERT',
-      });
+      await cancelRideWithPaymentHold(
+        ride._id,
+        ride.paymentIntentId,
+        'The assigned driver is not available to accept the ride',
+        'No Driver Available',
+        'The assigned driver is not available to accept the ride. Please try again later.',
+        ride.passengerId?.userId,
+      );
       throw new Error(
         'The assigned driver is not available to accept the ride',
       );
@@ -213,6 +279,18 @@ const handleScheduledRide = async (ride) => {
   }
 };
 
+// Helper function to check if driver is ready
+const isDriverReady = (ride) => {
+  // Driver is ready if they have arrived or are arriving
+  return !!(ride.driverArrivedAt || ride.driverArrivingAt);
+};
+
+// Helper function to check if passenger is ready
+const isPassengerReady = (ride) => {
+  // Passenger is ready if they've confirmed readiness or ride has started
+  return !!(ride.passengerReadyAt || ride.rideStartedAt);
+};
+
 // Cancel scheduled ride if no response from driver and passenger after scheduled time + 5 minutes
 const handleCancelScheduledRideIfNoResponse = async (ride) => {
   try {
@@ -232,9 +310,7 @@ const handleCancelScheduledRideIfNoResponse = async (ride) => {
       currentRide.status === 'CANCELLED_BY_SYSTEM' ||
       currentRide.status === 'RIDE_STARTED' ||
       currentRide.status === 'RIDE_IN_PROGRESS' ||
-      currentRide.status === 'RIDE_COMPLETED' ||
-      currentRide.status === 'DRIVER_ARRIVING' ||
-      currentRide.status === 'DRIVER_ARRIVED'
+      currentRide.status === 'RIDE_COMPLETED'
     ) {
       logger.info('Ride already processed, skipping cancellation', {
         rideId: ride._id,
@@ -245,7 +321,9 @@ const handleCancelScheduledRideIfNoResponse = async (ride) => {
 
     if (
       currentRide.status !== 'SCHEDULED' &&
-      currentRide.status !== 'DRIVER_ASSIGNED'
+      currentRide.status !== 'DRIVER_ASSIGNED' &&
+      currentRide.status !== 'DRIVER_ARRIVING' &&
+      currentRide.status !== 'DRIVER_ARRIVED'
     ) {
       logger.info('Ride status changed, skipping cancellation', {
         rideId: ride._id,
@@ -254,28 +332,168 @@ const handleCancelScheduledRideIfNoResponse = async (ride) => {
       return;
     }
 
-    // Cancel the ride
-    const cancelledRide = await updateRideById(ride._id, {
+    // Check if passenger is on another ride (only if bookedFor is not SOMEONE)
+    let passengerOnAnotherRide = false;
+    if (currentRide.bookedFor !== 'SOMEONE' && currentRide.passengerId) {
+      const activeRide = await findActiveRideByPassenger(
+        currentRide.passengerId._id || currentRide.passengerId,
+      );
+      // Check if there's an active ride that's not this scheduled ride
+      if (
+        activeRide &&
+        activeRide._id.toString() !== currentRide._id.toString()
+      ) {
+        passengerOnAnotherRide = true;
+      }
+    }
+
+    // Check readiness
+    const driverReady = isDriverReady(currentRide);
+    const passengerReady = isPassengerReady(currentRide);
+
+    // Determine cancellation scenario
+    let cancellationReason;
+    let notificationTitle;
+    let notificationMessage;
+    let refundType = 'full'; // 'full' or 'partial'
+
+    // Priority check: If passenger is on another ride (and bookedFor is not SOMEONE), cancel with partial refund
+    if (passengerOnAnotherRide) {
+      cancellationReason =
+        'Ride cancelled automatically: Passenger is on another active ride';
+      notificationTitle = 'Scheduled Ride Cancelled - Cancellation Fee Applied';
+      notificationMessage =
+        'Your scheduled ride has been cancelled automatically as you are currently on another ride. 90% of your payment has been refunded, 10% has been retained as a cancellation fee.';
+      refundType = 'partial';
+    } else if (!driverReady && !passengerReady) {
+      // Both not ready - full refund
+      cancellationReason =
+        'Ride cancelled automatically: Both driver and passenger were not ready after scheduled time';
+      notificationTitle = 'Scheduled Ride Cancelled';
+      notificationMessage =
+        'Your scheduled ride has been cancelled automatically as both you and the driver were not ready. Full refund has been processed.';
+      refundType = 'full';
+    } else if (!driverReady && passengerReady) {
+      // Driver not ready, passenger ready - full refund
+      cancellationReason =
+        'Ride cancelled automatically: Driver was not ready after scheduled time';
+      notificationTitle = 'Scheduled Ride Cancelled';
+      notificationMessage =
+        'Your scheduled ride has been cancelled automatically as the driver was not ready. Full refund has been processed.';
+      refundType = 'full';
+    } else if (driverReady && !passengerReady) {
+      // Driver ready, passenger not ready - partial refund (90% refund, 10% cancellation fee)
+      cancellationReason =
+        'Ride cancelled automatically: Passenger was not ready after scheduled time';
+      notificationTitle = 'Scheduled Ride Cancelled - Cancellation Fee Applied';
+      notificationMessage =
+        'Your scheduled ride has been cancelled automatically as you were not ready. 90% of your payment has been refunded, 10% has been retained as a cancellation fee.';
+      refundType = 'partial';
+    } else {
+      // Both ready - shouldn't happen, but handle gracefully
+      logger.info(
+        'Both driver and passenger are ready, skipping cancellation',
+        {
+          rideId: ride._id,
+        },
+      );
+      return;
+    }
+
+    // Process payment refund based on scenario
+    if (currentRide.paymentIntentId) {
+      if (refundType === 'partial') {
+        // Partial refund: capture full, refund 90%, keep 10%
+        const estimatedFare =
+          currentRide.fareBreakdown?.estimatedFare ||
+          currentRide.fareBreakdown?.finalAmount ||
+          0;
+
+        if (estimatedFare > 0) {
+          try {
+            const partialRefundResult = await partialRefundPaymentHold(
+              currentRide.paymentIntentId,
+              estimatedFare,
+              currentRide._id,
+            );
+
+            if (!partialRefundResult.success) {
+              logger.error(
+                'Failed to process partial refund for scheduled ride',
+                {
+                  rideId: currentRide._id,
+                  paymentIntentId: currentRide.paymentIntentId,
+                  error: partialRefundResult.error,
+                },
+              );
+            } else {
+              logger.info('Partial refund processed for scheduled ride', {
+                rideId: currentRide._id,
+                refundAmount: partialRefundResult.refundAmount,
+                cancellationFee: partialRefundResult.cancellationFee,
+              });
+            }
+          } catch (partialRefundError) {
+            logger.error('Error processing partial refund for scheduled ride', {
+              rideId: currentRide._id,
+              paymentIntentId: currentRide.paymentIntentId,
+              error: partialRefundError.message,
+            });
+          }
+        }
+      } else {
+        // Full refund: cancel payment hold
+        try {
+          const cancelResult = await cancelPaymentHold(
+            currentRide.paymentIntentId,
+          );
+          if (!cancelResult.success) {
+            logger.error('Failed to cancel payment hold for scheduled ride', {
+              rideId: currentRide._id,
+              paymentIntentId: currentRide.paymentIntentId,
+              error: cancelResult.error,
+            });
+          } else {
+            logger.info('Payment hold cancelled for scheduled ride', {
+              rideId: currentRide._id,
+              paymentIntentId: currentRide.paymentIntentId,
+            });
+          }
+        } catch (cancelError) {
+          logger.error('Error cancelling payment hold for scheduled ride', {
+            rideId: currentRide._id,
+            paymentIntentId: currentRide.paymentIntentId,
+            error: cancelError.message,
+          });
+        }
+      }
+    }
+
+    // Update ride status to cancelled
+    const cancelledRide = await updateRideById(currentRide._id, {
       status: 'CANCELLED_BY_SYSTEM',
       cancelledBy: 'system',
-      cancellationReason:
-        'Ride cancelled automatically due to no response from driver and passenger after scheduled time',
+      cancellationReason,
       paymentStatus: 'CANCELLED',
       cancelledAt: new Date(),
     });
 
     // Notify passenger
     await notifyUser({
-      userId: ride.passengerId?.userId,
-      title: 'Scheduled Ride Cancelled',
-      message:
-        'Your scheduled ride has been cancelled automatically due to no response.',
+      userId: currentRide.passengerId?.userId,
+      title: notificationTitle,
+      message: notificationMessage,
       module: 'ride',
-      metadata: cancelledRide,
+      metadata: cancelledRide || currentRide,
+      type: 'ALERT',
     });
 
     logger.info('Scheduled ride cancelled due to no response', {
       rideId: ride._id,
+      driverReady,
+      passengerReady,
+      passengerOnAnotherRide,
+      refundType,
     });
   } catch (error) {
     logger.error('Error cancelling scheduled ride', {

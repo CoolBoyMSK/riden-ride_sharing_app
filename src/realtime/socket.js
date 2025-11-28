@@ -3307,6 +3307,112 @@ export const initSocket = (server) => {
       }
     });
 
+    socket.on('ride:passenger_ready', async ({ rideId }) => {
+      const objectType = 'passenger-ready';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
+      try {
+        const passenger = await findPassengerByUserId(userId);
+        if (!passenger) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'NOT_FOUND',
+            message: 'Passenger not found',
+          });
+        }
+
+        const ride = await findRideById(rideId);
+        const passengerId = ride?.passengerId?._id;
+        if (!ride) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'NOT_FOUND',
+            message: 'Ride not found',
+          });
+        } else if (passengerId.toString() !== passenger._id.toString()) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Cannot mark ready for a ride not booked by you',
+          });
+        } else if (
+          ride.status === 'CANCELLED_BY_PASSENGER' ||
+          ride.status === 'CANCELLED_BY_DRIVER' ||
+          ride.status === 'CANCELLED_BY_SYSTEM' ||
+          ride.status === 'RIDE_COMPLETED'
+        ) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: `Cannot mark ready. Current ride status: ${ride.status}`,
+          });
+        } else if (ride.passengerReadyAt) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'You have already marked yourself as ready',
+          });
+        }
+
+        const updatedRide = await updateRideById(ride._id, {
+          passengerReadyAt: new Date(),
+        });
+
+        if (!updatedRide) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Failed to update ride status',
+          });
+        }
+
+        // Notify driver and others in the ride room
+        socket.join(`ride:${ride._id}`);
+        io.to(`ride:${ride._id}`).emit('ride:passenger_ready', {
+          success: true,
+          objectType,
+          data: updatedRide,
+          message: 'Passenger marked as ready',
+        });
+
+        // Notify driver specifically
+        if (ride.driverId?.userId) {
+          await notifyUser({
+            userId: ride.driverId.userId,
+            title: 'Passenger Ready',
+            message:
+              'Your passenger has marked themselves as ready for the ride',
+            module: 'ride',
+            metadata: updatedRide,
+            type: 'ALERT',
+            actionLink: 'ride:passenger_ready',
+            storeInDB: false,
+          });
+        }
+      } catch (error) {
+        console.error(`SOCKET ERROR: ${error}`);
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: `${error.code || 'SOCKET_ERROR'}`,
+          message: `SOCKET ERROR: ${error.message}`,
+        });
+      }
+    });
+
     socket.on(
       'ride:passenger_rate_driver',
       async ({ rideId, rating, feedback }) => {

@@ -96,8 +96,8 @@ registerRoute({
 
 registerRoute({
   router,
-  route: '/payment/intent',
-  passenger_auth_enable: true,
+  route: '/payment/intent/:id',
+  // passenger_auth_enable: true,
   get_method: getPaymentIntentController,
 });
 

@@ -151,7 +151,7 @@ export const getPaymentIntentController = (req, res) =>
     {
       handler: getPaymentIntent,
       validationFn: null,
-      handlerParams: [req.user, req.query],
+      handlerParams: [req.params],
       successMessage: 'Payment intent fetched successfully',
     },
     req,

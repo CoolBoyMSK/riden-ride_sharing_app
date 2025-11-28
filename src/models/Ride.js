@@ -339,6 +339,9 @@ const rideSchema = new mongoose.Schema(
     driverArrivedAt: {
       type: Date,
     },
+    passengerReadyAt: {
+      type: Date,
+    },
     rideStartedAt: {
       type: Date,
     },

@@ -380,30 +380,30 @@ export const deleteWallet = async (user, { walletType }, resp) => {
   }
 };
 
-export const getPaymentIntent = async (user, { paymentIntentId }, resp) => {
+export const getPaymentIntent = async ({ id }, resp) => {
   try {
-    const passenger = await findPassengerByUserId(user._id);
-    if (!passenger) {
-      resp.error = true;
-      resp.error_message = 'Failed to fetch passenger';
-      return resp;
-    }
+    // const passenger = await findPassengerByUserId(user._id);
+    // if (!passenger) {
+    //   resp.error = true;
+    //   resp.error_message = 'Failed to fetch passenger';
+    //   return resp;
+    // }
 
-    if (!passenger.stripeCustomerId) {
-      resp.error = true;
-      resp.error_message = 'Passenger does not have a Stripe customer ID';
-      return resp;
-    }
+    // if (!passenger.stripeCustomerId) {
+    //   resp.error = true;
+    //   resp.error_message = 'Passenger does not have a Stripe customer ID';
+    //   return resp;
+    // }
 
-    if (!paymentIntentId) {
+    if (!id) {
       resp.error = true;
       resp.error_message = 'Payment intent ID is required';
       return resp;
     }
 
     const result = await getPassengerPaymentIntent(
-      passenger.stripeCustomerId,
-      paymentIntentId,
+      // passenger.stripeCustomerId,
+      id,
     );
     if (!result.success) {
       resp.error = true;
