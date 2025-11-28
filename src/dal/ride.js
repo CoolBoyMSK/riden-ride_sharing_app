@@ -475,8 +475,11 @@ export const removeDriverLocation = async (driverId) => {
 };
 
 export const getDriverLocation = async (driverId) => {
+  console.log('Driver Id: ', driverId);
   const key = driverLocationKey(driverId);
+  console.log('Key: ', key);
   const data = await redis().get(key);
+  console.log('Data: ', data);
   return data ? JSON.parse(data) : null;
 };
 

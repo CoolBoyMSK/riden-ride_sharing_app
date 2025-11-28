@@ -500,20 +500,25 @@ export const initSocket = (server) => {
           });
         }
 
-        const driverLocation = await getDriverLocation(ride.driverId?._id);
-        if (!driverLocation) {
-          return socket.emit('error', {
-            success: false,
-            objectType,
-            code: 'FORBIDDEN',
-            message: 'Driver location not found',
-          });
-        }
+        const driverLocation = await getDriverLocation(ride.driverId?._id.toString());
+        // if (!driverLocation) {
+        //   return socket.emit('error', {
+        //     success: false,
+        //     objectType,
+        //     code: 'FORBIDDEN',
+        //     message: 'Driver location not found',
+        //   });
+        // }
 
         socket.emit('share:ride_data', {
           success: true,
           objectType,
-          data: { ride, location: driverLocation },
+          data: {
+            ride,
+            driverLocation: driverLocation
+              ? driverLocation
+              : 'Driver Location not available',
+          },
           message: 'Ride data shared successfully',
         });
       } catch (error) {
