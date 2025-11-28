@@ -13,8 +13,29 @@ import {
   partialRefundPaymentHold,
 } from '../../dal/stripe.js';
 import { startProgressiveDriverSearch } from '../../dal/driver.js';
+import IORedis from 'ioredis';
+import env from '../../config/envConfig.js';
 
 const concurrency = 5; // Process multiple scheduled rides concurrently
+
+// Create Redis connection for worker (must match queue connection)
+const redisConnection = new IORedis(env.REDIS_URL, {
+  maxRetriesPerRequest: null,
+  enableReadyCheck: false,
+});
+
+// Test Redis connection
+redisConnection.on('connect', () => {
+  logger.info('✅ Redis connected for scheduled ride worker');
+});
+
+redisConnection.on('error', (error) => {
+  logger.error('❌ Redis connection error:', error);
+});
+
+redisConnection.on('ready', () => {
+  logger.info('✅ Redis ready for scheduled ride worker');
+});
 
 // Helper function to cancel payment hold and update ride status
 const cancelRideWithPaymentHold = async (
@@ -75,14 +96,26 @@ const cancelRideWithPaymentHold = async (
 };
 
 export const startScheduledRideProcessor = () => {
+  const queueName = 'scheduled-ride-queue';
+  const prefix = env.QUEUE_PREFIX || 'riden';
+
+  logger.info('🚀 Starting scheduled ride processor', {
+    queueName,
+    prefix,
+    concurrency,
+    redisUrl: env.REDIS_URL ? 'configured' : 'missing',
+  });
+
   const worker = new Worker(
-    'scheduled-ride-queue',
+    queueName,
     async (job) => {
       const { rideId, jobType } = job.data;
-      logger.info('Processing scheduled ride job', {
+
+      logger.info('📥 Job received by worker', {
         jobId: job.id,
         rideId,
         jobType,
+        timestamp: new Date().toISOString(),
       });
 
       try {
@@ -166,50 +199,125 @@ export const startScheduledRideProcessor = () => {
             logger.warn('Unknown job type', { jobType, rideId });
         }
 
+        logger.info('✅ Job processed successfully', {
+          jobId: job.id,
+          rideId,
+          jobType,
+          status: 'completed',
+        });
+
         return { status: 'completed', jobType, rideId };
       } catch (error) {
-        logger.error('Error processing scheduled ride job', {
+        logger.error('❌ Error processing scheduled ride job', {
           jobId: job.id,
           rideId,
           jobType,
           error: error.message,
+          stack: error.stack,
         });
         throw error;
       }
     },
     {
-      connection: scheduledRideQueue.connection,
+      connection: redisConnection,
+      prefix,
       concurrency,
+      removeOnComplete: {
+        age: 3600, // Keep completed jobs for 1 hour
+        count: 1000, // Keep max 1000 completed jobs
+      },
+      removeOnFail: {
+        age: 24 * 3600, // Keep failed jobs for 24 hours
+      },
     },
   );
 
-  worker.on('completed', (job) => {
-    logger.info('Scheduled ride job completed', {
+  // Worker event handlers
+  worker.on('ready', () => {
+    logger.info('✅ Scheduled ride worker is ready and listening for jobs');
+  });
+
+  worker.on('active', (job) => {
+    logger.info('🔄 Job started processing', {
       jobId: job.id,
       rideId: job.data.rideId,
       jobType: job.data.jobType,
     });
   });
 
+  worker.on('completed', (job) => {
+    logger.info('✅ Scheduled ride job completed', {
+      jobId: job.id,
+      rideId: job.data.rideId,
+      jobType: job.data.jobType,
+      processedAt: new Date().toISOString(),
+    });
+  });
+
   worker.on('failed', (job, err) => {
-    logger.error('Scheduled ride job failed', {
+    logger.error('❌ Scheduled ride job failed', {
       jobId: job?.id,
       rideId: job?.data?.rideId,
       jobType: job?.data?.jobType,
       error: err.message,
+      stack: err.stack,
+      failedAt: new Date().toISOString(),
     });
   });
 
-  logger.info('Scheduled ride processor started');
+  worker.on('error', (error) => {
+    logger.error('❌ Worker error:', {
+      error: error.message,
+      stack: error.stack,
+    });
+  });
+
+  worker.on('stalled', (jobId) => {
+    logger.warn('⚠️ Job stalled', { jobId });
+  });
+
+  // Log worker startup
+  logger.info('✅ Scheduled ride processor started successfully', {
+    queueName,
+    prefix,
+    concurrency,
+  });
+
   return worker;
 };
 
 // Send notification to passenger and driver (if assigned) before scheduled time
 const handleScheduledRideNotification = async (ride) => {
   try {
+    logger.info('📧 Processing notification for scheduled ride', {
+      rideId: ride._id,
+      scheduledTime: ride.scheduledTime,
+      status: ride.status,
+    });
+
     const scheduledTime = new Date(ride.scheduledTime);
     const now = new Date();
     const minutesUntilRide = Math.floor((scheduledTime - now) / (1000 * 60));
+
+    logger.info('⏰ Time calculation', {
+      scheduledTime: scheduledTime.toISOString(),
+      now: now.toISOString(),
+      minutesUntilRide,
+    });
+
+    // Get passenger userId
+    const passengerUserId =
+      ride.passengerId?.userId?._id?.toString() ||
+      ride.passengerId?.userId?.toString() ||
+      ride.passengerId?.userId;
+
+    if (!passengerUserId) {
+      logger.error('❌ Cannot find passenger userId', {
+        rideId: ride._id,
+        passengerId: ride.passengerId,
+      });
+      throw new Error('Passenger userId not found');
+    }
 
     // Notify passenger
     const passengerMessage =
@@ -217,38 +325,88 @@ const handleScheduledRideNotification = async (ride) => {
         ? `Your scheduled ride is in ${minutesUntilRide} minute(s). Please be ready at the pickup location.`
         : 'Your scheduled ride is about to start. Please be ready at the pickup location.';
 
-    await notifyUser({
-      userId: ride.passengerId?.userId,
+    logger.info('📤 Sending notification to passenger', {
+      passengerUserId,
+      message: passengerMessage,
+    });
+
+    const passengerNotification = await notifyUser({
+      userId: passengerUserId,
       title: 'Scheduled Ride Reminder',
       message: passengerMessage,
       module: 'ride',
       metadata: ride,
     });
 
-    // Notify driver if already assigned
-    if (ride.driverId?.userId) {
-      const driverMessage =
-        minutesUntilRide > 0
-          ? `You have a scheduled ride in ${minutesUntilRide} minute(s). Please be ready.`
-          : 'Your scheduled ride is about to start. Please proceed to the pickup location.';
-
-      await notifyUser({
-        userId: ride.driverId.userId,
-        title: 'Scheduled Ride Reminder',
-        message: driverMessage,
-        module: 'ride',
-        metadata: ride,
+    if (passengerNotification?.success) {
+      logger.info('✅ Passenger notification sent successfully', {
+        passengerUserId,
+        rideId: ride._id,
+      });
+    } else {
+      logger.error('❌ Failed to send passenger notification', {
+        passengerUserId,
+        rideId: ride._id,
+        result: passengerNotification,
       });
     }
 
-    logger.info('Scheduled ride notification sent', {
+    // Notify driver if already assigned
+    if (ride.driverId) {
+      const driverUserId =
+        ride.driverId?.userId?._id?.toString() ||
+        ride.driverId?.userId?.toString() ||
+        ride.driverId?.userId;
+
+      if (driverUserId) {
+        const driverMessage =
+          minutesUntilRide > 0
+            ? `You have a scheduled ride in ${minutesUntilRide} minute(s). Please be ready.`
+            : 'Your scheduled ride is about to start. Please proceed to the pickup location.';
+
+        logger.info('📤 Sending notification to driver', {
+          driverUserId,
+          message: driverMessage,
+        });
+
+        const driverNotification = await notifyUser({
+          userId: driverUserId,
+          title: 'Scheduled Ride Reminder',
+          message: driverMessage,
+          module: 'ride',
+          metadata: ride,
+        });
+
+        if (driverNotification?.success) {
+          logger.info('✅ Driver notification sent successfully', {
+            driverUserId,
+            rideId: ride._id,
+          });
+        } else {
+          logger.error('❌ Failed to send driver notification', {
+            driverUserId,
+            rideId: ride._id,
+            result: driverNotification,
+          });
+        }
+      } else {
+        logger.info('ℹ️ No driver assigned yet, skipping driver notification', {
+          rideId: ride._id,
+        });
+      }
+    }
+
+    logger.info('✅ Scheduled ride notification processed', {
       rideId: ride._id,
       minutesUntilRide,
+      passengerNotified: !!passengerNotification?.success,
+      driverNotified: !!ride.driverId,
     });
   } catch (error) {
-    logger.error('Error sending scheduled ride notification', {
+    logger.error('❌ Error sending scheduled ride notification', {
       rideId: ride._id,
       error: error.message,
+      stack: error.stack,
     });
     throw error;
   }
