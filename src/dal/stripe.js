@@ -3523,6 +3523,311 @@ export const refundCardPaymentToPassenger = async (
   }
 };
 
+/**
+ * Transfer tip directly to driver's external account
+ * Handles both wallet and card payments, transfers tip to driver's connected account,
+ * then creates instant payout to driver's external bank account
+ */
+export const transferTipToDriverExternalAccount = async (
+  passenger,
+  driver,
+  ride,
+  tipAmount,
+  paymentMethod, // 'WALLET' or 'CARD'/'GOOGLE_PAY'/'APPLE_PAY'
+  paymentMethodId, // Required for card payments
+) => {
+  const session = await mongoose.startSession();
+
+  try {
+    let paymentIntentId = null;
+    let chargeId = null;
+    let payout = null;
+    let transfer = null;
+
+    // Validate driver has Stripe account and external account
+    if (!driver.stripeAccountId) {
+      throw new Error('Driver has no Stripe account linked');
+    }
+
+    // Check for default external account
+    const externalAccounts = await stripe.accounts.listExternalAccounts(
+      driver.stripeAccountId,
+    );
+
+    const defaultAccount = externalAccounts.data.find(
+      (account) => account.default_for_currency === true,
+    );
+
+    if (!defaultAccount) {
+      throw new Error(
+        'Driver has no default external account (bank account) set up',
+      );
+    }
+
+    if (defaultAccount.deleted) {
+      throw new Error('Default external account has been deleted');
+    }
+
+    // Validate tip amount
+    const parsedAmount = Number(tipAmount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      throw new Error('Invalid tip amount');
+    }
+
+    // Minimum tip amount for payout
+    const MIN_TIP_AMOUNT = 1; // Minimum $1 tip
+    if (parsedAmount < MIN_TIP_AMOUNT) {
+      throw new Error(`Tip amount must be at least $${MIN_TIP_AMOUNT}`);
+    }
+
+    await session.withTransaction(async () => {
+      // Get wallets
+      const [passengerWallet, driverWallet] = await Promise.all([
+        PassengerWallet.findOne({ passengerId: passenger._id }).session(
+          session,
+        ),
+        DriverWallet.findOne({ driverId: driver._id }).session(session),
+      ]);
+
+      if (!passengerWallet) throw new Error('Passenger wallet not found');
+      if (!driverWallet) throw new Error('Driver wallet not found');
+
+      // Handle payment based on payment method
+      if (paymentMethod === 'WALLET') {
+        // Deduct from passenger wallet
+        if (passengerWallet.availableBalance < parsedAmount) {
+          const shortfall = parsedAmount - passengerWallet.availableBalance;
+          // Use available balance first
+          if (passengerWallet.availableBalance > 0) {
+            await PassengerWallet.findOneAndUpdate(
+              { passengerId: passenger._id },
+              { $inc: { availableBalance: -passengerWallet.availableBalance } },
+              { session },
+            );
+          }
+          // Add remaining to negative balance
+          await PassengerWallet.findOneAndUpdate(
+            { passengerId: passenger._id },
+            { $inc: { negativeBalance: shortfall } },
+            { session },
+          );
+        } else {
+          // Sufficient balance
+          await PassengerWallet.findOneAndUpdate(
+            { passengerId: passenger._id },
+            { $inc: { availableBalance: -parsedAmount } },
+            { session },
+          );
+        }
+
+        // Create transaction record for passenger debit
+        await TransactionModel.create(
+          [
+            {
+              passengerId: passenger._id,
+              driverId: driver._id,
+              rideId: ride._id,
+              type: 'DEBIT',
+              category: 'TIP',
+              amount: parsedAmount,
+              for: 'passenger',
+              metadata: {
+                tipAmount: parsedAmount,
+                rideId: ride._id.toString(),
+                paymentMethod: 'WALLET',
+              },
+              status: 'succeeded',
+              referenceId: `tip_${ride._id}_${Date.now()}`,
+            },
+          ],
+          { session },
+        ).then((res) => res[0]);
+      } else {
+        // Card payment - charge passenger
+        if (!paymentMethodId) {
+          throw new Error('Payment method ID is required for card payments');
+        }
+
+        if (!passenger.stripeCustomerId) {
+          throw new Error('Passenger has no Stripe customer ID');
+        }
+
+        // Charge passenger for tip
+        const paymentIntent = await stripe.paymentIntents.create({
+          amount: Math.round(parsedAmount * 100), // Convert to cents
+          currency: 'cad',
+          customer: passenger.stripeCustomerId,
+          payment_method: paymentMethodId,
+          off_session: true,
+          confirm: true,
+          description: `Tip payment for ride ${ride.rideId || ride._id}`,
+          metadata: {
+            rideId: ride._id.toString(),
+            tipAmount: parsedAmount.toString(),
+            driverId: driver._id.toString(),
+          },
+        });
+
+        if (paymentIntent.status !== 'succeeded') {
+          throw new Error(`Payment failed: ${paymentIntent.status}`);
+        }
+
+        paymentIntentId = paymentIntent.id;
+        chargeId = paymentIntent.latest_charge;
+
+        // Create transaction record for passenger debit
+        await TransactionModel.create(
+          [
+            {
+              passengerId: passenger._id,
+              driverId: driver._id,
+              rideId: ride._id,
+              type: 'DEBIT',
+              category: 'TIP',
+              amount: parsedAmount,
+              for: 'passenger',
+              metadata: {
+                tipAmount: parsedAmount,
+                rideId: ride._id.toString(),
+                paymentIntentId: paymentIntent.id,
+                chargeId: chargeId,
+                paymentMethod: paymentMethod,
+              },
+              status: 'succeeded',
+              referenceId: paymentIntent.id,
+              receiptUrl: paymentIntent.id,
+            },
+          ],
+          { session },
+        ).then((res) => res[0]);
+      }
+
+      // Transfer tip to driver's connected account
+      if (chargeId) {
+        // Transfer from card payment charge
+        transfer = await stripe.transfers.create({
+          amount: Math.round(parsedAmount * 100), // Full tip amount (no commission)
+          currency: 'cad',
+          destination: driver.stripeAccountId,
+          source_transaction: chargeId,
+          description: `Tip transfer for ride ${ride.rideId || ride._id}`,
+          metadata: {
+            rideId: ride._id.toString(),
+            tipAmount: parsedAmount.toString(),
+            driverId: driver._id.toString(),
+            paymentMethod: paymentMethod,
+          },
+        });
+      } else {
+        // For wallet payments, create a transfer from platform account to driver's connected account
+        // Note: This requires the platform account to have sufficient balance
+        // In production, ensure platform account has funds or handle wallet tips differently
+        transfer = await stripe.transfers.create({
+          amount: Math.round(parsedAmount * 100), // Full tip amount (no commission)
+          currency: 'cad',
+          destination: driver.stripeAccountId,
+          description: `Tip transfer for ride ${ride.rideId || ride._id} (Wallet)`,
+          metadata: {
+            rideId: ride._id.toString(),
+            tipAmount: parsedAmount.toString(),
+            driverId: driver._id.toString(),
+            paymentMethod: 'WALLET',
+          },
+        });
+      }
+
+      // Create instant payout to driver's external account
+      payout = await stripe.payouts.create(
+        {
+          amount: Math.round(parsedAmount * 100),
+          currency: 'cad',
+          method: 'instant',
+          description: `Tip payout for ride ${ride.rideId || ride._id}`,
+          metadata: {
+            rideId: ride._id.toString(),
+            tipAmount: parsedAmount.toString(),
+            transferId: transfer?.id || 'wallet_tip',
+          },
+        },
+        {
+          stripeAccount: driver.stripeAccountId,
+        },
+      );
+
+      if (!payout || !payout.id || payout.status === 'failed') {
+        throw new Error(
+          `Payout failed: ${payout?.failure_message || 'Unknown error'}`,
+        );
+      }
+
+      // Create transaction record for driver credit
+      await TransactionModel.create(
+        [
+          {
+            passengerId: passenger._id,
+            driverId: driver._id,
+            rideId: ride._id,
+            type: 'CREDIT',
+            category: 'TIP',
+            amount: parsedAmount,
+            for: 'driver',
+            metadata: {
+              tipAmount: parsedAmount,
+              rideId: ride._id.toString(),
+              payoutId: payout.id,
+              transferId: transfer?.id,
+              paymentMethod: paymentMethod,
+            },
+            status: 'succeeded',
+            referenceId: payout.id,
+            receiptUrl: payout.id,
+          },
+        ],
+        { session },
+      ).then((res) => res[0]);
+    });
+
+    // Send notifications
+    await Promise.all([
+      notifyUser({
+        userId: passenger.userId?._id,
+        title: 'Tip Sent',
+        message: `You sent a $${parsedAmount} tip to your driver`,
+        module: 'payment',
+        metadata: { rideId: ride._id, tipAmount: parsedAmount },
+        type: 'ALERT',
+        actionLink: 'tip_sent',
+        isPush: false,
+      }),
+      notifyUser({
+        userId: driver.userId?._id,
+        title: 'Tip Received',
+        message: `You received a $${parsedAmount} tip! It has been transferred to your bank account`,
+        module: 'payment',
+        metadata: { rideId: ride._id, tipAmount: parsedAmount },
+        type: 'ALERT',
+        actionLink: 'tip_received',
+      }),
+    ]);
+
+    return {
+      success: true,
+      tipAmount: parsedAmount,
+      payoutId: payout?.id || null,
+      transferId: transfer?.id || null,
+      paymentIntentId: paymentIntentId || null,
+    };
+  } catch (error) {
+    console.error(`TIP TRANSFER ERROR: ${error.message}`);
+    return {
+      success: false,
+      error: error.message || 'Failed to transfer tip to driver',
+    };
+  } finally {
+    await session.endSession();
+  }
+};
+
 export const refundWalletPaymentToPassenger = async (
   rideId,
   reason = 'requested_by_customer',

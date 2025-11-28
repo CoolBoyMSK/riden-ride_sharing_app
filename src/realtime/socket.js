@@ -65,6 +65,7 @@ import {
   captureHeldPayment,
   cancelPaymentHold,
   processDriverPayoutAfterCapture,
+  transferTipToDriverExternalAccount,
 } from '../dal/stripe.js';
 import { createCallLog, findCallById, updateCallLogById } from '../dal/call.js';
 import { findDrivingHours } from '../dal/stats.js';
@@ -3799,134 +3800,169 @@ export const initSocket = (server) => {
       },
     );
 
-    socket.on('ride:tip_driver', async ({ rideId, percent, isApplied }) => {
-      const objectType = 'tip-driver';
-      if (!userId) {
-        return socket.emit('error', {
-          success: false,
-          objectType,
-          code: 'UNAUTHORIZED',
-          message: 'Authentication required',
-        });
-      }
-
-      try {
-        const ride = await findRideById(rideId);
-        const amount = Math.floor(
-          ((ride.actualFare || ride.estimatedFare) / percent) * 100,
-        );
-        if (!ride) {
+    socket.on(
+      'ride:tip_driver',
+      async ({ rideId, percent, isApplied, paymentMethodId }) => {
+        const objectType = 'tip-driver';
+        if (!userId) {
           return socket.emit('error', {
             success: false,
             objectType,
-            code: 'NOT_FOUND',
-            message: 'Ride not found',
-          });
-        } else if (ride.status !== 'RIDE_COMPLETED') {
-          return socket.emit('error', {
-            success: false,
-            objectType,
-            code: 'FORBIDDEN',
-            message: `Cannot rate driver. Current ride status: ${ride.status}`,
-          });
-        } else if (ride.tipBreakdown?.isApplied) {
-          return socket.emit('error', {
-            success: false,
-            objectType,
-            code: 'FORBIDDEN',
-            message: `You have already paid $${ride.tipBreakdown?.amount} which is ${ride.tipBreakdown?.percent}% of fare`,
-          });
-        } else if (isApplied !== true || amount <= 0 || percent <= 0) {
-          return socket.emit('error', {
-            success: false,
-            objectType,
-            code: 'FORBIDDEN',
-            message: `Tip amount and percentage must be greter than 0`,
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required',
           });
         }
 
-        const passenger = await findPassengerById(ride.passengerId._id);
-        const driver = await findDriverById(ride.driverId._id);
-
-        if (!passenger || !driver) {
-          return socket.emit('error', {
-            success: false,
-            objectType,
-            code: 'NOT_FOUND',
-            message: `Driver or Passenger not found`,
-          });
-        }
-
-        socket.join(`ride:${ride._id}`);
-
-        if (ride.paymentMethod === 'WALLET') {
-          const tip = await payDriverFromWallet(
-            passenger,
-            driver,
-            ride,
-            amount,
-            'TIP',
-          );
-          if (tip.error) {
+        try {
+          const ride = await findRideById(rideId);
+          if (!ride) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'NOT_FOUND',
+              message: 'Ride not found',
+            });
+          } else if (ride.status !== 'RIDE_COMPLETED') {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: tip.error,
+              message: `Cannot tip driver. Current ride status: ${ride.status}`,
             });
-          }
-
-          io.to(`ride:${ride._id}`).emit('ride:tip_driver', {
-            success: true,
-            objectType,
-            data: {
-              ride,
-              payment: tip.payment,
-              transaction: tip.transaction,
-            },
-            message: 'Tip successfully send to driver',
-          });
-        }
-
-        if (ride.paymentMethod === 'CARD') {
-          const tip = await passengerPaysDriver(
-            passenger,
-            driver,
-            ride,
-            amount,
-            passenger.defaultCardId,
-            'TIP',
-          );
-          if (!tip.payment || !tip.transaction) {
+          } else if (ride.tipBreakdown?.isApplied) {
             return socket.emit('error', {
               success: false,
               objectType,
               code: 'FORBIDDEN',
-              message: `Failed to send tip t driver's account`,
+              message: `You have already paid $${ride.tipBreakdown?.amount} which is ${ride.tipBreakdown?.percent}% of fare`,
+            });
+          } else if (
+            isApplied !== true ||
+            !percent ||
+            percent <= 0 ||
+            percent > 100
+          ) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: `Tip percentage must be between 1 and 100`,
             });
           }
 
+          // Calculate tip amount: (fare * percent) / 100
+          const fare = ride.actualFare || ride.estimatedFare || 0;
+          if (!fare || fare <= 0) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: `Invalid fare amount. Cannot calculate tip`,
+            });
+          }
+
+          const amount = Math.floor((fare * percent) / 100);
+          if (amount <= 0) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: `Tip amount must be greater than 0`,
+            });
+          }
+
+          const passenger = await findPassengerById(ride.passengerId._id);
+          const driver = await findDriverById(ride.driverId._id);
+
+          if (!passenger || !driver) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'NOT_FOUND',
+              message: `Driver or Passenger not found`,
+            });
+          }
+
+          // Validate payment method ID for card payments
+          let finalPaymentMethodId = paymentMethodId;
+          if (
+            ride.paymentMethod === 'CARD' ||
+            ride.paymentMethod === 'GOOGLE_PAY' ||
+            ride.paymentMethod === 'APPLE_PAY'
+          ) {
+            if (!finalPaymentMethodId) {
+              finalPaymentMethodId =
+                ride.cardId || passenger.defaultCardId || ride.paymentMethod;
+            }
+            if (!finalPaymentMethodId) {
+              return socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'FORBIDDEN',
+                message: `Payment method ID is required for card payments`,
+              });
+            }
+          }
+
+          socket.join(`ride:${ride._id}`);
+
+          // Transfer tip directly to driver's external account
+          const tipResult = await transferTipToDriverExternalAccount(
+            passenger,
+            driver,
+            ride,
+            amount,
+            ride.paymentMethod,
+            finalPaymentMethodId,
+          );
+
+          if (!tipResult.success) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'FORBIDDEN',
+              message: tipResult.error || 'Failed to transfer tip to driver',
+            });
+          }
+
+          // Update ride with tip breakdown information
+          const updatedRide = await updateRideById(ride._id, {
+            tipBreakdown: {
+              amount,
+              percent,
+              isApplied: true,
+            },
+          });
+
+          if (!updatedRide) {
+            console.error('Failed to update ride with tip breakdown');
+          }
+
+          // Emit success response
           io.to(`ride:${ride._id}`).emit('ride:tip_driver', {
             success: true,
             objectType,
             data: {
-              ride,
-              payment: tip.payment,
-              transaction: tip.transaction,
+              ride: updatedRide || ride,
+              tipAmount: amount,
+              tipPercent: percent,
+              payoutId: tipResult.payoutId,
+              transferId: tipResult.transferId,
+              paymentIntentId: tipResult.paymentIntentId,
             },
-            message: 'Tip successfully send to driver',
+            message: "Tip successfully transferred to driver's bank account",
+          });
+        } catch (error) {
+          console.error(`SOCKET ERROR: ${error}`);
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: `${error.code || 'SOCKET_ERROR'}`,
+            message: `SOCKET ERROR: ${error.message}`,
           });
         }
-      } catch (error) {
-        console.error(`SOCKET ERROR: ${error}`);
-        return socket.emit('error', {
-          success: false,
-          objectType,
-          code: `${error.code || 'SOCKET_ERROR'}`,
-          message: `SOCKET ERROR: ${error.message}`,
-        });
-      }
-    });
+      },
+    );
 
     socket.on('ride:pay_driver', async ({ rideId }) => {
       const objectType = 'pay-driver';
