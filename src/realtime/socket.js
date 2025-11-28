@@ -510,13 +510,11 @@ export const initSocket = (server) => {
           });
         }
 
-        console.log('Driver Location: ', driverLocation);
-
         socket.emit('share:ride_data', {
           success: true,
           objectType,
           data: {
-            ride,
+            ...ride,
             driverLocation: driverLocation || "Driver Location not available",
           },
           message: 'Ride data shared successfully',
