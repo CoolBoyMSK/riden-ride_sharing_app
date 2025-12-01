@@ -12,6 +12,7 @@ import {
   findFareConfigurationForLocation,
   isAirportRide,
   stopDriverSearch,
+  notifyDriversInRadius,
 } from '../../../dal/driver.js';
 import { calculateEstimatedFare } from './fareCalculationService.js';
 import {
@@ -511,6 +512,30 @@ export const bookRide = async (userId, rideData) => {
           rideId: rideObject._id,
         });
         // Still return success since ride is created, but log the error
+      }
+      try {
+        console.log(
+          `📢 Notifying drivers within 20km radius for scheduled ride ${rideObject._id}`,
+        );
+        const notificationResult = await notifyDriversInRadius(
+          rideObject,
+          20,
+          0,
+        );
+        if (notificationResult) {
+          console.log(
+            `✅ Drivers notified successfully for scheduled ride ${rideObject._id}`,
+          );
+        } else {
+          console.log(
+            `ℹ️ No drivers found in 20km radius for scheduled ride ${rideObject._id}`,
+          );
+        }
+      } catch (notificationError) {
+        console.error(
+          `❌ Failed to notify drivers for scheduled ride ${rideObject._id}:`,
+          notificationError,
+        );
       }
 
       return {

@@ -333,7 +333,7 @@ export const findPendingRides = async (
   { excludeIds = [], projection = null, limit = 0, session = null } = {},
 ) => {
   const query = {
-    status: 'REQUESTED',
+    status: { $in: ['REQUESTED', 'SCHEDULED'] },
     carType,
     'pickupLocation.coordinates': {
       $near: {
@@ -361,7 +361,7 @@ export const findPendingRides = async (
       },
       { path: 'chatRoomId' }, // simple top-level ref
     ])
-    .sort({ requestedAt: 1 });
+    .sort({ requestedAt: 1, scheduledTime: 1 }); // Sort by requestedAt and scheduledTime
 
   return q;
 };

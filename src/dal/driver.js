@@ -3506,6 +3506,12 @@ export const notifyDriversInRadius = async (ride, maxRadius, minRadius = 0) => {
     for (const driverId of newDrivers) {
       try {
         emitToUser(driverId, 'ride:new_request', rideNotificationData);
+        emitToUser(driverId, 'ride:find', {
+          success: true,
+          objectType: 'find-ride',
+          data: [ride],
+          message: `${1} available ride found`,
+        });
 
         const notify = await notifyUser({
           userId: driverId,
