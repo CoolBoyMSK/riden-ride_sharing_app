@@ -845,25 +845,25 @@ const addScheduledRideToQueue = async (ride) => {
     );
     console.log('✅ Activation job added:', activationJob.id);
 
-    // Job 3: Cancel ride if no response after scheduled time + 5 minutes
-    const cancellationJob = await scheduledRideQueue.add(
-      'cancel-if-no-response',
-      {
-        rideId: rideId,
-        jobType: 'cancel_if_no_response',
-      },
-      {
-        delay: cancellationDelay,
-        jobId: `scheduled-ride-cancel-${rideId}`,
-        removeOnComplete: true,
-        attempts: 2,
-        backoff: {
-          type: 'exponential',
-          delay: 2000,
-        },
-      },
-    );
-    console.log('✅ Cancellation job added:', cancellationJob.id);
+    // // Job 3: Cancel ride if no response after scheduled time + 5 minutes
+    // const cancellationJob = await scheduledRideQueue.add(
+    //   'cancel-if-no-response',
+    //   {
+    //     rideId: rideId,
+    //     jobType: 'cancel_if_no_response',
+    //   },
+    //   {
+    //     delay: cancellationDelay,
+    //     jobId: `scheduled-ride-cancel-${rideId}`,
+    //     removeOnComplete: true,
+    //     attempts: 2,
+    //     backoff: {
+    //       type: 'exponential',
+    //       delay: 2000,
+    //     },
+    //   },
+    // );
+    // console.log('✅ Cancellation job added:', cancellationJob.id);
 
     // Verify jobs were added by checking queue
     const waitingJobs = await scheduledRideQueue.getWaiting();

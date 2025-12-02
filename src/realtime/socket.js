@@ -848,6 +848,7 @@ export const initSocket = (server) => {
           driver.vehicle.type,
           driverLocation.coordinates,
           10000,
+          { driverId: driver._id }, // Exclude rides already assigned to this driver
         );
 
         socket.emit('ride:find', {
@@ -1569,6 +1570,231 @@ export const initSocket = (server) => {
       }
     });
 
+    // Handler for driver to accept/claim a scheduled ride
+    // This works for both:
+    // 1. Rides already assigned to the driver (acknowledgement)
+    // 2. Rides not yet assigned to any driver (driver claims the ride)
+    socket.on('ride:accept_scheduled_ride', async ({ rideId }) => {
+      const objectType = 'accept-scheduled-ride';
+      if (!userId) {
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        });
+      }
+
+      try {
+        const driver = await findDriverByUserId(userId);
+        if (!driver) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'NOT_FOUND',
+            message: 'Driver not found',
+          });
+        }
+
+        // Validate driver can accept rides
+        if (!driver.isActive) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver is not active',
+          });
+        }
+        if (driver.isBlocked) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver is blocked',
+          });
+        }
+        if (driver.isSuspended) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver is suspended',
+          });
+        }
+        if (driver.backgroundCheckStatus !== 'approved') {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Driver background check not approved',
+          });
+        }
+
+        const ride = await findRideById(rideId);
+        if (!ride) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'NOT_FOUND',
+            message: 'Ride not found',
+          });
+        }
+
+        // Validate this is a scheduled ride
+        if (!ride.isScheduledRide) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'INVALID_REQUEST',
+            message: 'This is not a scheduled ride',
+          });
+        }
+
+        // Check ride status
+        if (ride.status !== 'DRIVER_ASSIGNED' && ride.status !== 'SCHEDULED') {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'INVALID_STATUS',
+            message: `Cannot accept a ride with status: ${ride.status}`,
+          });
+        }
+
+        // Check if ride is already assigned to another driver
+        if (ride.driverId && ride.driverId._id.toString() !== driver._id.toString()) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'This ride is already assigned to another driver',
+          });
+        }
+
+        // Check vehicle type matches
+        if (driver.vehicle?.type !== ride.carType) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: `Your vehicle type (${driver.vehicle?.type}) does not match the ride requirement (${ride.carType})`,
+          });
+        }
+
+        let updatedRide = ride;
+        let isNewAssignment = false;
+
+        // If no driver assigned yet, assign this driver
+        if (!ride.driverId) {
+          isNewAssignment = true;
+          
+          // Update ride with driver assignment
+          updatedRide = await updateRideById(rideId, {
+            driverId: driver._id,
+            status: 'DRIVER_ASSIGNED',
+            driverAssignedAt: new Date(),
+          });
+
+          if (!updatedRide) {
+            return socket.emit('error', {
+              success: false,
+              objectType,
+              code: 'SERVER_ERROR',
+              message: 'Failed to assign driver to ride',
+            });
+          }
+
+          console.log('✅ Driver accepted and assigned to scheduled ride', {
+            rideId: ride._id.toString(),
+            driverId: driver._id.toString(),
+          });
+        } else {
+          console.log('✅ Driver acknowledged pre-assigned scheduled ride', {
+            rideId: ride._id.toString(),
+            driverId: driver._id.toString(),
+          });
+        }
+
+        // Join the ride room
+        socket.join(`ride:${updatedRide._id}`);
+
+        // Notify driver of successful acceptance
+        socket.emit('ride:accept_scheduled_ride', {
+          success: true,
+          objectType,
+          data: updatedRide,
+          message: isNewAssignment 
+            ? 'Scheduled ride accepted successfully' 
+            : 'Scheduled ride acknowledged successfully',
+        });
+
+        // Get passenger info for notification
+        const passengerUserId =
+          updatedRide.passengerId?.userId?._id?.toString() ||
+          updatedRide.passengerId?.userId?.toString();
+        const driverName = driver.userId?.name || 'Your driver';
+
+        // Notify passenger
+        if (passengerUserId) {
+          if (isNewAssignment) {
+            // Driver just accepted - notify passenger of new assignment
+            emitToUser(passengerUserId, 'ride:scheduled_ride_accepted', {
+              success: true,
+              objectType: 'scheduled-ride-accepted',
+              data: {
+                ride: updatedRide,
+                scheduledTime: updatedRide.scheduledTime?.toLocaleString('en-US', {
+                  weekday: 'short',
+                  year: 'numeric',
+                  month: 'short',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                }),
+                driverName,
+              },
+              message: `${driverName} has accepted your scheduled ride`,
+            });
+
+            await notifyUser({
+              userId: passengerUserId,
+              title: 'Driver Accepted Your Scheduled Ride',
+              message: `${driverName} has accepted your scheduled ride. We'll notify you when it's time for pickup.`,
+              module: 'ride',
+              metadata: updatedRide,
+              storeInDB: true,
+              isPush: true,
+            });
+          } else {
+            // Driver acknowledged pre-assigned ride
+            emitToUser(passengerUserId, 'ride:driver_acknowledged_scheduled_ride', {
+              success: true,
+              objectType: 'driver-acknowledged-scheduled-ride',
+              data: updatedRide,
+              message: `${driverName} has confirmed the scheduled ride assignment`,
+            });
+
+            await notifyUser({
+              userId: passengerUserId,
+              title: 'Driver Confirmed',
+              message: `${driverName} has confirmed your scheduled ride. We'll notify you when it's time for pickup.`,
+              module: 'ride',
+              metadata: updatedRide,
+              storeInDB: true,
+              isPush: true,
+            });
+          }
+        }
+      } catch (error) {
+        console.error(`SOCKET ERROR (accept_scheduled_ride): ${error}`);
+        return socket.emit('error', {
+          success: false,
+          objectType,
+          code: error.code || 'SOCKET_ERROR',
+          message: `SOCKET ERROR: ${error.message}`,
+        });
+      }
+    });
+
     socket.on('ride:driver_cancel_ride', async ({ rideId, reason }) => {
       const objectType = 'cancel-ride-driver';
       if (!userId) {
@@ -1590,14 +1816,12 @@ export const initSocket = (server) => {
             code: 'NOT_FOUND',
             message: 'Driver not found',
           });
-        } else if (driver.status !== 'on_ride') {
-          return socket.emit('error', {
-            success: false,
-            objectType,
-            code: 'FORBIDDEN',
-            message: 'Invalid driver status',
-          });
         }
+
+        // NOTE: Previously we enforced driver.status === 'on_ride' (then ['online','on_ride']).
+        // For scheduled rides this was too strict and caused false FORBIDDEN errors.
+        // We now TRUST that if the driver is authenticated and assigned to the ride,
+        // they are allowed to mark themselves as arriving, so we skip status validation here.
 
         const ride = await findRideById(rideId);
         const driverId = ride?.driverId?._id;
@@ -1878,14 +2102,12 @@ export const initSocket = (server) => {
             code: 'NOT_FOUND',
             message: 'Driver not found',
           });
-        } else if (driver.status !== 'on_ride') {
-          return socket.emit('error', {
-            success: false,
-            objectType,
-            code: 'FORBIDDEN',
-            message: 'Invalid driver status',
-          });
         }
+
+        // NOTE: For scheduled rides this strict status check caused false
+        // "Invalid driver status" errors. We trust that an authenticated,
+        // assigned driver can mark themselves as arriving, so we no longer
+        // enforce a specific driver.status here.
 
         const ride = await findRideById(rideId);
         const driverId = ride?.driverId?._id;
@@ -6245,6 +6467,10 @@ export const initSocket = (server) => {
 
   ioInstance = io;
   console.log('🚀 Socket.IO server initialized');
+  
+  // Subscribe to socket events from worker processes
+  subscribeToSocketEvents();
+  
   return io;
 };
 
@@ -6266,5 +6492,53 @@ export const emitToRide = (rideId, event, data) => {
 export const emitToUser = (userId, event, data) => {
   if (ioInstance) {
     ioInstance.to(`user:${userId}`).emit(event, data);
+  } else {
+    // If called from a worker process (no ioInstance), use Redis pub/sub
+    publishSocketEvent(userId, event, data);
   }
+};
+
+// Redis pub/sub for cross-process socket events
+let pubClient = null;
+
+export const initPubClient = () => {
+  if (!pubClient) {
+    pubClient = new Redis(env.REDIS_URL);
+    console.log('📡 Redis pub client initialized for socket events');
+  }
+  return pubClient;
+};
+
+export const publishSocketEvent = (userId, event, data) => {
+  if (!pubClient) {
+    pubClient = new Redis(env.REDIS_URL);
+  }
+  const message = JSON.stringify({ userId, event, data });
+  pubClient.publish('socket:emit', message);
+};
+
+// Subscribe to socket events from workers (called in main server only)
+export const subscribeToSocketEvents = () => {
+  const subClient = new Redis(env.REDIS_URL);
+  subClient.subscribe('socket:emit', (err) => {
+    if (err) {
+      console.error('❌ Failed to subscribe to socket:emit channel', err);
+      return;
+    }
+    console.log('📡 Subscribed to socket:emit channel for worker events');
+  });
+
+  subClient.on('message', (channel, message) => {
+    if (channel === 'socket:emit' && ioInstance) {
+      try {
+        const { userId, event, data } = JSON.parse(message);
+        ioInstance.to(`user:${userId}`).emit(event, data);
+        console.log(`📡 Emitted ${event} to user:${userId} from worker`);
+      } catch (error) {
+        console.error('❌ Error processing socket event from worker', error);
+      }
+    }
+  });
+
+  return subClient;
 };

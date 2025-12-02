@@ -965,14 +965,14 @@ export const assignDriverToScheduledRide = async ({ rideId, driverId }) => {
       : updatedRide.passengerId?.userId?.name || 'Passenger';
 
   try {
-    // Send push notification
+    // Send push notification to driver
     console.log('📤 Sending notification to driver:', {
       driverUserId,
       rideId: updatedRide._id.toString(),
       passengerName,
     });
 
-    const notificationResult = await notifyUser({
+    const driverNotificationResult = await notifyUser({
       userId: driverUserId,
       title: 'Scheduled Ride Assigned',
       message: `You have been assigned to a scheduled ride for ${passengerName}. Scheduled time: ${scheduledTimeFormatted}`,
@@ -982,33 +982,33 @@ export const assignDriverToScheduledRide = async ({ rideId, driverId }) => {
       actionLink: 'scheduled_ride_assigned',
     });
 
-    console.log('📬 Notification result:', {
-      success: notificationResult?.success,
-      message: notificationResult?.message,
-      hasDbNotification: !!notificationResult?.dbNotification,
-      hasPushNotification: !!notificationResult?.pushNotification,
+    console.log('📬 Driver notification result:', {
+      success: driverNotificationResult?.success,
+      message: driverNotificationResult?.message,
+      hasDbNotification: !!driverNotificationResult?.dbNotification,
+      hasPushNotification: !!driverNotificationResult?.pushNotification,
     });
 
-    if (!notificationResult || !notificationResult.success) {
+    if (!driverNotificationResult || !driverNotificationResult.success) {
       console.error('❌ Failed to send notification to driver', {
         driverUserId,
         rideId: updatedRide._id.toString(),
-        result: notificationResult,
+        result: driverNotificationResult,
       });
     } else {
       console.log('✅ Notification sent successfully to driver', {
         driverUserId,
         rideId: updatedRide._id.toString(),
-        dbNotification: notificationResult.dbNotification?._id,
-        pushSent: !!notificationResult.pushNotification,
+        dbNotification: driverNotificationResult.dbNotification?._id,
+        pushSent: !!driverNotificationResult.pushNotification,
       });
     }
 
-    // Send real-time socket notification
+    // Send real-time socket notification to driver
     try {
-      emitToUser(driverUserId, 'ride:driver_assigned_to_scheduled_ride', {
+      emitToUser(driverUserId, 'ride:scheduled_ride_accepted', {
         success: true,
-        objectType: 'scheduled-ride-assigned',
+        objectType: 'scheduled-ride-accepted',
         data: {
           ride: updatedRide,
           scheduledTime: scheduledTimeFormatted,
@@ -1028,9 +1028,81 @@ export const assignDriverToScheduledRide = async ({ rideId, driverId }) => {
         error: socketError.message,
       });
     }
+
+    // Send push notification to passenger
+    if (passengerUserId && mongoose.Types.ObjectId.isValid(passengerUserId)) {
+      console.log('📤 Sending notification to passenger:', {
+        passengerUserId,
+        rideId: updatedRide._id.toString(),
+        driverName,
+      });
+
+      const passengerNotificationResult = await notifyUser({
+        userId: passengerUserId,
+        title: 'Driver Assigned to Your Scheduled Ride',
+        message: `${driverName} has been assigned to your scheduled ride. Scheduled time: ${scheduledTimeFormatted}`,
+        module: 'ride',
+        metadata: updatedRide,
+        type: 'ALERT',
+        actionLink: 'scheduled_ride_driver_assigned',
+      });
+
+      console.log('📬 Passenger notification result:', {
+        success: passengerNotificationResult?.success,
+        message: passengerNotificationResult?.message,
+        hasDbNotification: !!passengerNotificationResult?.dbNotification,
+        hasPushNotification: !!passengerNotificationResult?.pushNotification,
+      });
+
+      if (!passengerNotificationResult || !passengerNotificationResult.success) {
+        console.error('❌ Failed to send notification to passenger', {
+          passengerUserId,
+          rideId: updatedRide._id.toString(),
+          result: passengerNotificationResult,
+        });
+      } else {
+        console.log('✅ Notification sent successfully to passenger', {
+          passengerUserId,
+          rideId: updatedRide._id.toString(),
+          dbNotification: passengerNotificationResult.dbNotification?._id,
+          pushSent: !!passengerNotificationResult.pushNotification,
+        });
+      }
+
+      // Send real-time socket notification to passenger
+      try {
+        emitToUser(passengerUserId, 'ride:scheduled_ride_accepted', {
+          success: true,
+          objectType: 'scheduled-ride-accepted',
+          data: {
+            ride: updatedRide,
+            scheduledTime: scheduledTimeFormatted,
+            driverName,
+          },
+          message: `${driverName} has been assigned to your scheduled ride`,
+        });
+
+        console.log('✅ Socket notification sent to passenger', {
+          passengerUserId,
+          rideId: updatedRide._id.toString(),
+        });
+      } catch (socketError) {
+        console.error('❌ Error sending socket notification to passenger', {
+          passengerUserId,
+          rideId: updatedRide._id.toString(),
+          error: socketError.message,
+        });
+      }
+    } else {
+      console.error('❌ Cannot send notification to passenger - invalid userId', {
+        passengerUserId,
+        rideId: updatedRide._id.toString(),
+      });
+    }
   } catch (notificationError) {
-    console.error('❌ Error sending notification to driver', {
+    console.error('❌ Error sending notifications', {
       driverUserId,
+      passengerUserId,
       rideId: updatedRide._id.toString(),
       error: notificationError.message,
       stack: notificationError.stack,

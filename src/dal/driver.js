@@ -2258,6 +2258,47 @@ export const isAirportRide = async (pickupCoordinates) => {
   }
 };
 
+// Helper function to get driver user IDs who are assigned to upcoming scheduled rides
+// These drivers should not receive ride:new_request for other rides
+export const getDriversWithUpcomingScheduledRides = async (withinMinutes = 60) => {
+  try {
+    const now = new Date();
+    const futureTime = new Date(now.getTime() + withinMinutes * 60 * 1000);
+
+    // Find all scheduled rides with assigned drivers within the time window
+    const scheduledRides = await RideModel.find({
+      isScheduledRide: true,
+      driverId: { $exists: true, $ne: null },
+      status: { $in: ['SCHEDULED', 'DRIVER_ASSIGNED'] },
+      scheduledTime: { $lte: futureTime },
+    })
+      .populate('driverId', 'userId')
+      .lean();
+
+    // Extract driver user IDs
+    const driverUserIds = scheduledRides
+      .filter((ride) => ride.driverId?.userId)
+      .map((ride) => {
+        if (typeof ride.driverId.userId === 'object' && ride.driverId.userId._id) {
+          return ride.driverId.userId._id.toString();
+        }
+        return ride.driverId.userId.toString();
+      });
+
+    // Remove duplicates
+    const uniqueDriverUserIds = [...new Set(driverUserIds)];
+
+    console.log(
+      `📅 Found ${uniqueDriverUserIds.length} drivers with upcoming scheduled rides within ${withinMinutes} minutes`,
+    );
+
+    return uniqueDriverUserIds;
+  } catch (error) {
+    console.error('Error getting drivers with upcoming scheduled rides:', error);
+    return [];
+  }
+};
+
 // Driver Searching Logic
 export const findNearbyDriverUserIds = async (
   carType,
@@ -3442,23 +3483,31 @@ export const notifyDriversInRadius = async (ride, maxRadius, minRadius = 0) => {
 
     // Get all currently notified drivers from Redis
     const notifiedDrivers = await redis.smembers(cacheKey);
+
+    // Get drivers who have upcoming scheduled rides (within 60 minutes)
+    // These drivers should not receive ride:new_request for other rides
+    const driversWithScheduledRides = await getDriversWithUpcomingScheduledRides(60);
+
+    // Combine exclusion lists
+    const excludeDriverIds = [...new Set([...notifiedDrivers, ...driversWithScheduledRides])];
+
     let availableDrivers;
 
     if (minRadius === 0) {
-      // Min radius search - exclude previously notified drivers
+      // Min radius search - exclude previously notified drivers and drivers with scheduled rides
       availableDrivers = await findNearbyDriverUserIds(
         ride.carType,
         ride.pickupLocation.coordinates,
         maxRadiusMeters,
-        { excludeDriverIds: notifiedDrivers },
+        { excludeDriverIds },
       );
     } else {
-      // Expanded radius search - exclude previously notified drivers
+      // Expanded radius search - exclude previously notified drivers and drivers with scheduled rides
       availableDrivers = await findNearbyDriverUserIds(
         ride.carType,
         ride.pickupLocation.coordinates,
         maxRadiusMeters,
-        { excludeDriverIds: notifiedDrivers },
+        { excludeDriverIds },
       );
 
       // Filter by distance range
@@ -3479,9 +3528,11 @@ export const notifyDriversInRadius = async (ride, maxRadius, minRadius = 0) => {
       return false;
     }
 
-    // Double-check filtering
+    // Double-check filtering (exclude both notified and scheduled drivers)
     const newDrivers = availableDrivers.filter(
-      (driverId) => !notifiedDrivers.includes(driverId),
+      (driverId) =>
+        !notifiedDrivers.includes(driverId) &&
+        !driversWithScheduledRides.includes(driverId),
     );
 
     if (newDrivers.length === 0) {
@@ -3492,7 +3543,7 @@ export const notifyDriversInRadius = async (ride, maxRadius, minRadius = 0) => {
     }
 
     console.log(
-      `📢 Notifying ${newDrivers.length} new drivers in ${minRadius}-${maxRadius}km radius`,
+      `📢 Notifying ${newDrivers.length} new drivers in ${minRadius}-${maxRadius}km radius (excluded ${driversWithScheduledRides.length} drivers with scheduled rides)`,
     );
 
     const rideNotificationData = {
@@ -3502,7 +3553,7 @@ export const notifyDriversInRadius = async (ride, maxRadius, minRadius = 0) => {
       message: `New ride request from ${ride.pickupLocation.address} to ${ride.dropoffLocation.address} — tap to respond`,
     };
 
-    // Notify ONLY new drivers
+    // Notify ONLY new drivers (excluding those with scheduled rides)
     for (const driverId of newDrivers) {
       try {
         emitToUser(driverId, 'ride:new_request', rideNotificationData);
