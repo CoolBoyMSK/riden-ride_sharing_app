@@ -7,7 +7,7 @@ import {
   findActiveRideByPassenger,
 } from '../../dal/ride.js';
 import { notifyUser } from '../../dal/notification.js';
-import { emitToUser } from '../../realtime/socket.js';
+import { emitToUser, initPubClient } from '../../realtime/socket.js';
 import {
   cancelPaymentHold,
   partialRefundPaymentHold,
@@ -17,6 +17,9 @@ import IORedis from 'ioredis';
 import env from '../../config/envConfig.js';
 
 const concurrency = 5; // Process multiple scheduled rides concurrently
+
+// Initialize Redis pub client for cross-process socket events
+initPubClient();
 
 // Create Redis connection for worker (must match queue connection)
 const redisConnection = new IORedis(env.REDIS_URL, {
@@ -330,6 +333,19 @@ const handleScheduledRideNotification = async (ride) => {
       message: passengerMessage,
     });
 
+    // Send socket notification for real-time in-app alert
+    emitToUser(passengerUserId, 'ride:scheduled_reminder', {
+      success: true,
+      objectType: 'scheduled-ride-reminder',
+      data: {
+        ride,
+        minutesUntilRide,
+        scheduledTime: scheduledTime.toISOString(),
+      },
+      message: passengerMessage,
+    });
+
+    // Send push notification
     const passengerNotification = await notifyUser({
       userId: passengerUserId,
       title: 'Scheduled Ride Reminder',
@@ -369,6 +385,19 @@ const handleScheduledRideNotification = async (ride) => {
           message: driverMessage,
         });
 
+        // Send socket notification for real-time in-app alert
+        emitToUser(driverUserId, 'ride:scheduled_reminder', {
+          success: true,
+          objectType: 'scheduled-ride-reminder',
+          data: {
+            ride,
+            minutesUntilRide,
+            scheduledTime: scheduledTime.toISOString(),
+          },
+          message: driverMessage,
+        });
+
+        // Send push notification
         const driverNotification = await notifyUser({
           userId: driverUserId,
           title: 'Scheduled Ride Reminder',
@@ -439,51 +468,265 @@ const handleScheduledRide = async (ride) => {
       }
     }
 
-    // Update ride status to REQUESTED to start driver search
-    const updatedRide = await updateRideById(ride._id, {
-      status: 'REQUESTED',
-      requestedAt: new Date(),
-    });
+    // Check if ride already has a driver assigned (scheduled ride with pre-assigned driver)
+    const hasPreAssignedDriver = !!ride.driverId;
+    let updatedRide;
 
-    if (!updatedRide) {
-      throw new Error('Failed to update ride status');
-    }
+    if (hasPreAssignedDriver) {
+      // Check if driver is still available before activating with pre-assigned driver
+      const DriverLocation = (await import('../../models/DriverLocation.js')).default;
+      const driverId = ride.driverId?._id || ride.driverId;
+      const driverLocation = await DriverLocation.findOne({ driverId }).lean();
 
-    // Start driver search (non-blocking)
-    startProgressiveDriverSearch(updatedRide).catch((error) => {
-      logger.error('Error starting driver search for scheduled ride', {
-        rideId: ride._id,
-        error: error.message,
-      });
-      // If driver search fails, cancel the ride
-      cancelRideWithPaymentHold(
-        ride._id,
-        ride.paymentIntentId,
-        'Failed to start driver search',
-        'Ride Activation Failed',
-        'Your scheduled ride could not be activated due to a technical issue. Full refund has been processed.',
-        ride.passengerId?.userId,
-      ).catch((cancelError) => {
-        logger.error('Error cancelling ride after search failure', {
+      // If driver is not available, fall back to searching for a new driver
+      if (
+        !driverLocation ||
+        driverLocation.status !== 'online' ||
+        driverLocation.currentRideId ||
+        !driverLocation.isAvailable
+      ) {
+        logger.warn('Pre-assigned driver not available, starting new driver search', {
           rideId: ride._id,
-          error: cancelError.message,
+          driverId,
+          driverStatus: driverLocation?.status,
+          isAvailable: driverLocation?.isAvailable,
+          currentRideId: driverLocation?.currentRideId,
+        });
+
+        // Clear the driver assignment and start fresh search
+        updatedRide = await updateRideById(ride._id, {
+          status: 'REQUESTED',
+          driverId: null,
+          driverAssignedAt: null,
+          requestedAt: new Date(),
+        });
+
+        if (!updatedRide) {
+          throw new Error('Failed to update ride status');
+        }
+
+        // Notify passenger that assigned driver is unavailable
+        const passengerUserId =
+          ride.passengerId?.userId?._id?.toString() ||
+          ride.passengerId?.userId?.toString() ||
+          ride.passengerId?.userId;
+
+        if (passengerUserId) {
+          await notifyUser({
+            userId: passengerUserId,
+            title: 'Driver Unavailable',
+            message:
+              'Your assigned driver is currently unavailable. We are searching for another driver for you.',
+            module: 'ride',
+            metadata: updatedRide,
+          });
+
+          emitToUser(passengerUserId, 'ride:driver_unavailable', {
+            success: false,
+            objectType: 'driver-unavailable',
+            data: updatedRide,
+            message: 'Your assigned driver is unavailable. Searching for a new driver.',
+          });
+        }
+
+        // Start new driver search
+        startProgressiveDriverSearch(updatedRide).catch((error) => {
+          logger.error('Error starting driver search for scheduled ride after driver unavailable', {
+            rideId: ride._id,
+            error: error.message,
+          });
+          cancelRideWithPaymentHold(
+            ride._id,
+            ride.paymentIntentId,
+            'Failed to find replacement driver',
+            'Ride Activation Failed',
+            'Your scheduled ride could not be activated as no drivers are available. Full refund has been processed.',
+            passengerUserId,
+          ).catch((cancelError) => {
+            logger.error('Error cancelling ride after search failure', {
+              rideId: ride._id,
+              error: cancelError.message,
+            });
+          });
+        });
+
+        logger.info('Started new driver search after pre-assigned driver unavailable', {
+          rideId: ride._id,
+        });
+        return;
+      }
+
+      // If driver is pre-assigned and available, change status to DRIVER_ASSIGNED instead of REQUESTED
+      updatedRide = await updateRideById(ride._id, {
+        status: 'DRIVER_ASSIGNED',
+        requestedAt: new Date(),
+      });
+
+      if (!updatedRide) {
+        throw new Error('Failed to update ride status');
+      }
+
+      // IMPORTANT: For scheduled rides with pre-assigned drivers, we must set
+      // DriverLocation.currentRideId so that passengers receive
+      // `ride:driver_update_location` events in real time.
+      try {
+        const updatedDriverLocation = await DriverLocation.findOneAndUpdate(
+          { driverId },
+          {
+            currentRideId: updatedRide._id,
+            isAvailable: false,
+            lastUpdated: new Date(),
+          },
+          { new: true },
+        );
+
+        logger.info('Updated driver location with currentRideId for scheduled ride', {
+          rideId: ride._id,
+          driverId,
+          driverLocationId: updatedDriverLocation?._id,
+        });
+      } catch (locationError) {
+        logger.error(
+          'Failed to update driver location with currentRideId for scheduled ride',
+          {
+            rideId: ride._id,
+            driverId,
+            error: locationError.message,
+          },
+        );
+      }
+
+      // Get passenger and driver user IDs for socket notifications
+      const passengerUserId =
+        updatedRide.passengerId?.userId?._id?.toString() ||
+        updatedRide.passengerId?.userId?.toString() ||
+        ride.passengerId?.userId;
+
+      const driverUserId =
+        updatedRide.driverId?.userId?._id?.toString() ||
+        updatedRide.driverId?.userId?.toString() ||
+        ride.driverId?.userId;
+
+      const passengerName =
+        ride.bookedFor === 'SOMEONE'
+          ? ride.bookedForName
+          : updatedRide.passengerId?.userId?.name || 'Passenger';
+      const driverName = updatedRide.driverId?.userId?.name || 'Your driver';
+
+      // Emit active ride data to passenger via socket
+      if (passengerUserId) {
+        emitToUser(passengerUserId, 'ride:active', {
+          success: true,
+          objectType: 'active-ride',
+          data: updatedRide,
+          message: 'Your scheduled ride is now active',
+        });
+
+        // Also notify via push notification
+        await notifyUser({
+          userId: passengerUserId,
+          title: 'Scheduled Ride Started',
+          message: `Your scheduled ride with ${driverName} is now active. Please be ready at the pickup location.`,
+          module: 'ride',
+          metadata: updatedRide,
+        });
+
+        logger.info('✅ Sent active ride notification to passenger', {
+          passengerUserId,
+          rideId: ride._id,
+        });
+      }
+
+      // Emit active ride data to driver via socket
+      if (driverUserId) {
+        emitToUser(driverUserId, 'ride:active', {
+          success: true,
+          objectType: 'active-ride',
+          data: updatedRide,
+          message: 'Your scheduled ride is now active',
+        });
+
+        // Also notify via push notification
+        await notifyUser({
+          userId: driverUserId,
+          title: 'Scheduled Ride Started',
+          message: `Your scheduled ride with ${passengerName} is now active. Please proceed to the pickup location.`,
+          module: 'ride',
+          metadata: updatedRide,
+        });
+
+        logger.info('✅ Sent active ride notification to driver', {
+          driverUserId,
+          rideId: ride._id,
+        });
+      }
+
+      logger.info('Scheduled ride with pre-assigned driver activated', {
+        rideId: ride._id,
+        driverId: ride.driverId?._id || ride.driverId,
+      });
+    } else {
+      // No pre-assigned driver - change status to REQUESTED and start driver search
+      updatedRide = await updateRideById(ride._id, {
+        status: 'REQUESTED',
+        requestedAt: new Date(),
+      });
+
+      if (!updatedRide) {
+        throw new Error('Failed to update ride status');
+      }
+
+      // Start driver search (non-blocking)
+      startProgressiveDriverSearch(updatedRide).catch((error) => {
+        logger.error('Error starting driver search for scheduled ride', {
+          rideId: ride._id,
+          error: error.message,
+        });
+        // If driver search fails, cancel the ride
+        cancelRideWithPaymentHold(
+          ride._id,
+          ride.paymentIntentId,
+          'Failed to start driver search',
+          'Ride Activation Failed',
+          'Your scheduled ride could not be activated due to a technical issue. Full refund has been processed.',
+          ride.passengerId?.userId,
+        ).catch((cancelError) => {
+          logger.error('Error cancelling ride after search failure', {
+            rideId: ride._id,
+            error: cancelError.message,
+          });
         });
       });
-    });
 
-    // Notify passenger that ride is now active and searching for drivers
-    await notifyUser({
-      userId: ride.passengerId?.userId,
-      title: 'Scheduled Ride Activated',
-      message:
-        'Your scheduled ride is now active. We are searching for available drivers near you.',
-      module: 'ride',
-      metadata: updatedRide,
-    });
+      // Notify passenger that ride is now active and searching for drivers
+      const passengerUserId =
+        updatedRide.passengerId?.userId?._id?.toString() ||
+        updatedRide.passengerId?.userId?.toString() ||
+        ride.passengerId?.userId;
 
-    logger.info('Scheduled ride activated and driver search started', {
-      rideId: ride._id,
-    });
+      if (passengerUserId) {
+        // Emit socket event for real-time update
+        emitToUser(passengerUserId, 'ride:active', {
+          success: true,
+          objectType: 'active-ride',
+          data: updatedRide,
+          message: 'Your scheduled ride is now active, searching for drivers',
+        });
+      }
+
+      await notifyUser({
+        userId: ride.passengerId?.userId,
+        title: 'Scheduled Ride Activated',
+        message:
+          'Your scheduled ride is now active. We are searching for available drivers near you.',
+        module: 'ride',
+        metadata: updatedRide,
+      });
+
+      logger.info('Scheduled ride activated and driver search started', {
+        rideId: ride._id,
+      });
+    }
   } catch (error) {
     logger.error('Error activating scheduled ride', {
       rideId: ride._id,

@@ -330,10 +330,10 @@ export const findPendingRides = async (
   carType,
   location,
   radius = 10000,
-  { excludeIds = [], projection = null, limit = 0, session = null } = {},
+  { excludeIds = [], projection = null, limit = 0, session = null, driverId = null } = {},
 ) => {
+  // Build the base query - $near cannot be combined with $or at the top level
   const query = {
-    status: { $in: ['REQUESTED', 'SCHEDULED'] },
     carType,
     'pickupLocation.coordinates': {
       $near: {
@@ -342,14 +342,20 @@ export const findPendingRides = async (
       },
     },
     isAirport: false,
+    status: { $in: ['REQUESTED', 'SCHEDULED'] },
   };
 
   if (excludeIds.length) {
     query._id = { $nin: excludeIds };
   }
 
-  let q = await RideModel.find(query)
-    .limit(limit)
+  // If driverId is provided, exclude rides already assigned to this driver
+  if (driverId) {
+    query.driverId = { $ne: driverId };
+  }
+
+  let rides = await RideModel.find(query)
+    .limit(limit > 0 ? limit * 2 : 0) // Get more than needed to account for filtering
     .populate([
       {
         path: 'driverId',
@@ -363,7 +369,26 @@ export const findPendingRides = async (
     ])
     .sort({ requestedAt: 1, scheduledTime: 1 }); // Sort by requestedAt and scheduledTime
 
-  return q;
+  // Filter out SCHEDULED rides that already have a driver assigned
+  // This is done in JS because MongoDB's $near cannot be combined with $or
+  rides = rides.filter((ride) => {
+    // For REQUESTED rides, include all (even if driverId is null)
+    if (ride.status === 'REQUESTED') {
+      return true;
+    }
+    // For SCHEDULED rides, only include if no driver is assigned
+    if (ride.status === 'SCHEDULED') {
+      return !ride.driverId;
+    }
+    return true;
+  });
+
+  // Apply limit after filtering if needed
+  if (limit > 0 && rides.length > limit) {
+    rides = rides.slice(0, limit);
+  }
+
+  return rides;
 };
 
 export const updateDriverAvailability = async (
@@ -1304,11 +1329,46 @@ export const findActiveRide = async (id, role) => {
       passengerId: id,
     };
 
+  // For drivers: include scheduled rides where they are assigned and time has arrived
+  // For passengers: include scheduled rides only when time has arrived or ride is active
+  // Scheduled rides should NOT appear in active rides before their scheduled time
+  const now = new Date();
+
   const ride = RideModel.findOne({
     ...query,
+    $or: [
+      // Regular active rides (not scheduled)
+      {
+        isScheduledRide: { $ne: true },
+        status: {
+          $in: [
+            'REQUESTED',
+            'DRIVER_ASSIGNED',
+            'DRIVER_ARRIVING',
+            'DRIVER_ARRIVED',
+            'RIDE_STARTED',
+            'RIDE_IN_PROGRESS',
+          ],
+        },
+      },
+      // Scheduled rides that are already in progress (driver on the way or ride started)
+      // These show regardless of time since they're physically happening
+      {
+        isScheduledRide: true,
+        status: {
+          $in: ['DRIVER_ARRIVING', 'DRIVER_ARRIVED', 'RIDE_STARTED', 'RIDE_IN_PROGRESS'],
+        },
+      },
+      // Scheduled rides where time has arrived (SCHEDULED, REQUESTED, or DRIVER_ASSIGNED)
+      // Only show if scheduled time has passed
+      {
+        isScheduledRide: true,
+        status: { $in: ['SCHEDULED', 'REQUESTED', 'DRIVER_ASSIGNED'] },
+        scheduledTime: { $lte: now }, // Only if scheduled time has passed
+      },
+    ],
     status: {
       $nin: [
-        'SCHEDULED',
         'RIDE_COMPLETED',
         'CANCELLED_BY_PASSENGER',
         'CANCELLED_BY_DRIVER',
