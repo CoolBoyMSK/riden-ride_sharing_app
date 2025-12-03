@@ -1374,6 +1374,33 @@ export const initSocket = (server) => {
           });
         }
 
+        // Ensure driver documents (including license) and waybill are still valid
+        const wayBillDocs = Object.values(driver.wayBill || {});
+        if (
+          wayBillDocs.length === 0 ||
+          wayBillDocs.some((doc) => !doc.status || doc.status !== 'issued')
+        ) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Way Bill not issued',
+          });
+        }
+
+        const documentList = Object.values(driver.documents || {});
+        if (
+          documentList.length === 0 ||
+          documentList.some((doc) => !doc.status || doc.status !== 'verified')
+        ) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Documents not verified',
+          });
+        }
+
         const ride = await findRideById(rideId);
         if (!ride) {
           return socket.emit('error', {
@@ -1627,6 +1654,33 @@ export const initSocket = (server) => {
             objectType,
             code: 'FORBIDDEN',
             message: 'Driver background check not approved',
+          });
+        }
+
+        // Ensure driver documents (including license) and waybill are still valid
+        const wayBillDocs = Object.values(driver.wayBill || {});
+        if (
+          wayBillDocs.length === 0 ||
+          wayBillDocs.some((doc) => !doc.status || doc.status !== 'issued')
+        ) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Way Bill not issued',
+          });
+        }
+
+        const documentList = Object.values(driver.documents || {});
+        if (
+          documentList.length === 0 ||
+          documentList.some((doc) => !doc.status || doc.status !== 'verified')
+        ) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Documents not verified',
           });
         }
 

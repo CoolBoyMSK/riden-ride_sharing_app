@@ -829,6 +829,25 @@ export const assignDriverToScheduledRide = async ({ rideId, driverId }) => {
     );
   }
 
+  // Ensure driver documents (including license) and waybill are valid at time of assignment
+  const wayBillDocs = Object.values(driver.wayBill || {});
+  if (
+    wayBillDocs.length === 0 ||
+    wayBillDocs.some((doc) => !doc.status || doc.status !== 'issued')
+  ) {
+    throw new Error('Driver waybill is not issued. Cannot assign this driver');
+  }
+
+  const documentList = Object.values(driver.documents || {});
+  if (
+    documentList.length === 0 ||
+    documentList.some((doc) => !doc.status || doc.status !== 'verified')
+  ) {
+    throw new Error(
+      'Driver documents are not fully verified. Cannot assign this driver',
+    );
+  }
+
   // Check driver location and availability
   const driverLocation = await DriverLocation.findOne({ driverId }).lean();
 
@@ -1481,6 +1500,15 @@ export const findActiveDriversCount = async () =>
     isSuspended: false,
     isDeleted: false,
     isApproved: true,
+    // Exclude any driver with a rejected document
+    'documents.proofOfWork.status': { $ne: 'rejected' },
+    'documents.profilePicture.status': { $ne: 'rejected' },
+    'documents.driversLicense.status': { $ne: 'rejected' },
+    'documents.commercialDrivingRecord.status': { $ne: 'rejected' },
+    'documents.vehicleOwnerCertificateAndInsurance.status': {
+      $ne: 'rejected',
+    },
+    'documents.vehicleInspection.status': { $ne: 'rejected' },
   }).lean();
 
 export const findDashboardData = async () => {
