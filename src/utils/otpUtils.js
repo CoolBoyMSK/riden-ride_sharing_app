@@ -94,7 +94,11 @@ export const requestEmailOtp = async (
 
     await emailQueue.add('sendEmailOtp', { email, otp, username, type, role });
 
-    return { ok: true };
+    // Local testing: hamesha OTP return karo (email ke sath)
+    return {
+      ok: true,
+      // otp,
+    };
   } catch (error) {
     console.error(`ERROR SENDING OTP to ${email}: ${error.message}`);
     return { ok: false };

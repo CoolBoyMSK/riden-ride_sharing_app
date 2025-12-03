@@ -108,6 +108,8 @@ export const signUpPassenger = async (
       signupOtp: true,
       message: `Email verification OTP to register passenger has been sent to ${email}`,
       email: email,
+      // Local / staging testing: include OTP in response (hidden in production)
+      // otp: env.NODE_ENV === 'production' ? undefined : result.otp,
     };
     return resp;
   } catch (error) {
@@ -175,6 +177,7 @@ export const signUpPassengerWithEmail = async (
       signupOtp: true,
       message: `Email verification OTP to register passenger has been sent to ${email}`,
       email: email,
+      // otp: result.otp, // local / staging: OTP direct response me milega
     };
     return resp;
   } catch (error) {
@@ -1575,38 +1578,75 @@ export const resendOtp = async (
 ) => {
   try {
     if (emailOtp) {
+      // 1) Try existing user (login / post-signup flows)
       let user = await findUserByEmail(email);
-      if (!user) {
-        resp.error = true;
-        resp.error_message = `User not found`;
-        return resp;
-      } else if (!user.roles.includes('passenger')) {
-        resp.error = true;
-        resp.error_message = 'No passenger found with this email';
-        return resp;
-      } else if (!user.isEmailVerified) {
-        resp.error = true;
-        resp.error_message = 'Email is not verified';
+
+      if (user) {
+        if (!user.roles.includes('passenger')) {
+          resp.error = true;
+          resp.error_message = 'No passenger found with this email';
+          return resp;
+        } else if (!user.isEmailVerified) {
+          resp.error = true;
+          resp.error_message = 'Email is not verified';
+          return resp;
+        }
+
+        const result = await resendEmailOtp(
+          user.email,
+          user.name,
+          {},
+          null,
+          user.roles[0],
+        );
+        if (!result.ok) {
+          resp.error = true;
+          resp.error_message = `Failed to send OTP. Please wait ${
+            result.waitSeconds || 60
+          }s`;
+          return resp;
+        }
+
+        resp.data = {
+          emailOtp: true,
+          message: `OTP has been sent to ${user.email}`,
+          email: user.email,
+        };
         return resp;
       }
 
-      const result = await resendEmailOtp(
-        user.email,
-        user.name,
-        {},
-        null,
-        user.roles[0],
+      // 2) If user not found, check pending signup context in Redis (email signup OTP resend)
+      const pendingRaw = await redisConfig.get(emailPendingKey(email));
+      if (!pendingRaw) {
+        resp.error = true;
+        resp.error_message =
+          'User not found and no pending signup exists for this email';
+        return resp;
+      }
+
+      const pending = JSON.parse(pendingRaw);
+      const username = pending.name || 'User';
+
+      const result = await requestEmailOtp(
+        email,
+        username,
+        pending,
+        'signup',
+        'passenger',
       );
       if (!result.ok) {
         resp.error = true;
-        resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
+        resp.error_message = `Failed to send OTP. Please wait ${
+          result.waitSeconds || 60
+        }s`;
         return resp;
       }
 
       resp.data = {
         emailOtp: true,
-        message: `OTP has been sent to ${user.email}`,
-        email: user.email,
+        message: `Signup OTP has been resent to ${email}`,
+        email,
+        otp: result.otp,
       };
       return resp;
     } else if (phoneOtp) {
