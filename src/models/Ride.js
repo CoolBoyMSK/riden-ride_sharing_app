@@ -163,17 +163,22 @@ const rideSchema = new mongoose.Schema(
       type: Date,
       validate: {
         validator: (value) => {
-          if (!value) {
-            return true;
-          } else if (value < new Date()) {
-            return false;
-          } else if (value < new Date() + 30 * 60 * 1000) {
-            return false;
-          }
+          if (!value) return true;
+
+          const now = new Date();
+          const thirtyMinutesFromNow = new Date(now.getTime() + 30 * 60 * 1000);
+          const threeDaysFromNow = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+
+          // Must be in future and at least 30 minutes from now
+          if (value < thirtyMinutesFromNow) return false;
+
+          // Must not be more than 3 days in future
+          if (value > threeDaysFromNow) return false;
+
           return true;
         },
         message:
-          'Scheduled time must be in the future and at least 30 minutes from now',
+          'Scheduled time must be at least 30 minutes from now and within the next 3 days',
       },
     },
 
