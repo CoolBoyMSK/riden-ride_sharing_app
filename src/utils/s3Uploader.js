@@ -54,14 +54,16 @@ export async function uploadDriverDocumentToS3(driverId, docType, file) {
   let ext = '';
   try {
     if (file.originalname && typeof file.originalname === 'string') {
-      ext = path.extmane(file.originalname);
+      // Correctly extract file extension from original name
+      ext = path.extname(file.originalname);
     }
   } catch (e) {
     ext = '';
   }
 
   if (!ext) {
-    const guessed = file.mimetype ? mime.extension(file.mimtype) : null;
+    // Fallback: guess extension from mimetype
+    const guessed = file.mimetype ? mime.extension(file.mimetype) : null;
     ext = guessed ? `.${guessed}` : '';
   }
 
