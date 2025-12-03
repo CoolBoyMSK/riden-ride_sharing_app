@@ -11,6 +11,7 @@ import {
 } from '../../../../dal/passenger.js';
 import { generateRideReceipt } from '../../../../utils/receiptGenerator.js';
 import { createAdminNotification } from '../../../../dal/notification.js';
+import env from '../../../../config/envConfig.js';
 
 export const getAllBookings = async (user, { page, limit }, resp) => {
   try {
