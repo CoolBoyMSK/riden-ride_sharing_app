@@ -71,6 +71,60 @@ export const findAllBookingsByDriverId = async (
   };
 };
 
+// Scheduled bookings for a driver (rides assigned to this driver)
+export const findScheduledBookingsByDriverId = async (
+  driverId,
+  page = 1,
+  limit = 10,
+) => {
+  const safePage =
+    Number.isInteger(Number(page)) && Number(page) > 0 ? Number(page) : 1;
+  const safeLimit =
+    Number.isInteger(Number(limit)) && Number(limit) > 0 ? Number(limit) : 10;
+
+  const skip = (safePage - 1) * safeLimit;
+  const now = new Date();
+
+  const query = {
+    driverId,
+    isScheduledRide: true,
+    $or: [
+      // Future scheduled rides assigned to this driver
+      {
+        status: { $in: ['SCHEDULED', 'REQUESTED', 'DRIVER_ASSIGNED'] },
+        scheduledTime: { $gte: now },
+      },
+      // Scheduled rides in progress
+      {
+        status: {
+          $in: [
+            'DRIVER_ARRIVING',
+            'DRIVER_ARRIVED',
+            'RIDE_STARTED',
+            'RIDE_IN_PROGRESS',
+          ],
+        },
+      },
+    ],
+  };
+
+  const bookings = await bookingModel
+    .find(query)
+    .sort({ scheduledTime: 1, createdAt: -1 })
+    .skip(skip)
+    .limit(safeLimit)
+    .lean();
+
+  const total = await bookingModel.countDocuments(query);
+
+  return {
+    data: bookings,
+    currentPage: safePage,
+    totalPages: Math.ceil(total / safeLimit),
+    totalRecords: total,
+  };
+};
+
 export const findBookingById = async (driverId, bookingId) =>
   bookingModel
     .findOne({ _id: bookingId, driverId })
@@ -139,14 +193,72 @@ export const findAllBookingsByPassengerId = async (
 
   const skip = (safePage - 1) * safeLimit;
 
+  // Return only non-scheduled (regular) rides in this list.
+  // Scheduled rides are now served via findScheduledBookingsByPassengerId.
+  const baseQuery = { passengerId, isScheduledRide: { $ne: true } };
+
   const bookings = await bookingModel
-    .find({ passengerId })
+    .find(baseQuery)
     .sort({ createdAt: -1 })
     .skip(skip)
     .limit(safeLimit)
     .lean();
 
-  const total = await bookingModel.countDocuments({ passengerId });
+  const total = await bookingModel.countDocuments(baseQuery);
+
+  return {
+    data: bookings,
+    currentPage: safePage,
+    totalPages: Math.ceil(total / safeLimit),
+    totalRecords: total,
+  };
+};
+
+// Scheduled bookings for a passenger (only scheduled rides: future + in-progress)
+export const findScheduledBookingsByPassengerId = async (
+  passengerId,
+  page = 1,
+  limit = 10,
+) => {
+  const safePage =
+    Number.isInteger(Number(page)) && Number(page) > 0 ? Number(page) : 1;
+  const safeLimit =
+    Number.isInteger(Number(limit)) && Number(limit) > 0 ? Number(limit) : 10;
+
+  const skip = (safePage - 1) * safeLimit;
+  const now = new Date();
+
+  const query = {
+    passengerId,
+    isScheduledRide: true,
+    $or: [
+      // Future scheduled rides
+      {
+        status: { $in: ['SCHEDULED', 'REQUESTED', 'DRIVER_ASSIGNED'] },
+        scheduledTime: { $gte: now },
+      },
+      // Scheduled rides already in progress
+      {
+        status: {
+          $in: [
+            'DRIVER_ARRIVING',
+            'DRIVER_ARRIVED',
+            'RIDE_STARTED',
+            'RIDE_IN_PROGRESS',
+          ],
+        },
+      },
+    ],
+  };
+
+  const bookings = await bookingModel
+    .find(query)
+    .sort({ scheduledTime: 1, createdAt: -1 })
+    .skip(skip)
+    .limit(safeLimit)
+    .lean();
+
+  const total = await bookingModel.countDocuments(query);
 
   return {
     data: bookings,

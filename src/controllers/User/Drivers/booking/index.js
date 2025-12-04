@@ -1,6 +1,7 @@
 import { handleResponse } from '../../../../utils/handleRespone.js';
 import {
   getAllBookings,
+  getScheduledBookings,
   getBookingById,
   addBookingReport,
   rateBooking,
@@ -16,6 +17,18 @@ export const getAllBookingsController = (req, res) =>
       validationFn: null,
       handlerParams: [req.user, req.query],
       successMessage: 'Bookings fetched successfully',
+    },
+    req,
+    res,
+  );
+
+export const getScheduledBookingsController = (req, res) =>
+  handleResponse(
+    {
+      handler: getScheduledBookings,
+      validationFn: null,
+      handlerParams: [req.user, req.query],
+      successMessage: 'Scheduled bookings fetched successfully',
     },
     req,
     res,

@@ -2,6 +2,7 @@ import express from 'express';
 import { registerRoute } from '../../../../utils/registerRoute.js';
 import {
   getAllBookingsController,
+  getScheduledBookingsController,
   getBookingByIdController,
   addBookingReportController,
   rateBookingController,
@@ -17,6 +18,13 @@ registerRoute({
   route: '/',
   driver_auth_enable: true,
   get_method: getAllBookingsController,
+});
+
+registerRoute({
+  router,
+  route: '/scheduled',
+  driver_auth_enable: true,
+  get_method: getScheduledBookingsController,
 });
 
 registerRoute({

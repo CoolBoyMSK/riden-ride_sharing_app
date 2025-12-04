@@ -1,5 +1,6 @@
 import {
   findAllBookingsByPassengerId,
+  findScheduledBookingsByPassengerId,
   findPassengerBookingById,
   createBookingReportByPassengerId,
   createBookingPassengerRating,
@@ -30,6 +31,36 @@ export const getAllBookings = async (user, { page, limit }, resp) => {
     if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to fetch bookings';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'something went wrong';
+    return resp;
+  }
+};
+
+export const getScheduledBookings = async (user, { page, limit }, resp) => {
+  try {
+    const passenger = await findPassengerByUserId(user._id);
+    if (!passenger) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch passenger';
+      return resp;
+    }
+
+    const success = await findScheduledBookingsByPassengerId(
+      passenger._id,
+      page,
+      limit,
+    );
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch scheduled bookings';
       return resp;
     }
 

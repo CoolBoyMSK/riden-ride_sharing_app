@@ -1,5 +1,6 @@
 import {
   findAllBookingsByDriverId,
+  findScheduledBookingsByDriverId,
   createBookingReportByDriverId,
   findBookingById,
   createBookingDriverRating,
@@ -28,6 +29,36 @@ export const getAllBookings = async (user, { page, limit }, resp) => {
     if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to fetch bookings';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'something went wrong';
+    return resp;
+  }
+};
+
+export const getScheduledBookings = async (user, { page, limit }, resp) => {
+  try {
+    const driver = await findDriverByUserId(user._id);
+    if (!driver) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch driver';
+      return resp;
+    }
+
+    const success = await findScheduledBookingsByDriverId(
+      driver._id,
+      page,
+      limit,
+    );
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch scheduled bookings';
       return resp;
     }
 
