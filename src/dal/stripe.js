@@ -153,22 +153,85 @@ export const getDriverBalance = async (driverId) =>
 
 export const getDriverTodayEarnings = async (driverId) => {
   const today = new Date();
-  const startOfDay = new Date(today.setHours(0, 0, 0, 0));
-  const endOfDay = new Date(today.setHours(23, 59, 59, 999));
+  const startOfDay = new Date(today);
+  startOfDay.setHours(0, 0, 0, 0);
+  const endOfDay = new Date(today);
+  endOfDay.setHours(23, 59, 59, 999);
 
-  const transactions = await TransactionModel.find({
+  // Debug: Log query parameters
+  console.log('🔍 [getDriverTodayEarnings] Debug Info:');
+  console.log('  DriverId:', driverId);
+  console.log('  Start of Day:', startOfDay.toISOString());
+  console.log('  End of Day:', endOfDay.toISOString());
+
+  const query = {
     driverId,
-    passengerId: { $exists: true },
     status: 'succeeded',
     isRefunded: false,
-    category: { $in: ['RIDE', 'TIP'] },
+    type: 'CREDIT', // Driver earnings are CREDIT (money added to driver)
+    category: { $in: ['PAYOUT', 'TIP'] }, // Driver earnings from rides (PAYOUT) and tips (TIP)
+    for: 'driver', // Transactions for driver
     createdAt: { $gte: startOfDay, $lte: endOfDay },
-    type: 'DEBIT',
-  })
-    .select('amount')
+  };
+
+  console.log('  Query:', JSON.stringify(query, null, 2));
+
+  // Check total transactions for this driver (any date)
+  const totalDriverTransactions = await TransactionModel.countDocuments({
+    driverId,
+    type: 'CREDIT',
+    for: 'driver',
+  });
+  console.log('  Total driver CREDIT transactions (all time):', totalDriverTransactions);
+
+  // Check today's transactions without filters
+  const todayTransactionsCount = await TransactionModel.countDocuments({
+    driverId,
+    createdAt: { $gte: startOfDay, $lte: endOfDay },
+  });
+  console.log('  Today\'s transactions (any type/category):', todayTransactionsCount);
+
+  // Check with each filter separately
+  const withStatusFilter = await TransactionModel.countDocuments({
+    driverId,
+    status: 'succeeded',
+    createdAt: { $gte: startOfDay, $lte: endOfDay },
+  });
+  console.log('  Today\'s transactions (status=succeeded):', withStatusFilter);
+
+  const withTypeFilter = await TransactionModel.countDocuments({
+    driverId,
+    type: 'CREDIT',
+    createdAt: { $gte: startOfDay, $lte: endOfDay },
+  });
+  console.log('  Today\'s transactions (type=CREDIT):', withTypeFilter);
+
+  const withCategoryFilter = await TransactionModel.countDocuments({
+    driverId,
+    category: { $in: ['PAYOUT', 'TIP'] },
+    createdAt: { $gte: startOfDay, $lte: endOfDay },
+  });
+  console.log('  Today\'s transactions (category=PAYOUT|TIP):', withCategoryFilter);
+
+  const withForFilter = await TransactionModel.countDocuments({
+    driverId,
+    for: 'driver',
+    createdAt: { $gte: startOfDay, $lte: endOfDay },
+  });
+  console.log('  Today\'s transactions (for=driver):', withForFilter);
+
+  // Execute main query
+  const transactions = await TransactionModel.find(query)
+    .select('amount category type status createdAt')
     .lean();
 
+  console.log('  Found transactions:', transactions.length);
+  if (transactions.length > 0) {
+    console.log('  Transaction details:', JSON.stringify(transactions, null, 2));
+  }
+
   const balance = transactions.reduce((acc, curr) => acc + curr.amount, 0);
+  console.log('  Calculated balance:', balance);
 
   return {
     balance,
@@ -1092,14 +1155,11 @@ export const captureHeldPayment = async (
       );
     }
 
-    // If actual amount differs from authorized amount, update first
+    // Note: Cannot update amount when status is 'requires_capture'
+    // If amount differs, we'll capture the different amount using amount_to_capture
     const authorizedAmount = paymentIntent.amount / 100; // Convert from cents
-    if (Math.abs(authorizedAmount - amount) > 0.01) {
-      // Update payment intent with new amount
-      await stripe.paymentIntents.update(paymentIntentId, {
-        amount: Math.round(amount * 100),
-      });
-    }
+    const amountToCapture = Math.round(amount * 100); // Amount to capture in cents
+    const shouldCaptureDifferentAmount = Math.abs(authorizedAmount - amount) > 0.01;
 
     // Calculate admin commission
     // Check if commission was already calculated
@@ -1129,11 +1189,14 @@ export const captureHeldPayment = async (
     const driverAmount = amount - adminCommission;
 
     // Capture the payment to platform account
+    // If amount differs from authorized amount, capture the different amount
     const capturedPayment = await stripe.paymentIntents.capture(
       paymentIntentId,
-      {
-        amount_to_capture: Math.round(amount * 100),
-      },
+      shouldCaptureDifferentAmount
+        ? {
+            amount_to_capture: amountToCapture,
+          }
+        : undefined, // Capture full authorized amount if same
     );
 
     if (capturedPayment.status !== 'succeeded') {

@@ -3918,12 +3918,35 @@ const cancelExpiredRide = async (rideId) => {
       }
 
       // Notify passenger about cancellation
-      emitToUser(cancelledRide.passengerId?.userId, 'ride:system_cancel_ride', {
-        success: false,
-        objectType: 'system-cancel-ride',
-        data: cancelledRide,
-        message: 'Ride cancelled. No drivers available in your area.',
-      });
+      if (cancelledRide.passengerId) {
+        const userId = cancelledRide.passengerId.userId?.toString();
+        if (userId) {
+          try {
+            emitToUser(userId, 'ride:system_cancel_ride', {
+              success: false,
+              objectType: 'system-cancel-ride',
+              data: cancelledRide,
+              message: 'Ride cancelled. No drivers available in your area.',
+            });
+            console.log(
+              `✅ System cancel event emitted to user ${userId} for ride ${rideId}`,
+            );
+          } catch (emitError) {
+            console.error(
+              `❌ Failed to emit system_cancel_ride event for ride ${rideId}:`,
+              emitError,
+            );
+          }
+        } else {
+          console.error(
+            `❌ Cannot emit system_cancel_ride: userId is missing for ride ${rideId}`,
+          );
+        }
+      } else {
+        console.error(
+          `❌ Cannot emit system_cancel_ride: passengerId is null for ride ${rideId}`,
+        );
+      }
 
       console.log(
         `Ride ${rideId} automatically cancelled due to no drivers available`,

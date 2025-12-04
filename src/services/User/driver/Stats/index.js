@@ -183,6 +183,10 @@ export const fetchDriverBalance = async (user, resp) => {
       return resp;
     }
 
+    console.log('🔍 [fetchDriverBalance] User ID:', user._id);
+    console.log('🔍 [fetchDriverBalance] Driver ID:', driver._id);
+    console.log('🔍 [fetchDriverBalance] Driver ID Type:', typeof driver._id);
+
     const success = await getDriverTodayEarnings(driver._id);
     if (!success) {
       resp.error = true;
