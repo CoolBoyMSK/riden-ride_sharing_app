@@ -291,7 +291,7 @@ const generateReceiptContent = (doc, ride, transaction, driver, passenger) => {
         70,
         yPosition + 50,
       )
-      .te.text(`Payment: ${ride.paymentMethod || 'N/A'}`, 250, yPosition + 35)
+      .text(`Payment: ${ride.paymentMethod || 'N/A'}`, 250, yPosition + 35)
       .text(
         `Transaction: ${safeSliceId(transaction._id)}`,
         250,

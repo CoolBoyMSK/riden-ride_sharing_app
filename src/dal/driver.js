@@ -2488,6 +2488,8 @@ const handleRegularRide = async (ride) => {
     );
     redisPipeline.setex(`ride:${ride._id}:phase1_searches`, 300, '0');
     redisPipeline.setex(`ride:${ride._id}:phase2_searches`, 300, '0');
+    // Store ride start time for 5km cancellation check (5 minutes timeout)
+    redisPipeline.setex(`ride:${ride._id}:start_time`, 600, Date.now().toString());
     await redisPipeline.exec();
 
     await startDriverLocationMonitoring(ride._id);
@@ -2504,11 +2506,11 @@ const handleRegularRide = async (ride) => {
       },
     );
 
-    // Calculate total search time based on zone configuration
+    // Calculate total search time based on zone configuration (back to production logic)
     const totalSearchTime =
       (searchParams.minRadiusTime + searchParams.maxRadiusTime) * 60 * 1000;
 
-    // Set expiration for auto-cancellation
+    // Set expiration for auto-cancellation (system_cancel_ride)
     await driverSearchQueue.add(
       'cancel-ride',
       { rideId: ride._id },
@@ -3350,12 +3352,59 @@ driverSearchQueue.process('cancel-ride', 5, async (job) => {
 const handlePhase1Search = async (rideId, ride, searchParams) => {
   try {
     const minRadius = searchParams.minRadius;
-    console.log(
+    const CANCEL_RADIUS = 5; // 5km radius
+    const CANCEL_TIMEOUT = 5 * 60 * 1000; // 5 minutes in milliseconds
+
+                                                                                                                                                                                                  console.log(
       `📍 Phase 1: Searching drivers in 0-${minRadius}km radius for ride ${rideId} (Zone: ${searchParams.zoneName})`,
     );
 
+    // Track ride start time for 5km cancellation check
+    const rideStartTimeKey = `ride:${rideId}:start_time`;
+    let rideStartTime = await redis.get(rideStartTimeKey);
+    
+    if (!rideStartTime) {
+      // First search - store start time
+      rideStartTime = Date.now();
+      await redis.setex(rideStartTimeKey, 600, rideStartTime.toString()); // Store for 10 minutes
+    } else {
+      rideStartTime = parseInt(rideStartTime);
+    }
+
+    // Check if 5 minutes have passed
+    const timeElapsed = Date.now() - rideStartTime;
+    const shouldCheckCancellation = timeElapsed >= CANCEL_TIMEOUT;
+
     // Search for drivers in min radius
-    await notifyDriversInRadius(ride, minRadius, 0);
+    const driversFound = await notifyDriversInRadius(ride, minRadius, 0);
+
+    // Check for 5km radius cancellation: If 5 minutes passed and no driver in 5km radius
+    if (shouldCheckCancellation && minRadius <= CANCEL_RADIUS) {
+      // Check if any drivers exist in 5km radius (without notifying)
+      const driversIn5km = await checkDriversInRadius(ride, CANCEL_RADIUS, 0);
+      
+      if (!driversIn5km || driversIn5km.length === 0) {
+        const currentRide = await getRideById(rideId);
+        if (currentRide && currentRide.status === 'REQUESTED') {
+          console.log(
+            `⏰ Auto-cancelling ride ${rideId}: No driver available in ${CANCEL_RADIUS}km radius for 5 minutes`,
+          );
+          
+          await cancelExpiredRide(rideId);
+
+          // Cleanup Redis
+          await redis.del(`ride:${rideId}`);
+          await redis.del(`ride:${rideId}:search_params`);
+          await redis.del(`ride:${rideId}:phase1_searches`);
+          await redis.del(`ride:${rideId}:phase2_searches`);
+          await redis.del(`ride:${rideId}:notified_drivers`);
+          await redis.del(rideStartTimeKey);
+
+          // Stop further searches
+          return;
+        }
+      }
+    }
 
     // Get current search count and increment
     const searchCount = await redis.incr(`ride:${rideId}:phase1_searches`);
@@ -3470,6 +3519,59 @@ const handlePhase2Search = async (rideId, ride, searchParams) => {
     }
   } catch (error) {
     console.error(`Error in handlePhase2Search for ride ${rideId}:`, error);
+  }
+};
+
+// Helper function to check if drivers exist in radius (without notifying)
+const checkDriversInRadius = async (ride, maxRadius, minRadius = 0) => {
+  try {
+    const maxRadiusMeters = maxRadius * 1000;
+    const minRadiusMeters = minRadius * 1000;
+
+    // Get drivers who have upcoming scheduled rides (within 60 minutes)
+    const driversWithScheduledRides = await getDriversWithUpcomingScheduledRides(60);
+
+    let availableDrivers;
+
+    if (minRadius === 0) {
+      // Min radius search
+      availableDrivers = await findNearbyDriverUserIds(
+        ride.carType,
+        ride.pickupLocation.coordinates,
+        maxRadiusMeters,
+        { excludeDriverIds: driversWithScheduledRides },
+      );
+    } else {
+      // Expanded radius search
+      availableDrivers = await findNearbyDriverUserIds(
+        ride.carType,
+        ride.pickupLocation.coordinates,
+        maxRadiusMeters,
+        { excludeDriverIds: driversWithScheduledRides },
+      );
+
+      // Filter by distance range
+      if (availableDrivers.length > 0) {
+        availableDrivers = await filterDriversByDistanceRange(
+          ride.pickupLocation.coordinates,
+          availableDrivers,
+          minRadiusMeters,
+          maxRadiusMeters,
+        );
+      }
+    }
+
+    // Filter out drivers with scheduled rides
+    if (availableDrivers && availableDrivers.length > 0) {
+      return availableDrivers.filter(
+        (driverId) => !driversWithScheduledRides.includes(driverId),
+      );
+    }
+
+    return [];
+  } catch (error) {
+    console.error('Error checking drivers in radius:', error);
+    return [];
   }
 };
 

@@ -180,11 +180,29 @@ export const generateReceipt = async ({ id }, resp) => {
 
 export const downloadReceipt = async ({ id }, res, resp) => {
   try {
-    const success = await findReceipt(id);
+    let success = await findReceipt(id);
     if (!success) {
-      resp.error = true;
-      resp.error_message = 'Failed to find receipt';
-      return resp;
+      // Auto-generate receipt if ride is completed but receipt does not exist
+      console.log(
+        `📄 [downloadReceipt][passenger] No receipt found for ride ${id}, attempting to generate...`,
+      );
+
+      const generated = await generateRideReceipt(id);
+
+      if (!generated?.success) {
+        resp.error = true;
+        resp.error_message =
+          generated?.error || 'Failed to generate receipt for this ride';
+        return resp;
+      }
+
+      // Re-fetch receipt after successful generation
+      success = await findReceipt(id);
+      if (!success) {
+        resp.error = true;
+        resp.error_message = 'Failed to find receipt after generation';
+        return resp;
+      }
     }
 
     res.setHeader('Content-Type', 'application/pdf');
