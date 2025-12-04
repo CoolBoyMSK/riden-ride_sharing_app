@@ -17,6 +17,7 @@ import {
   setDefaultPayoutMethodController,
   sendInstantPayoutRequestController,
   sendPayoutToDriverBankController,
+  instantPayoutWithFeeController,
 } from '../../../../controllers/User/Drivers/payment/index.js';
 
 const router = express.Router();
@@ -127,5 +128,13 @@ registerRoute({
   route: '/transfer',
   driver_auth_enable: true,
   post_method: sendPayoutToDriverBankController,
+});
+
+// Instant payout with 3% fee (uses available balance)
+registerRoute({
+  router,
+  route: '/instant-payout',
+  driver_auth_enable: true,
+  post_method: instantPayoutWithFeeController,
 });
 export default router;

@@ -74,18 +74,26 @@ export const getInstantPayoutRequests = async (
   resp,
 ) => {
   try {
-    const success = await findInstantPayoutRequests({
-      page,
-      limit,
-      search,
-    });
-    if (!success) {
+    const [requestsData, pendingCount] = await Promise.all([
+      findInstantPayoutRequests({
+        page,
+        limit,
+        search,
+      }),
+      countTotalPendingRequests(),
+    ]);
+
+    if (!requestsData) {
       resp.error = true;
       resp.error_message = 'Failed to fetch instant payout requests';
       return resp;
     }
 
-    resp.data = success;
+    // Add pending count to response
+    resp.data = {
+      ...requestsData,
+      pendingCount: pendingCount || 0,
+    };
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);

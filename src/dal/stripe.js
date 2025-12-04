@@ -423,6 +423,189 @@ export const createDriverPayout = async (payload) => {
   return DriverPayout.create(payload);
 };
 
+// Instant payout with fee (e.g. 3%).
+// - If overrideAmount provided: uses that gross amount (for example, unpaid earnings).
+// - Otherwise: uses driver's available wallet balance.
+// Sends (gross - fee) to driver's bank via Stripe payout,
+// and deducts the full gross (net + fee) from the wallet.
+export const processInstantPayoutWithFee = async (
+  driver,
+  feePercent = 3,
+  overrideAmount = null,
+) => {
+  const session = await mongoose.startSession();
+
+  try {
+    let result;
+
+    await session.withTransaction(async () => {
+      if (!driver.stripeAccountId) {
+        throw new Error('Driver has no Stripe account linked');
+      }
+
+      const wallet = await DriverWallet.findOne({
+        driverId: driver._id,
+      }).session(session);
+
+      if (!wallet) {
+        throw new Error('Driver wallet not found');
+      }
+
+      const baseAmount =
+        overrideAmount !== null && overrideAmount !== undefined
+          ? overrideAmount
+          : wallet.availableBalance;
+
+      const grossAmount = Number(baseAmount || 0);
+      if (isNaN(grossAmount) || grossAmount <= 0) {
+        throw new Error('No available balance for instant payout');
+      }
+
+      const MIN_PAYOUT_AMOUNT = 10;
+      if (grossAmount < MIN_PAYOUT_AMOUNT) {
+        throw new Error(
+          `Instant payout amount must be at least $${MIN_PAYOUT_AMOUNT}`,
+        );
+      }
+
+      const feeRate = Number(feePercent) / 100;
+      const feeAmount = +(grossAmount * feeRate).toFixed(2);
+      const netAmount = +(grossAmount - feeAmount).toFixed(2);
+
+      if (netAmount <= 0) {
+        throw new Error('Instant payout amount is too low after fee');
+      }
+
+      // Check if driver's default payout method supports instant payouts
+      // In Canada, instant payouts only work with debit cards, not bank accounts
+      const externalAccountsResult = await getAllExternalAccounts(
+        driver.stripeAccountId,
+      );
+      if (!externalAccountsResult.success) {
+        throw new Error(
+          'Failed to verify payout method. Please ensure you have a payout method added.',
+        );
+      }
+
+      const defaultAccount = externalAccountsResult.accounts.find(
+        (account) => account.default_for_currency === true,
+      );
+
+      if (!defaultAccount) {
+        throw new Error(
+          'No default payout method found. Please set a default payout method first.',
+        );
+      }
+
+      // Check if default account is a bank account (not supported for instant payouts in Canada)
+      if (defaultAccount.object === 'bank_account') {
+        throw new Error(
+          'Instant payouts to bank accounts are not supported for accounts based in Canada. Please add a debit card as your default payout method to use instant payouts. See: https://stripe.com/docs/payouts/instant-payouts-banks',
+        );
+      }
+
+      // If it's a card, proceed with instant payout
+      if (defaultAccount.object !== 'card') {
+        throw new Error(
+          `Unsupported payout method type: ${defaultAccount.object}. Instant payouts require a debit card.`,
+        );
+      }
+
+      // Create Stripe payout for the net amount
+      const payout = await stripe.payouts.create(
+        {
+          amount: Math.round(netAmount * 100),
+          currency: 'cad',
+          method: 'instant',
+        },
+        {
+          stripeAccount: driver.stripeAccountId,
+        },
+      );
+
+      if (!payout || payout.status === 'failed') {
+        throw new Error(
+          `Stripe payout failed: ${payout?.failure_message || 'Unknown error'}`,
+        );
+      }
+
+      // Deduct full gross amount (net + fee) from driver's available balance.
+      // If overrideAmount is used and wallet.availableBalance is lower,
+      // we still deduct from availableBalance up to its value, and leave the
+      // rest in negativeBalance handling for future adjustments.
+      await DriverWallet.findOneAndUpdate(
+        { driverId: driver._id },
+        { $inc: { availableBalance: -grossAmount } },
+        { session },
+      );
+
+      // Create transaction for driver (debit = payout to bank)
+      const [driverTx, feeTx] = await TransactionModel.create(
+        [
+          {
+            driverId: driver._id,
+            type: 'DEBIT',
+            category: 'INSTANT-PAYOUT',
+            amount: netAmount,
+            for: 'driver',
+            metadata: {
+              payoutId: payout.id,
+              stripeAccountId: driver.stripeAccountId,
+              status: payout.status,
+              method: payout.method,
+              feePercent,
+              feeAmount,
+              grossAmount,
+            },
+            status: payout.status === 'paid' ? 'succeeded' : 'pending',
+            referenceId: payout.id,
+          },
+          {
+            driverId: driver._id,
+            type: 'DEBIT',
+            category: 'INSTANT-PAYOUT',
+            amount: feeAmount,
+            for: 'driver',
+            metadata: {
+              payoutId: payout.id,
+              stripeAccountId: driver.stripeAccountId,
+              status: payout.status,
+              method: payout.method,
+              feePercent,
+              description: 'Instant payout fee',
+            },
+            status: payout.status === 'paid' ? 'succeeded' : 'pending',
+            referenceId: `${payout.id}_fee`,
+          },
+        ],
+        { session },
+      );
+
+      result = {
+        success: true,
+        payoutId: payout.id,
+        status: payout.status,
+        currency: payout.currency,
+        grossAmount,
+        feePercent,
+        feeAmount,
+        netAmount,
+        transactions: {
+          driverPayoutTransactionId: driverTx._id,
+          feeTransactionId: feeTx._id,
+        },
+      };
+    });
+
+    return result;
+  } catch (error) {
+    console.error('STRIPE INSTANT PAYOUT ERROR:', error);
+    throw error;
+  } finally {
+    await session.endSession();
+  }
+};
+
 const createRefundTransaction = async (payload) =>
   RefundTransaction.create(payload);
 
@@ -3172,13 +3355,21 @@ export const transferToDriverAccount = async (driver, requestId) => {
   if (wallet.pendingBalance <= 10)
     throw new Error('Transfer amount must be greater than $10');
 
+  // Decide payout method based on external account type and Stripe/region rules
+  // In Canada, instant payouts are only supported for debit cards, not bank accounts.
+  let payoutMethod = 'instant';
+  if (defaultAccount.object === 'bank_account') {
+    // Fall back to standard payout for bank accounts to avoid Stripe error
+    payoutMethod = 'standard';
+  }
+
   // Create payout from driver's connected account to their default external account
   // Stripe automatically uses the default external account if destination is not specified
   const payout = await stripe.payouts.create(
     {
       amount: Math.round(wallet.pendingBalance * 100),
       currency: 'cad',
-      method: 'instant', // or 'standard' for slower payouts
+      method: payoutMethod,
       description: `Driver payout transfer for request ${requestId}`,
       // destination is not specified, so Stripe will use the default external account
     },

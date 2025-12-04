@@ -15,6 +15,9 @@ import {
   setDefaultExternalAccount,
   createPayoutRequest,
   payoutToDriverBank,
+  processInstantPayoutWithFee,
+  getDriverBalance,
+  getDriverUnpaidBalance,
 } from '../../../../dal/stripe.js';
 
 export const onBoardDriver = async (user, { data }, ip, resp) => {
@@ -405,6 +408,71 @@ export const sendPayoutToDriverBank = async (user, { amount }, resp) => {
     }
 
     resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
+    return resp;
+  }
+};
+
+// Instant payout with 3% fee using driver's available balance
+export const instantPayoutWithFee = async (user, resp) => {
+  try {
+    const driver = await findDriverByUserId(user._id);
+    if (!driver) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch driver';
+      return resp;
+    }
+
+    const FEE_PERCENT = 3;
+
+    // 1) Try using available wallet balance
+    const wallet = await getDriverBalance(driver._id);
+    const availableBalance = Number(wallet?.availableBalance || 0);
+
+    let grossAmountToUse = null;
+    let source = null;
+
+    if (!isNaN(availableBalance) && availableBalance >= 10) {
+      // Sufficient wallet balance → use it directly
+      grossAmountToUse = availableBalance;
+      source = 'wallet';
+    } else {
+      // 2) Fallback: use unpaid ride earnings (all-time unpaid, close enough to current week)
+      const unpaid = await getDriverUnpaidBalance(driver._id);
+      const unpaidBalance = Number(unpaid?.unpaidBalance || 0);
+
+      if (isNaN(unpaidBalance) || unpaidBalance < 10) {
+        resp.error = true;
+        resp.error_message =
+          'No available balance for instant payout (min $10 required)';
+        return resp;
+      }
+
+      grossAmountToUse = unpaidBalance;
+      source = 'unpaidEarnings';
+    }
+
+    const result = await processInstantPayoutWithFee(
+      driver,
+      FEE_PERCENT,
+      grossAmountToUse,
+    );
+
+    if (!result?.success) {
+      resp.error = true;
+      resp.error_message =
+        result?.error || 'Failed to process instant payout with fee';
+      return resp;
+    }
+
+    resp.data = {
+      ...result,
+      source, // 'wallet' or 'unpaidEarnings'
+    };
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);

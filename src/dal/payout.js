@@ -188,6 +188,20 @@ export const findInstantPayoutRequests = async ({
       },
     },
     { $unwind: '$driver.user' },
+    {
+      $lookup: {
+        from: 'driverwallets',
+        localField: 'driverId',
+        foreignField: 'driverId',
+        as: 'wallet',
+      },
+    },
+    {
+      $unwind: {
+        path: '$wallet',
+        preserveNullAndEmptyArrays: true, // Handle drivers without wallet
+      },
+    },
   ];
 
   // Search only on driver name and uniqueId
@@ -215,7 +229,7 @@ export const findInstantPayoutRequests = async ({
       driver: {
         _id: '$driver._id',
         uniqueId: '$driver.uniqueId',
-        balance: '$driver.balance',
+        balance: { $ifNull: ['$wallet.availableBalance', 0] }, // Use DriverWallet.availableBalance
         user: {
           _id: '$driver.user._id',
           name: '$driver.user.name',

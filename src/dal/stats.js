@@ -353,6 +353,27 @@ export const findWeeklyStats = async (driverId) => {
             ],
           },
         },
+        // Total online driving hours for the week (sum of rideCompletedAt - rideStartedAt)
+        totalDrivingHours: {
+          $sum: {
+            $cond: [
+              {
+                $and: [
+                  { $gt: ['$rideCompletedAt', '$rideStartedAt'] },
+                  { $ne: ['$rideStartedAt', null] },
+                  { $ne: ['$rideCompletedAt', null] },
+                ],
+              },
+              {
+                $divide: [
+                  { $subtract: ['$rideCompletedAt', '$rideStartedAt'] },
+                  1000 * 60 * 60, // ms → hours
+                ],
+              },
+              0,
+            ],
+          },
+        },
       },
     },
   ]);
@@ -395,6 +416,7 @@ export const findWeeklyStats = async (driverId) => {
       totalRides: 0,
       totalCommission: 0,
       totalDriverEarnings: 0,
+      totalDrivingHours: 0,
     };
 
     const payout = payoutsMap.get(key);
@@ -425,6 +447,7 @@ export const findWeeklyStats = async (driverId) => {
         totalDeductions: stats.totalCommission,
         totalEarnings: stats.totalDriverEarnings,
         total: stats.totalRides,
+        totalOnlineHoursThisWeek: stats.totalDrivingHours || 0,
         // Include payout amount if available
         payoutAmount: payout?.totalPaid || 0,
       },
