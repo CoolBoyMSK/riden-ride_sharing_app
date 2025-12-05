@@ -69,12 +69,24 @@ export const findAdminNotifications = async (adminId, page = 1, limit = 10) => {
   };
 };
 
-export const findUnreadNotificationsCount = async (adminId) =>
-  AdminNotification.countDocuments({
+export const findUnreadNotificationsCount = async (adminId) => {
+  // Get admin's module access
+  const access = await AdminAccess.findOne({ admin: adminId })
+    .select('modules')
+    .lean();
+
+  if (!access || !access.modules?.length) {
+    return 0;
+  }
+
+  // Count unread notifications filtered by admin's module access
+  return AdminNotification.countDocuments({
+    module: { $in: access.modules },
     'recipients.adminId': new mongoose.Types.ObjectId(adminId),
     'recipients.isRead': false,
     'recipients.isDeleted': false,
   });
+};
 
 export const toggleNotificationReadStatus = async (adminId, notificationId) => {
   try {
