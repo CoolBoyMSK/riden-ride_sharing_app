@@ -3256,7 +3256,10 @@ export const sendAlert = async (alertId) => {
     // Build user query based on audience
     let userQuery = { userDeviceToken: { $exists: true, $ne: null, $ne: '' } };
 
-    if (alert.audience === 'custom') {
+    // If recipients are provided, use them (even if audience is not explicitly 'custom')
+    if (alert.recipients && alert.recipients.length > 0) {
+      userQuery._id = { $in: alert.recipients };
+    } else if (alert.audience === 'custom') {
       userQuery._id = { $in: alert.recipients || [] };
     } else if (alert.audience === 'drivers') {
       userQuery.roles = { $in: ['driver'] };

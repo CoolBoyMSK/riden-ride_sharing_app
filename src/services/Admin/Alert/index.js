@@ -13,7 +13,9 @@ export const sendAlert = async (
   resp,
 ) => {
   try {
-    const alert = await createAlert({ user, audience, recipients, blocks });
+    // If recipients are provided, automatically set audience to 'custom'
+    const finalAudience = recipients && recipients.length > 0 ? 'custom' : audience;
+    const alert = await createAlert({ user, audience: finalAudience, recipients, blocks });
     if (!alert) {
       resp.error = true;
       resp.error_message = 'Failed to create alert';
