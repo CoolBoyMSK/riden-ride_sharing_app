@@ -365,7 +365,7 @@ export const sendDriverPasswordResetOtpEmail = async (
   const html = Tpl({ username, code });
   await sendEmail({
     to: toEmail,
-    subject: 'Document Edit Request Approved',
+    subject: 'Forgot Password – OTP Sent',
     html,
   });
 };
