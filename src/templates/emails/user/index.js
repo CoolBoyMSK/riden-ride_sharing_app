@@ -365,7 +365,32 @@ export const sendDriverPasswordResetOtpEmail = async (
   const html = Tpl({ username, code });
   await sendEmail({
     to: toEmail,
-    subject: 'Forgot Password – OTP Sent',
+    subject: 'Reset Your RIDEN Password – OTP Sent',
+    html,
+  });
+};
+
+export const sendPassengerPasswordResetOtpEmail = async (
+  toEmail,
+  username,
+  code,
+) => {
+  const TplPath = path.join(
+    process.cwd(),
+    'src',
+    'templates',
+    'emails',
+    'user',
+    'html',
+    'driverPasswordResetOtpEmail.html',
+  );
+
+  const TplSource = fs.readFileSync(TplPath, 'utf-8');
+  const Tpl = handlebars.compile(TplSource);
+  const html = Tpl({ username, code });
+  await sendEmail({
+    to: toEmail,
+    subject: 'Reset Your RIDEN Password – OTP Sent',
     html,
   });
 };
