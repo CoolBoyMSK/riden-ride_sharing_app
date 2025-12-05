@@ -39,28 +39,85 @@ export const findAdminNotifications = async (adminId, page = 1, limit = 10) => {
   const skip = (page - 1) * limit;
 
   // Get total count for pagination info
-  const totalCount = await AdminNotification.countDocuments({
-    module: { $in: access.modules },
-    'recipients.adminId': adminId,
-    'recipients.isDeleted': false,
-  });
+  // Using aggregation to ensure all conditions match the same recipient
+  const totalCountResult = await AdminNotification.aggregate([
+    {
+      $match: {
+        module: { $in: access.modules },
+      },
+    },
+    {
+      $unwind: '$recipients',
+    },
+    {
+      $match: {
+        'recipients.adminId': new mongoose.Types.ObjectId(adminId),
+        'recipients.isDeleted': false,
+      },
+    },
+    {
+      $count: 'count',
+    },
+  ]);
+  const totalCount = totalCountResult[0]?.count || 0;
 
   // Calculate total pages
   const totalPages = Math.ceil(totalCount / limit);
 
   // Get total unread count across all pages
-  const unreadCount = await AdminNotification.countDocuments({
-    module: { $in: access.modules },
-    'recipients.adminId': new mongoose.Types.ObjectId(adminId),
-    'recipients.isRead': false,
-    'recipients.isDeleted': false,
-  });
+  // Using aggregation to ensure all conditions match the same recipient
+  const unreadCountResult = await AdminNotification.aggregate([
+    {
+      $match: {
+        module: { $in: access.modules },
+      },
+    },
+    {
+      $unwind: '$recipients',
+    },
+    {
+      $match: {
+        'recipients.adminId': new mongoose.Types.ObjectId(adminId),
+        'recipients.isRead': false,
+        'recipients.isDeleted': false,
+      },
+    },
+    {
+      $count: 'count',
+    },
+  ]);
+  const unreadCount = unreadCountResult[0]?.count || 0;
 
   // Get paginated notifications
+  // Using aggregation to ensure all conditions match the same recipient
+  // First, find notification IDs that match the criteria
+  const matchingNotificationIds = await AdminNotification.aggregate([
+    {
+      $match: {
+        module: { $in: access.modules },
+      },
+    },
+    {
+      $unwind: '$recipients',
+    },
+    {
+      $match: {
+        'recipients.adminId': new mongoose.Types.ObjectId(adminId),
+        'recipients.isDeleted': false,
+      },
+    },
+    {
+      $group: {
+        _id: '$_id',
+      },
+    },
+  ]);
+
+  const notificationIds = matchingNotificationIds.map((n) => n._id);
+
+  // Now fetch the full notifications with all recipients
   const notifications = await AdminNotification.find({
-    module: { $in: access.modules },
-    'recipients.adminId': adminId,
-    'recipients.isDeleted': false,
+    _id: { $in: notificationIds },
   })
     .sort({ createdAt: -1 })
     .skip(skip)
@@ -90,12 +147,28 @@ export const findUnreadNotificationsCount = async (adminId) => {
   }
 
   // Count unread notifications filtered by admin's module access
-  return AdminNotification.countDocuments({
-    module: { $in: access.modules },
-    'recipients.adminId': new mongoose.Types.ObjectId(adminId),
-    'recipients.isRead': false,
-    'recipients.isDeleted': false,
-  });
+  // Using aggregation to ensure all conditions match the same recipient
+  const result = await AdminNotification.aggregate([
+    {
+      $match: {
+        module: { $in: access.modules },
+      },
+    },
+    {
+      $unwind: '$recipients',
+    },
+    {
+      $match: {
+        'recipients.adminId': new mongoose.Types.ObjectId(adminId),
+        'recipients.isRead': false,
+        'recipients.isDeleted': false,
+      },
+    },
+    {
+      $count: 'count',
+    },
+  ]);
+  return result[0]?.count || 0;
 };
 
 export const toggleNotificationReadStatus = async (adminId, notificationId) => {

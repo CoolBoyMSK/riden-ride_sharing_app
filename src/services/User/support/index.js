@@ -103,16 +103,17 @@ export const createComplainTicket = async (
       return resp;
     }
 
-    const notify = await {
-      title: 'Ticket Submitted',
+    // Send admin notification when complaint is created
+    const notify = await createAdminNotification({
+      title: 'New Support Ticket Submitted',
       message: `A ${user.roles[0]} has submitted a support ticket.`,
       metadata: success,
       module: 'support_ticket',
       type: 'ALERT',
       actionLink: `${env.FRONTEND_URL}/api/admin/support/get?id=${success._id}`,
-    };
+    });
     if (!notify) {
-      console.error('Failed to send notification');
+      console.error('Failed to send admin notification');
     }
 
     resp.data = success;
