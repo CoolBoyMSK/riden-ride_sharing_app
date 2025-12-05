@@ -3087,8 +3087,24 @@ export const findAdminCommissions = async ({
 
   // --- Search filter ---
   if (search && search.trim()) {
-    const regex = new RegExp(search.trim(), 'i');
-    filter.$or = [{ carType: regex }, { 'rideId.rideId': regex }];
+    const searchTerm = search.trim();
+    const regex = new RegExp(searchTerm, 'i');
+    
+    // Try to find by rideId first (if search looks like a rideId or exact match)
+    const ride = await Booking.findOne({
+      $or: [
+        { rideId: searchTerm },
+        { rideId: regex },
+      ],
+    }).lean();
+    
+    if (ride) {
+      // Found ride by rideId, filter by rideId reference
+      filter.rideId = ride._id;
+    } else {
+      // No ride found, search by carType
+      filter.carType = regex;
+    }
   }
 
   // --- Date filter ---
