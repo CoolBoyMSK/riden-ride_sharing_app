@@ -123,9 +123,17 @@ export const blockPassenger = async (passengerId, resp) => {
     return resp;
   }
 
+  // When blocking, isActive is set to false in the Passenger model
+  // This will make the user inactive and clear their online status
+  // The auth middleware should check isActive and reject requests if false
+
   await sendPassengerSuspendedEmail(user.userId?.email, user.userId?.name);
 
-  resp.data = { id: updated._id, isBlocked: updated.isBlocked };
+  resp.data = { 
+    id: updated._id, 
+    isBlocked: updated.isBlocked,
+    isActive: updated.isActive, // Will be false when blocked, clearing online status
+  };
   return resp;
 };
 

@@ -63,12 +63,18 @@ export const deletePassenger = async (passengerId, session) => {
   return true;
 };
 
-export const updatePassengerBlockStatus = (passengerId, isBlocked) =>
-  PassengerModel.findByIdAndUpdate(
+export const updatePassengerBlockStatus = (passengerId, isBlocked) => {
+  const update = { isBlocked };
+  if (isBlocked) {
+    // When blocking, set isActive to false to clear online status and force logout
+    update.isActive = false;
+  }
+  return PassengerModel.findByIdAndUpdate(
     passengerId,
-    { isBlocked },
+    { $set: update },
     { new: true },
   ).lean();
+};
 
 export const findPassengers = (filter = {}, { page, limit }) =>
   PassengerModel.find(filter)

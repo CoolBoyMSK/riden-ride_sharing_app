@@ -1,5 +1,6 @@
 import { extractToken, verifyAccessToken } from '../utils/auth.js';
 import UserModel from '../models/User.js';
+import PassengerModel from '../models/Passenger.js';
 
 export const authenticate = async (req, res, next) => {
   const token = extractToken(req);
@@ -14,6 +15,16 @@ export const authenticate = async (req, res, next) => {
   if (!user || !user.roles.includes('passenger')) {
     return res.status(403).json({ code: 403, message: 'Forbidden' });
   }
+
+  // Check if passenger is blocked or inactive
+  const passenger = await PassengerModel.findOne({ userId: user._id }).lean();
+  if (passenger && (passenger.isBlocked || passenger.isActive === false)) {
+    return res.status(403).json({ 
+      code: 403, 
+      message: 'Account is blocked or inactive. Please contact support.' 
+    });
+  }
+
   req.user = user;
   next();
 };
