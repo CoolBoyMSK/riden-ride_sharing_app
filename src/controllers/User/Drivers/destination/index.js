@@ -13,7 +13,7 @@ export const addDestinationController = (req, res) =>
     {
       handler: addDestination,
       handlerParams: [req.user, req.body],
-      successMessage: 'Destination created successfully',
+      successMessage: 'Destination ride set successfully',
     },
     req,
     res,
@@ -24,7 +24,7 @@ export const fetchDestinationsController = (req, res) =>
     {
       handler: fetchDestinations,
       handlerParams: [req.user],
-      successMessage: 'Destinations fetched successfully',
+      successMessage: 'Destination ride status fetched successfully',
     },
     req,
     res,
@@ -46,7 +46,7 @@ export const editDestinationController = (req, res) =>
     {
       handler: editDestination,
       handlerParams: [req.user, req.params, req.body],
-      successMessage: 'Destination fetched successfully',
+      successMessage: 'Destination ride updated successfully',
     },
     req,
     res,
@@ -68,7 +68,7 @@ export const toggleDestinationController = (req, res) =>
     {
       handler: toggleDestination,
       handlerParams: [req.user],
-      successMessage: 'Destination toggled successfully',
+      successMessage: 'Destination ride toggled successfully',
     },
     req,
     res,

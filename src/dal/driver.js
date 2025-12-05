@@ -16,6 +16,7 @@ import { emitToUser, emitToRide } from '../realtime/socket.js';
 import { notifyUser, createAdminNotification } from '../dal/notification.js';
 import { PASSENGER_ALLOWED } from '../enums/vehicleEnums.js';
 import { cancelPaymentHold } from './stripe.js';
+import { haversineDistance } from './ride.js';
 import env from '../config/envConfig.js';
 import Queue from 'bull';
 import Redis from 'ioredis';
@@ -2330,6 +2331,76 @@ export const getDriversWithUpcomingScheduledRides = async (withinMinutes = 60) =
 };
 
 // Driver Searching Logic
+// Find drivers with active destination rides whose destination is within radius of dropoff location
+export const findDestinationRideDrivers = async (
+  carType,
+  dropoffLocation,
+  radiusKm = 10,
+  { excludeDriverIds = [], limit = 50, session = null } = {},
+) => {
+  try {
+
+    // Find drivers with active destination rides
+    const drivers = await DriverModel.find({
+      'destinationRide.isActive': true,
+      'destinationRide.endLocation.coordinates': { $exists: true, $ne: null },
+      'vehicle.type': carType,
+      isBlocked: false,
+      isSuspended: false,
+      isActive: true,
+      backgroundCheckStatus: 'approved',
+      status: 'online',
+      ...(excludeDriverIds.length > 0 && {
+        userId: { $nin: excludeDriverIds },
+      }),
+    })
+      .populate({
+        path: 'userId',
+        match: { isBlocked: { $ne: true } },
+      })
+      .limit(limit * 3) // Get more to account for filtering
+      .lean();
+
+    // Filter by distance using haversine formula and check availability
+    const matchingDrivers = [];
+    for (const driver of drivers) {
+      if (!driver.userId) continue;
+
+      // Check if driver location exists and is available
+      const driverLocation = await DriverLocation.findOne({
+        driverId: driver._id,
+        status: 'online',
+        isAvailable: true,
+        currentRideId: { $in: [null, undefined, ''] },
+      }).lean();
+
+      if (!driverLocation) continue;
+
+      const destCoords = driver.destinationRide.endLocation.coordinates;
+      if (!destCoords || destCoords.length !== 2) continue;
+
+      const distance = haversineDistance(
+        { latitude: destCoords[1], longitude: destCoords[0] },
+        { latitude: dropoffLocation[1], longitude: dropoffLocation[0] },
+      );
+
+      if (distance <= radiusKm) {
+        matchingDrivers.push({
+          userId: driver.userId._id.toString(),
+          distance,
+        });
+      }
+    }
+
+    // Sort by distance and return user IDs
+    matchingDrivers.sort((a, b) => a.distance - b.distance);
+    return matchingDrivers.slice(0, limit).map((d) => d.userId);
+  } catch (error) {
+    console.error('Error finding destination ride drivers:', error);
+    return [];
+  }
+};
+
 export const findNearbyDriverUserIds = async (
   carType,
   location,
@@ -3652,6 +3723,20 @@ export const notifyDriversInRadius = async (ride, maxRadius, minRadius = 0) => {
         );
       }
     }
+
+    // Also check for destination ride drivers (passenger dropoff within 10km of driver destination)
+    const destinationRideDrivers = await findDestinationRideDrivers(
+      ride.carType,
+      ride.dropoffLocation.coordinates,
+      10, // 10km radius
+      { excludeDriverIds, limit: 20 },
+    );
+
+    // Combine regular drivers with destination ride drivers (avoid duplicates)
+    const allAvailableDrivers = [
+      ...new Set([...availableDrivers, ...destinationRideDrivers]),
+    ];
+    availableDrivers = allAvailableDrivers;
 
     if (!availableDrivers || availableDrivers.length === 0) {
       console.log(

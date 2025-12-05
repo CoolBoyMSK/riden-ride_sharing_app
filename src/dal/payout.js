@@ -1,6 +1,7 @@
 import Driver from '../models/Driver.js';
 import Payout from '../models/Payout.js';
 import InstantPayoutRequest from '../models/InstantPayoutRequest.js';
+import DriverWallet from '../models/DriverWallet.js';
 
 const parseDate = (dateStr, endOfDay = false) => {
   if (!dateStr) return null;
@@ -17,39 +18,127 @@ export const findUpcomingPayouts = async ({
   limit = 10,
   search = '',
 }) => {
-  const skip = (page - 1) * limit;
+  const pageNumber = Number(page) || 1;
+  const limitNumber = Number(limit) || 10;
+  const skip = (pageNumber - 1) * limitNumber;
 
-  // Base filter: balance > 0 and at least 1 ride
-  const query = {
-    balance: { $gt: 0 },
-    rideIds: { $exists: true, $not: { $size: 0 } },
-  };
+  // Build aggregation pipeline
+  const pipeline = [
+    // Lookup DriverWallet to get availableBalance
+    {
+      $lookup: {
+        from: 'driverwallets',
+        localField: '_id',
+        foreignField: 'driverId',
+        as: 'wallet',
+      },
+    },
+    {
+      $unwind: {
+        path: '$wallet',
+        preserveNullAndEmptyArrays: true, // Include drivers without wallet (balance = 0)
+      },
+    },
+    // Lookup User for driver info
+    {
+      $lookup: {
+        from: 'users',
+        localField: 'userId',
+        foreignField: '_id',
+        as: 'user',
+      },
+    },
+    {
+      $unwind: '$user',
+    },
+    // Lookup completed rides count
+    {
+      $lookup: {
+        from: 'rides',
+        let: { driverId: '$_id' },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ['$driverId', '$$driverId'] },
+                  { $eq: ['$status', 'RIDE_COMPLETED'] },
+                ],
+              },
+            },
+          },
+        ],
+        as: 'completedRides',
+      },
+    },
+    // Filter: availableBalance > 0 and at least 1 completed ride
+    {
+      $match: {
+        $expr: {
+          $and: [
+            {
+              $gt: [
+                { $ifNull: ['$wallet.availableBalance', 0] },
+                0,
+              ],
+            },
+            {
+              $gt: [{ $size: '$completedRides' }, 0],
+            },
+          ],
+        },
+      },
+    },
+  ];
 
   // Add search filter if provided
   if (search.trim()) {
-    query['$or'] = [
-      { uniqueId: { $regex: search, $options: 'i' } }, // search in Driver uniqueId
-      { 'userId.name': { $regex: search, $options: 'i' } }, // search in populated User name
-    ];
+    pipeline.push({
+      $match: {
+        $or: [
+          { uniqueId: { $regex: search, $options: 'i' } },
+          { 'user.name': { $regex: search, $options: 'i' } },
+        ],
+      },
+    });
   }
 
-  const drivers = await Driver.find(query)
-    .populate({
-      path: 'userId',
-      select: 'name email profileImg', // only include name and email
-    })
-    .skip(skip)
-    .limit(limit)
-    .lean();
+  // Project desired fields
+  pipeline.push({
+    $project: {
+      _id: 1,
+      uniqueId: 1,
+      status: 1,
+      isApproved: 1,
+      isActive: 1,
+      balance: { $ifNull: ['$wallet.availableBalance', 0] },
+      rideIds: 1,
+      userId: {
+        _id: '$user._id',
+        name: '$user.name',
+        email: '$user.email',
+        profileImg: '$user.profileImg',
+      },
+      completedRidesCount: { $size: '$completedRides' },
+    },
+  });
 
-  const total = await Driver.countDocuments(query);
+  // Count total documents for pagination
+  const countPipeline = [...pipeline, { $count: 'total' }];
+  const countResult = await Driver.aggregate(countPipeline);
+  const total = countResult[0]?.total || 0;
+
+  // Apply pagination
+  pipeline.push({ $skip: skip }, { $limit: limitNumber });
+
+  const drivers = await Driver.aggregate(pipeline);
 
   return {
     data: drivers,
-    page: page ? parseInt(page) : null,
-    limit: limit ? parseInt(limit) : null,
+    page: pageNumber,
+    limit: limitNumber,
     total,
-    totalPages: Math.ceil(total / limit),
+    totalPages: Math.ceil(total / limitNumber),
   };
 };
 

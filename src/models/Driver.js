@@ -220,6 +220,44 @@ const driverSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    destinationRide: {
+      isActive: {
+        type: Boolean,
+        default: false,
+        index: true,
+      },
+      startLocation: {
+        coordinates: {
+          type: [Number], // [longitude, latitude]
+          index: '2dsphere',
+        },
+        address: {
+          type: String,
+          trim: true,
+        },
+        placeName: {
+          type: String,
+          trim: true,
+        },
+      },
+      endLocation: {
+        coordinates: {
+          type: [Number], // [longitude, latitude]
+          index: '2dsphere',
+        },
+        address: {
+          type: String,
+          trim: true,
+        },
+        placeName: {
+          type: String,
+          trim: true,
+        },
+      },
+      activatedAt: {
+        type: Date,
+      },
+    },
     isVerified: {
       type: Boolean,
       default: false,

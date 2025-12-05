@@ -23,6 +23,7 @@ export const findAdminNotifications = async (adminId, page = 1, limit = 10) => {
   if (!access || !access.modules?.length) {
     return {
       notifications: [],
+      unreadCount: 0,
       pagination: {
         total: 0,
         page,
@@ -47,6 +48,14 @@ export const findAdminNotifications = async (adminId, page = 1, limit = 10) => {
   // Calculate total pages
   const totalPages = Math.ceil(totalCount / limit);
 
+  // Get total unread count across all pages
+  const unreadCount = await AdminNotification.countDocuments({
+    module: { $in: access.modules },
+    'recipients.adminId': new mongoose.Types.ObjectId(adminId),
+    'recipients.isRead': false,
+    'recipients.isDeleted': false,
+  });
+
   // Get paginated notifications
   const notifications = await AdminNotification.find({
     module: { $in: access.modules },
@@ -60,6 +69,7 @@ export const findAdminNotifications = async (adminId, page = 1, limit = 10) => {
 
   return {
     notifications,
+    unreadCount,
     pagination: {
       total: totalCount,
       page,

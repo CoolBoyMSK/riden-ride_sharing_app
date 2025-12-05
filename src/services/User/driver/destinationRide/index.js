@@ -1,21 +1,11 @@
 import mongoose from 'mongoose';
 import {
   findDriverByUserId,
-  createDestination,
-  findAllDestination,
-  findDestinationById,
-  updateDestinationById,
-  deleteDestinationById,
   updateDriverByUserId,
 } from '../../../../dal/driver.js';
 import { checkDestinationRides } from '../../../../dal/ride.js';
 
-// Set Destination Ride (using /add endpoint)
-export const addDestination = async (
-  user,
-  { startLocation, endLocation },
-  resp,
-) => {
+export const setDestinationRide = async (user, { startLocation, endLocation }, resp) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
@@ -23,7 +13,6 @@ export const addDestination = async (
     if (!driver) {
       await session.abortTransaction();
       session.endSession();
-
       resp.error = true;
       resp.error_message = 'Driver not found';
       return resp;
@@ -91,7 +80,6 @@ export const addDestination = async (
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
-
     console.error(`API ERROR: ${error}`);
     resp.error = true;
     resp.error_message = error.message || 'Something went wrong';
@@ -99,8 +87,7 @@ export const addDestination = async (
   }
 };
 
-// Get Destination Ride Status (using /get endpoint)
-export const fetchDestinations = async (user, resp) => {
+export const getDestinationRide = async (user, resp) => {
   try {
     const driver = await findDriverByUserId(user._id);
     if (!driver) {
@@ -109,7 +96,6 @@ export const fetchDestinations = async (user, resp) => {
       return resp;
     }
 
-    // Return destination ride status
     resp.data = {
       destinationRide: driver.destinationRide || null,
       canAcceptDestinationRide: driver.destinationRide?.isActive
@@ -125,36 +111,8 @@ export const fetchDestinations = async (user, resp) => {
   }
 };
 
-export const fetchDestinationById = async (user, { id }, resp) => {
-  try {
-    const driver = await findDriverByUserId(user._id);
-    if (!driver) {
-      resp.error = true;
-      resp.error_essage = 'Failed to find Driver';
-      return resp;
-    }
-
-    const destination = await findDestinationById(id, driver._id);
-    if (!destination) {
-      resp.error = true;
-      resp.error_message = 'Failed to fetch destination';
-      return resp;
-    }
-
-    resp.data = destination;
-    return resp;
-  } catch (error) {
-    console.error(`API ERROR: ${error}`);
-    resp.error = true;
-    resp.error_message = error.message || 'something went wrong';
-    return resp;
-  }
-};
-
-// Update Destination Ride (using /edit/:id endpoint - id is ignored, updates current driver's destination ride)
-export const editDestination = async (
+export const updateDestinationRide = async (
   user,
-  { id },
   { startLocation, endLocation },
   resp,
 ) => {
@@ -165,7 +123,6 @@ export const editDestination = async (
     if (!driver) {
       await session.abortTransaction();
       session.endSession();
-
       resp.error = true;
       resp.error_message = 'Driver not found';
       return resp;
@@ -211,14 +168,6 @@ export const editDestination = async (
       };
     }
 
-    if (Object.keys(updateData).length === 0) {
-      await session.abortTransaction();
-      session.endSession();
-      resp.error = true;
-      resp.error_message = 'No update data provided. Include startLocation or endLocation to update.';
-      return resp;
-    }
-
     const updated = await updateDriverByUserId(user._id, updateData, { session });
 
     if (!updated) {
@@ -240,7 +189,6 @@ export const editDestination = async (
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
-
     console.error(`API ERROR: ${error}`);
     resp.error = true;
     resp.error_message = error.message || 'Something went wrong';
@@ -248,50 +196,7 @@ export const editDestination = async (
   }
 };
 
-export const deleteDestination = async (user, { id }, resp) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-  try {
-    const driver = await findDriverByUserId(user._id);
-    if (!driver) {
-      await session.abortTransaction();
-      session.endSession();
-
-      resp.error = true;
-      resp.error_essage = 'Failed to find Driver';
-      return resp;
-    }
-
-    const success = await deleteDestinationById(id, driver._id, { session });
-    if (!success) {
-      await session.abortTransaction();
-      session.endSession();
-
-      resp.error = true;
-      resp.error_essage = 'Failed to delete destination';
-      return resp;
-    }
-
-    await session.commitTransaction();
-    session.endSession();
-
-    resp.data = {
-      message: 'Destination deleted successfully',
-    };
-    return resp;
-  } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-
-    console.error(`API ERROR: ${error}`);
-    resp.error = true;
-    resp.error_message = error.message || 'something went wrong';
-    return resp;
-  }
-};
-
-// Toggle Destination Ride (Activate/Deactivate using /toggle endpoint)
-export const toggleDestination = async (user, resp) => {
+export const removeDestinationRide = async (user, resp) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
@@ -299,54 +204,28 @@ export const toggleDestination = async (user, resp) => {
     if (!driver) {
       await session.abortTransaction();
       session.endSession();
-
       resp.error = true;
       resp.error_message = 'Driver not found';
       return resp;
     }
 
-    const isCurrentlyActive = driver.destinationRide?.isActive || false;
-
-    let updateData;
-    if (isCurrentlyActive) {
-      // Deactivate destination ride
-      updateData = {
+    const updated = await updateDriverByUserId(
+      user._id,
+      {
         'destinationRide.isActive': false,
         'destinationRide.startLocation': null,
         'destinationRide.endLocation': null,
         'destinationRide.activatedAt': null,
         isDestination: false, // Keep this for backward compatibility
-      };
-    } else {
-      // Activate destination ride (but need locations first)
-      if (!driver.destinationRide?.startLocation?.coordinates || !driver.destinationRide?.endLocation?.coordinates) {
-        await session.abortTransaction();
-        session.endSession();
-
-        resp.error = true;
-        resp.error_message = 'Cannot activate destination ride. Please set start and end locations first using /add endpoint.';
-        return resp;
-      }
-
-      updateData = {
-        'destinationRide.isActive': true,
-        'destinationRide.activatedAt': new Date(),
-        isDestination: true, // Keep this for backward compatibility
-      };
-    }
-
-    const updated = await updateDriverByUserId(
-      user._id,
-      updateData,
+      },
       { session },
     );
 
     if (!updated) {
       await session.abortTransaction();
       session.endSession();
-
       resp.error = true;
-      resp.error_message = 'Failed to toggle destination ride';
+      resp.error_message = 'Failed to remove destination ride';
       return resp;
     }
 
@@ -354,19 +233,18 @@ export const toggleDestination = async (user, resp) => {
     session.endSession();
 
     resp.data = {
-      destinationRide: updated.destinationRide,
-      message: isCurrentlyActive
-        ? 'Destination ride deactivated successfully'
-        : 'Destination ride activated successfully',
+      message: 'Destination ride removed successfully',
     };
     return resp;
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
-
     console.error(`API ERROR: ${error}`);
     resp.error = true;
     resp.error_message = error.message || 'Something went wrong';
     return resp;
   }
 };
+
+
+

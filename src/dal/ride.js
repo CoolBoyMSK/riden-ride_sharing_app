@@ -92,17 +92,27 @@ export const updateRideById = async (
 };
 
 export const checkDestinationRides = async (driverId) => {
+  // Get start of today in UTC
+  const startOfToday = new Date();
+  startOfToday.setUTCHours(0, 0, 0, 0);
+
+  // Get end of today in UTC
+  const endOfToday = new Date();
+  endOfToday.setUTCHours(23, 59, 59, 999);
+
+  // Count completed destination rides today
   const completedDestinationRidesCount = await RideModel.countDocuments({
     driverId,
     status: 'RIDE_COMPLETED',
     isDestinationRide: true,
+    rideCompletedAt: {
+      $gte: startOfToday,
+      $lte: endOfToday,
+    },
   });
 
-  if (completedDestinationRidesCount >= 2) {
-    return false;
-  } else {
-    return true;
-  }
+  // Driver can accept destination rides if they have completed less than 2 today
+  return completedDestinationRidesCount < 2;
 };
 
 export const createFeedback = async (payload) => Feedback.create(payload);

@@ -1450,7 +1450,8 @@ export const initSocket = (server) => {
         }
 
         let isDestinationRide = false;
-        if (driver.isDestination) {
+        // Check if driver has active destination ride
+        if (driver.destinationRide?.isActive || driver.isDestination) {
           const canAcceptDestinationRide = await checkDestinationRides(
             driver._id,
           );
@@ -1460,10 +1461,36 @@ export const initSocket = (server) => {
               objectType,
               code: 'FORBIDDEN',
               message:
-                'Driver has reached the maximum number of destination rides',
+                'Driver has reached the maximum number of destination rides for today (2 rides per day limit)',
             });
           }
-          isDestinationRide = true;
+          
+          // Verify that passenger dropoff is within 10km of driver's destination
+          if (driver.destinationRide?.isActive && driver.destinationRide?.endLocation?.coordinates) {
+            const destCoords = driver.destinationRide.endLocation.coordinates;
+            const dropoffCoords = ride.dropoffLocation?.coordinates;
+            
+            if (dropoffCoords && destCoords.length === 2 && dropoffCoords.length === 2) {
+              const distance = haversineDistance(
+                { latitude: destCoords[1], longitude: destCoords[0] },
+                { latitude: dropoffCoords[1], longitude: dropoffCoords[0] },
+              );
+              
+              if (distance <= 10) {
+                isDestinationRide = true;
+              } else {
+                return socket.emit('error', {
+                  success: false,
+                  objectType,
+                  code: 'FORBIDDEN',
+                  message: 'This ride is not within 10km of your destination',
+                });
+              }
+            }
+          } else {
+            // Backward compatibility: if isDestination is true but no destinationRide data
+            isDestinationRide = true;
+          }
         }
 
         const rideCoords = {
