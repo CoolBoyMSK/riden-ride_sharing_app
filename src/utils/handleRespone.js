@@ -8,15 +8,25 @@ export const handleResponse = async (options, req, res) => {
       validationFn,
       handlerParams = [],
       successMessage,
+      validationParams,
     } = options;
 
     if (validationFn) {
       try {
-        await validationFn(req.body);
+        const paramsToValidate = validationParams !== undefined ? validationParams : req.body;
+        await validationFn(paramsToValidate);
       } catch (e) {
+        // Handle Joi validation errors
+        if (e.details && Array.isArray(e.details) && e.details.length > 0) {
+          return res.status(400).json({
+            code: 400,
+            message: e.details[0].message.replace(/\"/g, ''),
+          });
+        }
+        // Handle other types of errors
         return res.status(400).json({
           code: 400,
-          message: e.details[0].message.replace(/\"/g, ''),
+          message: e.message || 'Validation failed',
         });
       }
     }

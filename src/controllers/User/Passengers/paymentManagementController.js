@@ -13,6 +13,7 @@ import {
   getPaymentIntent
 } from '../../../services/User/passenger/paymentManagement.js';
 import { handleResponse } from '../../../utils/handleRespone.js';
+import { validateSetDefaultPaymentMethod } from '../../../validations/user/passenger/paymentManagementValidators.js';
 
 export const addCardSetupIntentController = (req, res) =>
   handleResponse(
@@ -54,7 +55,8 @@ export const getCardByIdController = (req, res) =>
   handleResponse(
     {
       handler: getCardById,
-      validationFn: () => validateSetDefaultPaymentMethod(req.params),
+      validationFn: validateSetDefaultPaymentMethod,
+      validationParams: req.params,
       handlerParams: [req.user, req.params],
       successMessage: 'Card fetched successfully',
     },
@@ -78,7 +80,8 @@ export const setDefaultCardController = (req, res) =>
   handleResponse(
     {
       handler: setDefaultCard,
-      validationFn: () => validateSetDefaultPaymentMethod(req.params),
+      validationFn: validateSetDefaultPaymentMethod,
+      validationParams: req.params,
       handlerParams: [req.user, req.params],
       successMessage: 'Default Card added successfully',
     },
@@ -90,7 +93,8 @@ export const topUpInAppWalletController = (req, res) =>
   handleResponse(
     {
       handler: topUpInAppWallet,
-      validationFn: () => validateSetDefaultPaymentMethod(req.params),
+      validationFn: validateSetDefaultPaymentMethod,
+      validationParams: req.params,
       handlerParams: [req.user, req.params, req.body],
       successMessage: 'Wallet top-up successfull',
     },
