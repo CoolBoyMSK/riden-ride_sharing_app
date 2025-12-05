@@ -26,6 +26,7 @@ import {
   holdRidePayment,
   cancelPaymentHold,
   getPassengerWallet,
+  captureCommissionAtBooking,
 } from '../../../dal/stripe.js';
 
 export const getFareEstimate = async (
@@ -427,6 +428,8 @@ export const bookRide = async (userId, rideData) => {
             'Failed to authorize payment. Please check your payment method and try again.',
         };
       }
+
+      // Commission will be captured after ride creation (we need rideId)
     } else {
       return {
         success: false,
@@ -463,6 +466,37 @@ export const bookRide = async (userId, rideData) => {
       paymentIntentId: paymentHoldResult?.paymentIntentId || null,
       cardType,
     });
+
+    // Capture 20% commission at booking time (after ride is created)
+    if (paymentHoldResult?.success && ride?._id) {
+      const commissionResult = await captureCommissionAtBooking(
+        paymentHoldResult.paymentIntentId,
+        fareResult.estimatedFare,
+        ride._id,
+        carType,
+        fareResult.fareBreakdown?.promoDiscount || 0,
+      );
+
+      if (!commissionResult.success) {
+        // If commission capture fails, cancel the payment hold and cleanup
+        await cancelPaymentHold(paymentHoldResult.paymentIntentId).catch(
+          (cancelError) => {
+            console.error('Failed to cancel payment hold:', cancelError);
+          },
+        );
+        await cleanupFailedRide(ride._id).catch((cleanupError) => {
+          console.error('Cleanup failed:', cleanupError);
+        });
+        return {
+          success: false,
+          message:
+            commissionResult.error ||
+            'Failed to process commission. Please try again.',
+        };
+      }
+
+      console.log('Commission captured at booking:', commissionResult);
+    }
 
     if (!ride) {
       return {

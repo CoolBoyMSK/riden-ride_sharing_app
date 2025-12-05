@@ -6,10 +6,18 @@ import Ride from '../models/Ride.js';
 import Report from '../models/Report.js';
 import mongoose, { Error } from 'mongoose';
 import { generateUniqueId } from '../utils/auth.js';
-import { COMPLAIN_TYPES } from '../enums/complainEnums.js';
+import {
+  COMPLAIN_TYPES,
+  DRIVER_COMPLAIN_TYPES,
+  PASSENGER_COMPLAIN_TYPES,
+  getComplainTypesByRole,
+} from '../enums/complainEnums.js';
 import { notifyUser } from '../dal/notification.js';
 
-export const findComplainTypes = () => {
+export const findComplainTypes = (role = null) => {
+  if (role) {
+    return getComplainTypesByRole(role);
+  }
   return COMPLAIN_TYPES;
 };
 

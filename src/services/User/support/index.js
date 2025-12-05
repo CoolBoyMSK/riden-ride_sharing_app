@@ -16,7 +16,9 @@ import env from '../../../config/envConfig.js';
 
 export const getComplainTypes = async (user, resp) => {
   try {
-    const success = findComplainTypes();
+    // Get role-specific complaint types based on user role
+    const userRole = user.roles && user.roles.length > 0 ? user.roles[0] : null;
+    const success = findComplainTypes(userRole);
     if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to fetch complain types';

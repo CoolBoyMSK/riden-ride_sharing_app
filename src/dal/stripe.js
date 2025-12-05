@@ -1218,6 +1218,228 @@ export const cancelPaymentHold = async (paymentIntentId) => {
   }
 };
 
+/**
+ * Capture 20% commission at booking time
+ * This function captures 20% of the estimated fare immediately when a ride is booked
+ */
+export const captureCommissionAtBooking = async (
+  paymentIntentId,
+  estimatedFare,
+  rideId,
+  carType,
+  discount = 0,
+) => {
+  try {
+    if (!paymentIntentId) {
+      throw new Error('Payment intent ID is required');
+    }
+
+    if (!estimatedFare || estimatedFare <= 0) {
+      throw new Error('Invalid estimated fare amount');
+    }
+
+    if (!rideId) {
+      throw new Error('Ride ID is required');
+    }
+
+    // Calculate 20% commission
+    const commissionPercentage = 20;
+    const commissionAmount = Math.round((estimatedFare * commissionPercentage) / 100 * 100) / 100; // Round to 2 decimal places
+    const commissionAmountInCents = Math.round(commissionAmount * 100);
+
+    // Retrieve payment intent to check status
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+
+    if (paymentIntent.status !== 'requires_capture') {
+      throw new Error(
+        `Payment intent is not in requires_capture state. Current status: ${paymentIntent.status}`,
+      );
+    }
+
+    // Capture only the commission amount (20%)
+    const capturedPayment = await stripe.paymentIntents.capture(
+      paymentIntentId,
+      {
+        amount_to_capture: commissionAmountInCents,
+      },
+    );
+
+    if (capturedPayment.status !== 'succeeded') {
+      throw new Error(
+        `Commission capture failed. Status: ${capturedPayment.status}`,
+      );
+    }
+
+    // Store commission record
+    await AdminCommission.create({
+      date: new Date(),
+      rideId,
+      carType,
+      totalAmount: estimatedFare,
+      discount,
+      commission: commissionPercentage,
+      commissionAmount,
+      driverDistanceCommission: 0,
+      isRefunded: false,
+    });
+
+    return {
+      success: true,
+      paymentIntentId: capturedPayment.id,
+      status: capturedPayment.status,
+      commissionAmount,
+      estimatedFare,
+      remainingAmount: estimatedFare - commissionAmount,
+    };
+  } catch (error) {
+    console.error('STRIPE ERROR: ', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to capture commission at booking',
+    };
+  }
+};
+
+/**
+ * Capture full payment on cancellation
+ * This function captures the full estimated fare when user cancels the ride
+ */
+export const captureFullPaymentOnCancellation = async (
+  paymentIntentId,
+  estimatedFare,
+  rideId,
+) => {
+  try {
+    if (!paymentIntentId) {
+      throw new Error('Payment intent ID is required');
+    }
+
+    if (!estimatedFare || estimatedFare <= 0) {
+      throw new Error('Invalid estimated fare amount');
+    }
+
+    if (!rideId) {
+      throw new Error('Ride ID is required');
+    }
+
+    // Retrieve payment intent to check status
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+
+    if (paymentIntent.status !== 'requires_capture') {
+      // If already captured, check if we need to capture remaining amount
+      if (paymentIntent.status === 'succeeded') {
+        const alreadyCaptured = paymentIntent.amount_received
+          ? paymentIntent.amount_received / 100
+          : paymentIntent.amount / 100;
+        const remainingAmount = estimatedFare - alreadyCaptured;
+
+        if (remainingAmount > 0.01) {
+          // Create a new payment intent for the remaining amount
+          const ride = await RideModel.findById(rideId).populate('passengerId');
+          if (!ride) {
+            throw new Error('Ride not found');
+          }
+
+          const passenger = await PassengerModel.findById(ride.passengerId).populate('userId');
+          if (!passenger || !passenger.stripeCustomerId) {
+            throw new Error('Passenger not found or missing Stripe customer ID');
+          }
+
+          if (!ride.paymentMethodId) {
+            throw new Error('Payment method not found in ride');
+          }
+
+          const remainingPaymentIntent = await stripe.paymentIntents.create({
+            amount: Math.round(remainingAmount * 100),
+            currency: 'cad',
+            customer: passenger.stripeCustomerId,
+            payment_method: ride.paymentMethodId,
+            confirm: true,
+            off_session: true,
+            description: `Cancellation fee for ride ${rideId} - Remaining amount: $${remainingAmount.toFixed(2)}`,
+            metadata: {
+              type: 'cancellation_fee',
+              rideId: rideId.toString(),
+              passengerId: passenger._id.toString(),
+            },
+          });
+
+          return {
+            success: true,
+            paymentIntentId: remainingPaymentIntent.id,
+            status: remainingPaymentIntent.status,
+            amount: estimatedFare,
+            alreadyCaptured,
+            newlyCaptured: remainingAmount,
+          };
+        }
+
+        return {
+          success: true,
+          paymentIntentId: paymentIntent.id,
+          status: paymentIntent.status,
+          amount: estimatedFare,
+          message: 'Full amount already captured',
+        };
+      }
+
+      throw new Error(
+        `Payment intent is not in requires_capture state. Current status: ${paymentIntent.status}`,
+      );
+    }
+
+    // Calculate remaining amount to capture (full fare - already captured commission)
+    // amount_capturable is the amount that can still be captured
+    // amount is the total authorized amount
+    // amount_received is the amount already captured
+    const totalAuthorized = paymentIntent.amount / 100; // Convert from cents
+    const alreadyCaptured = paymentIntent.amount_received
+      ? paymentIntent.amount_received / 100
+      : totalAuthorized - (paymentIntent.amount_capturable / 100);
+    const remainingAmount = estimatedFare - alreadyCaptured;
+    const remainingAmountInCents = Math.round(remainingAmount * 100);
+
+    if (remainingAmountInCents > 0) {
+      // Capture the remaining amount
+      const capturedPayment = await stripe.paymentIntents.capture(
+        paymentIntentId,
+        {
+          amount_to_capture: remainingAmountInCents,
+        },
+      );
+
+      if (capturedPayment.status !== 'succeeded') {
+        throw new Error(
+          `Full payment capture failed. Status: ${capturedPayment.status}`,
+        );
+      }
+
+      return {
+        success: true,
+        paymentIntentId: capturedPayment.id,
+        status: capturedPayment.status,
+        amount: estimatedFare,
+        alreadyCaptured,
+        newlyCaptured: remainingAmount,
+      };
+    }
+
+    return {
+      success: true,
+      paymentIntentId: paymentIntent.id,
+      status: paymentIntent.status,
+      amount: estimatedFare,
+      message: 'Full amount already captured',
+    };
+  } catch (error) {
+    console.error('STRIPE ERROR: ', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to capture full payment on cancellation',
+    };
+  }
+};
+
 export const partialRefundPaymentHold = async (
   paymentIntentId,
   estimatedFare,

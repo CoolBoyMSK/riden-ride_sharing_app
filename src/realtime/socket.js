@@ -66,6 +66,7 @@ import {
   cancelPaymentHold,
   processDriverPayoutAfterCapture,
   transferTipToDriverExternalAccount,
+  captureFullPaymentOnCancellation,
 } from '../dal/stripe.js';
 import { createCallLog, findCallById, updateCallLogById } from '../dal/call.js';
 import { findDrivingHours } from '../dal/stats.js';
@@ -3736,22 +3737,34 @@ export const initSocket = (server) => {
           });
         }
 
-        // Cancel payment hold if payment was held (paymentIntentId exists)
+        // Capture full payment on cancellation (user must pay full amount if they cancel)
         if (ride.paymentIntentId) {
           try {
-            const cancelResult = await cancelPaymentHold(ride.paymentIntentId);
-            if (!cancelResult.success) {
-              // Log error but don't fail the cancellation
-              console.error(
-                `Failed to cancel payment hold for ride ${ride._id}:`,
-                cancelResult.error,
+            const estimatedFare = ride.estimatedFare || 0;
+            if (estimatedFare > 0) {
+              const captureResult = await captureFullPaymentOnCancellation(
+                ride.paymentIntentId,
+                estimatedFare,
+                ride._id,
               );
+              if (!captureResult.success) {
+                // Log error but don't fail the cancellation
+                console.error(
+                  `Failed to capture full payment on cancellation for ride ${ride._id}:`,
+                  captureResult.error,
+                );
+              } else {
+                console.log(
+                  `Full payment captured on cancellation for ride ${ride._id}:`,
+                  captureResult,
+                );
+              }
             }
-          } catch (cancelError) {
+          } catch (captureError) {
             // Log error but don't fail the cancellation
             console.error(
-              `Error cancelling payment hold for ride ${ride._id}:`,
-              cancelError,
+              `Error capturing full payment on cancellation for ride ${ride._id}:`,
+              captureError,
             );
           }
         }
