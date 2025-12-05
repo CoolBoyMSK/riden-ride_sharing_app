@@ -204,7 +204,7 @@ export const findDriver = async (driverId) => {
                 },
               },
               as: 'completed',
-              in: '$$completed.fare',
+              in: { $ifNull: ['$$completed.actualFare', 0] },
             },
           },
         },
@@ -218,12 +218,42 @@ export const findDriver = async (driverId) => {
           },
         },
         cancellationRatio: {
-          $cond: {
-            if: { $gt: ['$totalBookings', 0] },
-            then: {
-              $divide: ['$canceledBookings', '$totalBookings'],
+          $let: {
+            vars: {
+              total: { $size: '$bookings' },
+              canceled: {
+                $size: {
+                  $filter: {
+                    input: '$bookings',
+                    as: 'b',
+                    cond: {
+                      $in: [
+                        '$$b.status',
+                        [
+                          'CANCELLED_BY_PASSENGER',
+                          'CANCELLED_BY_DRIVER',
+                          'CANCELLED_BY_SYSTEM',
+                        ],
+                      ],
+                    },
+                  },
+                },
+              },
             },
-            else: 0,
+            in: {
+              $cond: {
+                if: { $gt: ['$$total', 0] },
+                then: {
+                  $round: [
+                    {
+                      $divide: ['$$canceled', '$$total'],
+                    },
+                    4,
+                  ],
+                },
+                else: 0,
+              },
+            },
           },
         },
         daysSinceCreated: {
