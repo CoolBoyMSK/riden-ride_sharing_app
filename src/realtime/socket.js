@@ -1818,34 +1818,84 @@ export const initSocket = (server) => {
         // Notify passenger
         if (passengerUserId) {
           if (isNewAssignment) {
-            // Driver just accepted - notify passenger of new assignment
-            emitToUser(passengerUserId, 'ride:scheduled_ride_accepted', {
-              success: true,
-              objectType: 'scheduled-ride-accepted',
-              data: {
-                ride: updatedRide,
-                scheduledTime: updatedRide.scheduledTime?.toLocaleString('en-US', {
-                  weekday: 'short',
-                  year: 'numeric',
-                  month: 'short',
-                  day: 'numeric',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                }),
-                driverName,
-              },
-              message: `${driverName} has accepted your scheduled ride`,
-            });
+            // Check if scheduled time has already passed - if yes, activate the ride
+            const scheduledTime = updatedRide.scheduledTime ? new Date(updatedRide.scheduledTime) : null;
+            const now = new Date();
+            const isScheduledTimePassed = scheduledTime && scheduledTime <= now;
 
-            await notifyUser({
-              userId: passengerUserId,
-              title: 'Driver Accepted Your Scheduled Ride',
-              message: `${driverName} has accepted your scheduled ride. We'll notify you when it's time for pickup.`,
-              module: 'ride',
-              metadata: updatedRide,
-              storeInDB: true,
-              isPush: true,
-            });
+            if (isScheduledTimePassed) {
+              // Scheduled time has passed - activate the ride and notify passenger
+              emitToUser(passengerUserId, 'ride:active', {
+                success: true,
+                objectType: 'active-ride',
+                data: updatedRide,
+                message: 'Your scheduled ride is now active',
+              });
+
+              await notifyUser({
+                userId: passengerUserId,
+                title: 'Scheduled Ride Started',
+                message: `Your scheduled ride with ${driverName} is now active. Please be ready at the pickup location.`,
+                module: 'ride',
+                metadata: updatedRide,
+              });
+
+              // Also notify driver
+              const driverUserId =
+                updatedRide.driverId?.userId?._id?.toString() ||
+                updatedRide.driverId?.userId?.toString() ||
+                driver.userId?._id?.toString();
+              
+              if (driverUserId) {
+                const passengerName = updatedRide.bookedFor === 'SOMEONE'
+                  ? updatedRide.bookedForName
+                  : updatedRide.passengerId?.userId?.name || 'Passenger';
+
+                emitToUser(driverUserId, 'ride:active', {
+                  success: true,
+                  objectType: 'active-ride',
+                  data: updatedRide,
+                  message: 'Your scheduled ride is now active',
+                });
+
+                await notifyUser({
+                  userId: driverUserId,
+                  title: 'Scheduled Ride Started',
+                  message: `Your scheduled ride with ${passengerName} is now active. Please proceed to the pickup location.`,
+                  module: 'ride',
+                  metadata: updatedRide,
+                });
+              }
+            } else {
+              // Scheduled time hasn't arrived yet - just notify of assignment
+              emitToUser(passengerUserId, 'ride:scheduled_ride_accepted', {
+                success: true,
+                objectType: 'scheduled-ride-accepted',
+                data: {
+                  ride: updatedRide,
+                  scheduledTime: updatedRide.scheduledTime?.toLocaleString('en-US', {
+                    weekday: 'short',
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  }),
+                  driverName,
+                },
+                message: `${driverName} has accepted your scheduled ride`,
+              });
+
+              await notifyUser({
+                userId: passengerUserId,
+                title: 'Driver Accepted Your Scheduled Ride',
+                message: `${driverName} has accepted your scheduled ride. We'll notify you when it's time for pickup.`,
+                module: 'ride',
+                metadata: updatedRide,
+                storeInDB: true,
+                isPush: true,
+              });
+            }
           } else {
             // Driver acknowledged pre-assigned ride
             emitToUser(passengerUserId, 'ride:driver_acknowledged_scheduled_ride', {
@@ -3649,6 +3699,7 @@ export const initSocket = (server) => {
         }
 
         const cancellableStatuses = [
+          'SCHEDULED', // Allow cancelling scheduled rides before they become active
           'REQUESTED',
           'DRIVER_ASSIGNED',
           'DRIVER_ARRIVING',
@@ -3811,16 +3862,17 @@ export const initSocket = (server) => {
           actionLink: 'ride:passenger_cancel_ride',
           storeInDB: false,
         });
-        const notifyPassenger = await notifyUser({
-          userId: newPassenger.userId?._id,
-          title: 'Ride Cancelled',
-          message: `Ride cancelled successfully.`,
-          module: 'ride',
-          metadata: updatedRide,
-          actionLink: 'ride:passenger_cancel_ride',
-          storeInDB: false,
-        });
-        if (!notifyDriver || !notifyPassenger) {
+        // Passenger notification disabled - passenger already knows they cancelled the ride
+        // const notifyPassenger = await notifyUser({
+        //   userId: newPassenger.userId?._id,
+        //   title: 'Ride Cancelled',
+        //   message: `Ride cancelled successfully.`,
+        //   module: 'ride',
+        //   metadata: updatedRide,
+        //   actionLink: 'ride:passenger_cancel_ride',
+        //   storeInDB: false,
+        // });
+        if (!notifyDriver) {
           console.log('Failed to send notification');
         }
         // Notification Logic End

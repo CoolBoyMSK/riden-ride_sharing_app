@@ -494,8 +494,9 @@ const handleScheduledRide = async (ride) => {
         });
 
         // Clear the driver assignment and start fresh search
+        // Keep status as SCHEDULED - don't activate until new driver is assigned
         updatedRide = await updateRideById(ride._id, {
-          status: 'REQUESTED',
+          status: 'SCHEDULED', // Keep as SCHEDULED until driver is assigned
           driverId: null,
           driverAssignedAt: null,
           requestedAt: new Date(),
@@ -666,17 +667,19 @@ const handleScheduledRide = async (ride) => {
         driverId: ride.driverId?._id || ride.driverId,
       });
     } else {
-      // No pre-assigned driver - change status to REQUESTED and start driver search
+      // No pre-assigned driver - keep status as SCHEDULED and start driver search in background
+      // Ride will only become active (REQUESTED/DRIVER_ASSIGNED) when driver is assigned
+      // Just update requestedAt to track when scheduled time arrived
       updatedRide = await updateRideById(ride._id, {
-        status: 'REQUESTED',
         requestedAt: new Date(),
+        // Keep status as SCHEDULED - don't activate until driver is assigned
       });
 
       if (!updatedRide) {
-        throw new Error('Failed to update ride status');
+        throw new Error('Failed to update ride');
       }
 
-      // Start driver search (non-blocking)
+      // Start driver search (non-blocking) - this will work with SCHEDULED status for scheduled rides
       startProgressiveDriverSearch(updatedRide).catch((error) => {
         logger.error('Error starting driver search for scheduled ride', {
           rideId: ride._id,
@@ -698,32 +701,24 @@ const handleScheduledRide = async (ride) => {
         });
       });
 
-      // Notify passenger that ride is now active and searching for drivers
+      // Notify passenger that we are searching for drivers (but ride is not active yet)
       const passengerUserId =
         updatedRide.passengerId?.userId?._id?.toString() ||
         updatedRide.passengerId?.userId?.toString() ||
         ride.passengerId?.userId;
 
       if (passengerUserId) {
-        // Emit socket event for real-time update
-        emitToUser(passengerUserId, 'ride:active', {
-          success: true,
-          objectType: 'active-ride',
-          data: updatedRide,
-          message: 'Your scheduled ride is now active, searching for drivers',
+        await notifyUser({
+          userId: ride.passengerId?.userId,
+          title: 'Searching for Driver',
+          message:
+            'Your scheduled ride time has arrived. We are searching for available drivers near you. The ride will become active once a driver is assigned.',
+          module: 'ride',
+          metadata: updatedRide,
         });
       }
 
-      await notifyUser({
-        userId: ride.passengerId?.userId,
-        title: 'Scheduled Ride Activated',
-        message:
-          'Your scheduled ride is now active. We are searching for available drivers near you.',
-        module: 'ride',
-        metadata: updatedRide,
-      });
-
-      logger.info('Scheduled ride activated and driver search started', {
+      logger.info('Scheduled ride driver search started (status remains SCHEDULED until driver assigned)', {
         rideId: ride._id,
       });
     }

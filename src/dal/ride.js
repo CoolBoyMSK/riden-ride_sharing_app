@@ -1249,7 +1249,10 @@ export const handleDriverResponse = async (
     if (!rideId || !driverId) return;
 
     const ride = await RideModel.findById(rideId);
-    if (!ride || ride.status !== 'REQUESTED') return; // Already assigned
+    // For scheduled rides, also accept SCHEDULED status (ride becomes active when driver is assigned)
+    const isActiveStatus = ride?.status === 'REQUESTED' || 
+      (ride?.isScheduledRide && ride?.status === 'SCHEDULED');
+    if (!ride || !isActiveStatus) return; // Already assigned or not in active status
 
     const parkingLot = findNearestParkingForPickup(
       ride.pickupLocation.coordinates,

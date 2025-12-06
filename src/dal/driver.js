@@ -2008,7 +2008,7 @@ export const findFareConfigurationForLocation = async (
 //   };
 // };
 
-const calculateSurgeScenario = (
+export const calculateSurgeScenario = (
   rideCount,
   driverCount,
   surgeConfig,
@@ -3412,8 +3412,12 @@ driverSearchQueue.process('search-drivers', 10, async (job) => {
     const currentRide = await getRideById(rideId);
 
     // Check if ride is still active
-    if (!currentRide || currentRide.status !== 'REQUESTED') {
-      console.log(`🛑 Ride ${rideId} is no longer active`);
+    // For scheduled rides, also accept SCHEDULED status (ride becomes active when driver is assigned)
+    const isActiveStatus = currentRide?.status === 'REQUESTED' || 
+      (currentRide?.isScheduledRide && currentRide?.status === 'SCHEDULED');
+    
+    if (!currentRide || !isActiveStatus) {
+      console.log(`🛑 Ride ${rideId} is no longer active (status: ${currentRide?.status})`);
       return;
     }
 
@@ -3479,8 +3483,9 @@ const handlePhase1Search = async (rideId, ride, searchParams) => {
     // Search for drivers in min radius
     const driversFound = await notifyDriversInRadius(ride, minRadius, 0);
 
-    // Check for 5km radius cancellation: If 5 minutes passed and no driver in 5km radius
-    if (shouldCheckCancellation && minRadius <= CANCEL_RADIUS) {
+    // Check for 5km radius cancellation: If 30 seconds passed and no driver in 5km radius
+    // Note: We always check 5km radius regardless of minRadius, as this is the cancellation threshold
+    if (shouldCheckCancellation) {
       // Check if any drivers exist in 5km radius (without notifying)
       const driversIn5km = await checkDriversInRadius(ride, CANCEL_RADIUS, 0);
       
@@ -3488,7 +3493,7 @@ const handlePhase1Search = async (rideId, ride, searchParams) => {
         const currentRide = await getRideById(rideId);
         if (currentRide && currentRide.status === 'REQUESTED') {
           console.log(
-            `⏰ Auto-cancelling ride ${rideId}: No driver available in ${CANCEL_RADIUS}km radius for 5 minutes`,
+            `⏰ Auto-cancelling ride ${rideId}: No driver available in ${CANCEL_RADIUS}km radius for 30 seconds`,
           );
           
           await cancelExpiredRide(rideId);

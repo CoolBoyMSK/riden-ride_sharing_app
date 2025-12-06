@@ -195,7 +195,12 @@ export const findAllBookingsByPassengerId = async (
 
   // Return only non-scheduled (regular) rides in this list.
   // Scheduled rides are now served via findScheduledBookingsByPassengerId.
-  const baseQuery = { passengerId, isScheduledRide: { $ne: true } };
+  // Explicitly exclude scheduled rides - only include rides where isScheduledRide is NOT true
+  // This handles cases where isScheduledRide is false, null, undefined, or doesn't exist
+  const baseQuery = {
+    passengerId,
+    isScheduledRide: { $ne: true },
+  };
 
   const bookings = await bookingModel
     .find(baseQuery)
