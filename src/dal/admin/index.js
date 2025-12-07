@@ -1477,8 +1477,24 @@ export const findRequestedFeedbacks = async (
 
 export const toggleFeedbackById = async (id, { status }) => {
   if (status === 'reject') {
+    // First retrieve feedback to get rideId and type before deleting
+    const feedback = await Feedback.findById(id).lean();
+    if (!feedback) return false;
+
+    // Delete the feedback
     const result = await Feedback.findByIdAndDelete(id);
     if (!result) return false;
+
+    // Remove the rating reference from Ride model
+    // If feedback type is 'by_passenger', remove driverRating
+    // If feedback type is 'by_driver', remove passengerRating
+    const updateField =
+      feedback.type === 'by_passenger' ? 'driverRating' : 'passengerRating';
+
+    await Booking.findByIdAndUpdate(feedback.rideId, {
+      $unset: { [updateField]: 1 },
+    });
+
     return true;
   } else if (status === 'approve') {
     const result = await Feedback.findByIdAndUpdate(
