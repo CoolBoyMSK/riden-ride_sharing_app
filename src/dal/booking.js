@@ -54,14 +54,23 @@ export const findAllBookingsByDriverId = async (
 
   const skip = (safePage - 1) * safeLimit;
 
+  // Return only non-scheduled (regular) rides in this list.
+  // Scheduled rides are now served via findScheduledBookingsByDriverId.
+  // Explicitly exclude scheduled rides - only include rides where isScheduledRide is NOT true
+  // This handles cases where isScheduledRide is false, null, undefined, or doesn't exist
+  const baseQuery = {
+    driverId,
+    isScheduledRide: { $ne: true },
+  };
+
   const bookings = await bookingModel
-    .find({ driverId })
+    .find(baseQuery)
     .sort({ createdAt: -1 })
     .skip(skip)
     .limit(safeLimit)
     .lean();
 
-  const total = await bookingModel.countDocuments({ driverId });
+  const total = await bookingModel.countDocuments(baseQuery);
 
   return {
     data: bookings,

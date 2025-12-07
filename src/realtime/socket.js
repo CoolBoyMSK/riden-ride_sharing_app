@@ -1832,6 +1832,40 @@ export const initSocket = (server) => {
                 message: 'Your scheduled ride is now active',
               });
 
+              // Automatically join passenger to ride room to receive location updates
+              try {
+                const passengerSocketIds = await getSocketIds(passengerUserId);
+                const rideRoom = `ride:${updatedRide._id}`;
+                
+                for (const socketId of passengerSocketIds) {
+                  const socket = io.sockets.sockets.get(socketId);
+                  if (socket) {
+                    socket.join(rideRoom);
+                    console.log('✅ Auto-joined passenger to ride room', {
+                      passengerUserId,
+                      rideId: updatedRide._id,
+                      socketId,
+                    });
+                  }
+                }
+
+                // Emit confirmation that passenger joined the room
+                if (passengerSocketIds.length > 0) {
+                  io.to(rideRoom).emit('ride:passenger_join_ride', {
+                    success: true,
+                    objectType: 'passenger-join-ride',
+                    data: updatedRide,
+                    message: 'Passenger automatically joined ride room',
+                  });
+                }
+              } catch (joinError) {
+                console.error('Failed to auto-join passenger to ride room', {
+                  passengerUserId,
+                  rideId: updatedRide._id,
+                  error: joinError.message,
+                });
+              }
+
               await notifyUser({
                 userId: passengerUserId,
                 title: 'Scheduled Ride Started',

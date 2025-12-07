@@ -7,7 +7,8 @@ import {
   findActiveRideByPassenger,
 } from '../../dal/ride.js';
 import { notifyUser } from '../../dal/notification.js';
-import { emitToUser, initPubClient } from '../../realtime/socket.js';
+import { emitToUser, initPubClient, getIO } from '../../realtime/socket.js';
+import { getSocketIds } from '../../utils/onlineUsers.js';
 import {
   cancelPaymentHold,
   partialRefundPaymentHold,
@@ -622,6 +623,43 @@ const handleScheduledRide = async (ride) => {
           data: updatedRide,
           message: 'Your scheduled ride is now active',
         });
+
+        // Automatically join passenger to ride room to receive location updates
+        try {
+          const io = getIO();
+          if (io) {
+            const passengerSocketIds = await getSocketIds(passengerUserId);
+            const rideRoom = `ride:${updatedRide._id}`;
+            
+            for (const socketId of passengerSocketIds) {
+              const socket = io.sockets.sockets.get(socketId);
+              if (socket) {
+                socket.join(rideRoom);
+                logger.info('✅ Auto-joined passenger to ride room', {
+                  passengerUserId,
+                  rideId: updatedRide._id,
+                  socketId,
+                });
+              }
+            }
+
+            // Emit confirmation that passenger joined the room
+            if (passengerSocketIds.length > 0) {
+              io.to(rideRoom).emit('ride:passenger_join_ride', {
+                success: true,
+                objectType: 'passenger-join-ride',
+                data: updatedRide,
+                message: 'Passenger automatically joined ride room',
+              });
+            }
+          }
+        } catch (joinError) {
+          logger.error('Failed to auto-join passenger to ride room', {
+            passengerUserId,
+            rideId: updatedRide._id,
+            error: joinError.message,
+          });
+        }
 
         // Also notify via push notification
         await notifyUser({
