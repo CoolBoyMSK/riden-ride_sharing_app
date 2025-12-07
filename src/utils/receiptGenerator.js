@@ -521,38 +521,39 @@ export const generateRideReceipt = async (bookingId) => {
       throw new Error(`Ride not found with ID: ${bookingId}`);
     }
 
-    // Check ride status
+    // Check ride status - must be completed
     if (rideExists.status !== 'RIDE_COMPLETED') {
       throw new Error(
         `Cannot generate receipt. Ride status is '${rideExists.status}' but must be 'RIDE_COMPLETED'`,
       );
     }
 
-    // Check payment status
-    if (rideExists.paymentStatus !== 'COMPLETED') {
+    // Allow receipt generation for COMPLETED, PROCESSING, and PENDING payment status
+    const allowedPaymentStatuses = ['COMPLETED', 'PROCESSING', 'PENDING'];
+    if (!allowedPaymentStatuses.includes(rideExists.paymentStatus)) {
       throw new Error(
-        `Cannot generate receipt. Payment status is '${rideExists.paymentStatus || 'NOT_SET'}' but must be 'COMPLETED'`,
+        `Cannot generate receipt. Payment status is '${rideExists.paymentStatus || 'NOT_SET'}' but must be one of: ${allowedPaymentStatuses.join(', ')}`,
       );
     }
 
-    // Get full ride details
+    // Get full ride details - allow PROCESSING and PENDING payment status
     const ride = await Ride.findOne({
       _id: new mongoose.Types.ObjectId(bookingId),
       status: 'RIDE_COMPLETED',
-      paymentStatus: 'COMPLETED',
+      paymentStatus: { $in: ['COMPLETED', 'PROCESSING', 'PENDING'] },
     }).lean();
 
     if (!ride) {
       throw new Error('Ride not found with required status and payment conditions');
     }
 
-    // Get related data
+    // Get related data - allow PROCESSING and PENDING transaction status
     const [passenger, driver, transaction] = await Promise.all([
       findPassengerById(ride.passengerId),
       findDriverById(ride.driverId),
       RideTransaction.findOne({
         rideId: ride._id,
-        status: 'COMPLETED',
+        status: { $in: ['COMPLETED', 'PROCESSING', 'PENDING'] },
       }).lean(),
     ]);
 
@@ -570,11 +571,11 @@ export const generateRideReceipt = async (bookingId) => {
       
       if (anyTransaction) {
         throw new Error(
-          `Transaction found but status is '${anyTransaction.status}' instead of 'COMPLETED' for ride ${bookingId}`,
+          `Transaction found but status is '${anyTransaction.status}' which is not allowed. Allowed statuses: COMPLETED, PROCESSING, PENDING`,
         );
       } else {
         throw new Error(
-          `No transaction found for ride ${bookingId}. Receipt can only be generated for completed and paid rides.`,
+          `No transaction found for ride ${bookingId}. Receipt can only be generated for rides with transactions.`,
         );
       }
     }

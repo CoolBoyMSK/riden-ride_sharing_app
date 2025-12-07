@@ -41,6 +41,13 @@ export const handleResponse = async (options, req, res) => {
       return res.status(403).json({ code: 403, message: resp.error_message });
     }
 
+    // Check if this is a file download (Buffer data with Content-Type header already set)
+    if (Buffer.isBuffer(resp.data) && res.getHeader('Content-Type')) {
+      // Headers are already set by the handler (e.g., downloadReceipt)
+      // Send the Buffer directly
+      return res.status(200).send(resp.data);
+    }
+
     return res.status(200).json({
       code: 200,
       message: successMessage,
