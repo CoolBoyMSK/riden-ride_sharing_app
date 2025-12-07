@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import {
   findAllBookingsByDriverId,
   findScheduledBookingsByDriverId,
@@ -205,6 +206,12 @@ export const generateReceipt = async ({ id }, resp) => {
 
 export const downloadReceipt = async ({ id }, res, resp) => {
   try {
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      resp.error = true;
+      resp.error_message = 'Invalid ride ID provided';
+      return resp;
+    }
+
     let success = await findReceipt(id);
     if (!success) {
       // Auto-generate receipt if ride is completed but receipt does not exist
@@ -215,6 +222,10 @@ export const downloadReceipt = async ({ id }, res, resp) => {
       const generated = await generateRideReceipt(id);
 
       if (!generated?.success) {
+        console.error(
+          `❌ [downloadReceipt][driver] Failed to generate receipt for ride ${id}:`,
+          generated?.error,
+        );
         resp.error = true;
         resp.error_message =
           generated?.error || 'Failed to generate receipt for this ride';
@@ -224,23 +235,38 @@ export const downloadReceipt = async ({ id }, res, resp) => {
       // Re-fetch receipt after successful generation
       success = await findReceipt(id);
       if (!success) {
+        console.error(
+          `❌ [downloadReceipt][driver] Receipt generated but not found in database for ride ${id}`,
+        );
         resp.error = true;
         resp.error_message = 'Failed to find receipt after generation';
         return resp;
       }
     }
 
+    if (!success.pdfData || !Buffer.isBuffer(success.pdfData)) {
+      console.error(
+        `❌ [downloadReceipt][driver] Invalid PDF data for ride ${id}`,
+      );
+      resp.error = true;
+      resp.error_message = 'Receipt PDF data is invalid';
+      return resp;
+    }
+
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="${success.fileName}"`,
+      `attachment; filename="${success.fileName || `receipt-${id}.pdf`}"`,
     );
     res.setHeader('Content-Length', success.pdfData.length);
 
     resp.data = success.pdfData;
     return resp;
   } catch (error) {
-    console.error(`API ERROR: ${error}`);
+    console.error(`❌ [downloadReceipt][driver] Error for ride ${id}:`, {
+      message: error.message,
+      stack: error.stack,
+    });
     resp.error = true;
     resp.error_message = error.message || 'something went wrong';
     return resp;

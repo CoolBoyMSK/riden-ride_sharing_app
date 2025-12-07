@@ -1416,6 +1416,14 @@ export const deductRidenCommission = async (
   if (!ride) {
     return false;
   }
+  
+  // Check if commission already exists to prevent duplicate key errors
+  const existingCommission = await AdminCommission.findOne({ rideId });
+  if (existingCommission) {
+    // Return the existing commission amount
+    return existingCommission.commissionAmount + (existingCommission.driverDistanceCommission || 0);
+  }
+  
   let driverDistanceCommission = 0;
   if (ride.driverDistance > 5) {
     driverDistanceCommission = 5 - Math.ceil(ride.driverDistance);

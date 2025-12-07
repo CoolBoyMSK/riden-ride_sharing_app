@@ -4128,6 +4128,34 @@ export const transferTipToDriverExternalAccount = async (
           throw new Error('Passenger has no Stripe customer ID');
         }
 
+        // Ensure payment method is attached to customer before use
+        // This prevents errors when reusing payment methods
+        try {
+          const paymentMethod = await stripe.paymentMethods.retrieve(paymentMethodId);
+          
+          // Check if payment method is attached to a customer
+          if (!paymentMethod.customer) {
+            // Attach payment method to customer
+            await stripe.paymentMethods.attach(paymentMethodId, {
+              customer: passenger.stripeCustomerId,
+            });
+          } else if (paymentMethod.customer !== passenger.stripeCustomerId) {
+            // Payment method is attached to a different customer
+            // Detach it first, then attach to the correct customer
+            await stripe.paymentMethods.detach(paymentMethodId);
+            await stripe.paymentMethods.attach(paymentMethodId, {
+              customer: passenger.stripeCustomerId,
+            });
+          }
+          // If already attached to the correct customer, no action needed
+        } catch (attachError) {
+          // If payment method is already attached or other error, continue
+          // Stripe will handle the error when creating the payment intent if needed
+          if (!attachError.message.includes('already been attached')) {
+            console.warn(`Payment method attachment check failed: ${attachError.message}`);
+          }
+        }
+
         // Charge passenger for tip
         const paymentIntent = await stripe.paymentIntents.create({
           amount: Math.round(parsedAmount * 100), // Convert to cents

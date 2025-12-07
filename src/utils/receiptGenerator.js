@@ -514,7 +514,28 @@ export const generateRideReceipt = async (bookingId) => {
       throw new Error('Invalid booking ID');
     }
 
-    // Get ride details
+    // First check if ride exists at all
+    const rideExists = await Ride.findById(bookingId).select('status paymentStatus').lean();
+    
+    if (!rideExists) {
+      throw new Error(`Ride not found with ID: ${bookingId}`);
+    }
+
+    // Check ride status
+    if (rideExists.status !== 'RIDE_COMPLETED') {
+      throw new Error(
+        `Cannot generate receipt. Ride status is '${rideExists.status}' but must be 'RIDE_COMPLETED'`,
+      );
+    }
+
+    // Check payment status
+    if (rideExists.paymentStatus !== 'COMPLETED') {
+      throw new Error(
+        `Cannot generate receipt. Payment status is '${rideExists.paymentStatus || 'NOT_SET'}' but must be 'COMPLETED'`,
+      );
+    }
+
+    // Get full ride details
     const ride = await Ride.findOne({
       _id: new mongoose.Types.ObjectId(bookingId),
       status: 'RIDE_COMPLETED',
@@ -522,7 +543,7 @@ export const generateRideReceipt = async (bookingId) => {
     }).lean();
 
     if (!ride) {
-      throw new Error('Ride not found');
+      throw new Error('Ride not found with required status and payment conditions');
     }
 
     // Get related data
@@ -535,9 +556,28 @@ export const generateRideReceipt = async (bookingId) => {
       }).lean(),
     ]);
 
-    if (!passenger) throw new Error('Passenger not found');
-    if (!driver) throw new Error('Driver not found');
-    if (!transaction) throw new Error('Transaction not found');
+    if (!passenger) {
+      throw new Error(`Passenger not found for ride ${bookingId}`);
+    }
+    if (!driver) {
+      throw new Error(`Driver not found for ride ${bookingId}`);
+    }
+    if (!transaction) {
+      // Check if any transaction exists for this ride
+      const anyTransaction = await RideTransaction.findOne({
+        rideId: ride._id,
+      }).lean();
+      
+      if (anyTransaction) {
+        throw new Error(
+          `Transaction found but status is '${anyTransaction.status}' instead of 'COMPLETED' for ride ${bookingId}`,
+        );
+      } else {
+        throw new Error(
+          `No transaction found for ride ${bookingId}. Receipt can only be generated for completed and paid rides.`,
+        );
+      }
+    }
 
     // Generate PDF
     const pdfBuffer = await generatePDFBuffer(
@@ -580,10 +620,14 @@ export const generateRideReceipt = async (bookingId) => {
       },
     };
   } catch (error) {
-    console.error('Error generating receipt:', error);
+    console.error(`[generateRideReceipt] Error for bookingId ${bookingId}:`, {
+      message: error.message,
+      stack: error.stack,
+      bookingId,
+    });
     return {
       success: false,
-      error: error.message,
+      error: error.message || 'Failed to generate receipt',
     };
   }
 };
