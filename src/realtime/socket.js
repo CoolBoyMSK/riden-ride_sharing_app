@@ -1799,6 +1799,25 @@ export const initSocket = (server) => {
         // Join the ride room
         socket.join(`ride:${updatedRide._id}`);
 
+        // IMPORTANT: Set currentRideId in DriverLocation so passenger receives location updates
+        try {
+          await updateDriverAvailability(
+            driver._id,
+            false,
+            updatedRide._id,
+          );
+          console.log('✅ Set currentRideId for scheduled ride', {
+            rideId: updatedRide._id,
+            driverId: driver._id,
+          });
+        } catch (locationError) {
+          console.error('Failed to set currentRideId for scheduled ride', {
+            rideId: updatedRide._id,
+            driverId: driver._id,
+            error: locationError.message,
+          });
+        }
+
         // Notify driver of successful acceptance
         socket.emit('ride:accept_scheduled_ride', {
           success: true,
