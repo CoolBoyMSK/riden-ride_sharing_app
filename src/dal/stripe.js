@@ -21,6 +21,98 @@ import { CARD_TYPES, PAYMENT_METHODS } from '../enums/paymentEnums.js';
 
 const stripe = new Stripe(env.STRIPE_SECRET_KEY);
 
+/**
+ * Helper function to ensure payment method is attached to customer
+ * Handles cases where payment method was previously used without attachment
+ * Returns the payment method ID to use (may be different if fallback is used)
+ */
+export const ensurePaymentMethodAttached = async (
+  stripeCustomerId,
+  paymentMethodId,
+) => {
+  try {
+    // Retrieve payment method
+    const paymentMethod = await stripe.paymentMethods.retrieve(paymentMethodId);
+
+    // Check if payment method is attached to the correct customer
+    if (paymentMethod.customer === stripeCustomerId) {
+      // Already attached to correct customer
+      return { success: true, paymentMethodId, isAttached: true };
+    }
+
+    // If not attached or attached to different customer
+    if (!paymentMethod.customer) {
+      // Try to attach payment method to customer
+      try {
+        await stripe.paymentMethods.attach(paymentMethodId, {
+          customer: stripeCustomerId,
+        });
+        return { success: true, paymentMethodId, isAttached: true };
+      } catch (attachError) {
+        // If payment method was previously used without attachment, it cannot be reused
+        if (
+          attachError.message.includes('previously used') ||
+          attachError.message.includes('may not be used again') ||
+          attachError.message.includes('detached from a Customer')
+        ) {
+          // Try to use customer's default payment method as fallback
+          const customer = await stripe.customers.retrieve(stripeCustomerId);
+          const defaultPaymentMethodId =
+            customer.invoice_settings?.default_payment_method;
+
+          if (defaultPaymentMethodId) {
+            console.log(
+              `Payment method ${paymentMethodId} cannot be attached. Using default payment method ${defaultPaymentMethodId} instead.`,
+            );
+            return {
+              success: true,
+              paymentMethodId: defaultPaymentMethodId,
+              isAttached: true,
+              usedFallback: true,
+            };
+          }
+
+          throw new Error(
+            'This payment method was previously used and cannot be reused. Please add a new payment method.',
+          );
+        }
+        throw attachError;
+      }
+    } else {
+      // Payment method is attached to a different customer
+      // Try to use customer's default payment method as fallback
+      const customer = await stripe.customers.retrieve(stripeCustomerId);
+      const defaultPaymentMethodId =
+        customer.invoice_settings?.default_payment_method;
+
+      if (defaultPaymentMethodId) {
+        console.log(
+          `Payment method ${paymentMethodId} belongs to different customer. Using default payment method ${defaultPaymentMethodId} instead.`,
+        );
+        return {
+          success: true,
+          paymentMethodId: defaultPaymentMethodId,
+          isAttached: true,
+          usedFallback: true,
+        };
+      }
+
+      throw new Error(
+        'This payment method belongs to a different customer. Please use a different payment method.',
+      );
+    }
+  } catch (error) {
+    console.error(
+      `Error ensuring payment method attachment for ${paymentMethodId}:`,
+      error.message,
+    );
+    return {
+      success: false,
+      error: error.message || 'Failed to ensure payment method attachment',
+    };
+  }
+};
+
 const sanitizeMetadataValue = (value, maxLength = 500) => {
   if (value === null || value === undefined) {
     return '';
@@ -1140,12 +1232,28 @@ export const holdRidePayment = async (
     // Safely extract passengerId
     const passengerId = sanitizeMetadataValue(passenger._id);
 
+    // Ensure payment method is attached to customer before creating PaymentIntent
+    const attachmentResult = await ensurePaymentMethodAttached(
+      passenger.stripeCustomerId,
+      paymentMethodId,
+    );
+
+    if (!attachmentResult.success) {
+      throw new Error(
+        attachmentResult.error ||
+          'Payment method validation failed. Please use a different payment method.',
+      );
+    }
+
+    // Use the validated payment method ID (may be different if fallback was used)
+    const validatedPaymentMethodId = attachmentResult.paymentMethodId;
+
     // Create a Payment Intent with manual capture to hold/authorize funds
     const paymentIntent = await stripe.paymentIntents.create({
       amount: Math.round(amount * 100), // Convert to cents
       currency: 'cad',
       customer: passenger.stripeCustomerId,
-      payment_method: paymentMethodId,
+      payment_method: validatedPaymentMethodId,
       capture_method: 'manual', // Authorize but don't capture yet
       confirm: true, // Confirm immediately to authorize
       off_session: true, // Customer is not present
@@ -1157,6 +1265,9 @@ export const holdRidePayment = async (
         userId: userId,
         userType: 'passenger',
         addedAt: new Date().toISOString(),
+        originalPaymentMethodId: paymentMethodId, // Track original
+        usedPaymentMethodId: validatedPaymentMethodId, // Track what was actually used
+        ...(attachmentResult.usedFallback ? { usedFallback: 'true' } : {}),
         ...(paymentMethodType === 'CARD'
           ? {
               isWallet: 'false',
@@ -4129,39 +4240,28 @@ export const transferTipToDriverExternalAccount = async (
         }
 
         // Ensure payment method is attached to customer before use
-        // This prevents errors when reusing payment methods
-        try {
-          const paymentMethod = await stripe.paymentMethods.retrieve(paymentMethodId);
-          
-          // Check if payment method is attached to a customer
-          if (!paymentMethod.customer) {
-            // Attach payment method to customer
-            await stripe.paymentMethods.attach(paymentMethodId, {
-              customer: passenger.stripeCustomerId,
-            });
-          } else if (paymentMethod.customer !== passenger.stripeCustomerId) {
-            // Payment method is attached to a different customer
-            // Detach it first, then attach to the correct customer
-            await stripe.paymentMethods.detach(paymentMethodId);
-            await stripe.paymentMethods.attach(paymentMethodId, {
-              customer: passenger.stripeCustomerId,
-            });
-          }
-          // If already attached to the correct customer, no action needed
-        } catch (attachError) {
-          // If payment method is already attached or other error, continue
-          // Stripe will handle the error when creating the payment intent if needed
-          if (!attachError.message.includes('already been attached')) {
-            console.warn(`Payment method attachment check failed: ${attachError.message}`);
-          }
+        // Use the helper function for consistent validation
+        const attachmentResult = await ensurePaymentMethodAttached(
+          passenger.stripeCustomerId,
+          paymentMethodId,
+        );
+
+        if (!attachmentResult.success) {
+          throw new Error(
+            attachmentResult.error ||
+              'Payment method validation failed. Please use a different payment method.',
+          );
         }
 
-        // Charge passenger for tip
+        // Use the validated payment method ID (may be different if fallback was used)
+        const finalPaymentMethodId = attachmentResult.paymentMethodId;
+
+        // Charge passenger for tip using the validated payment method ID
         const paymentIntent = await stripe.paymentIntents.create({
           amount: Math.round(parsedAmount * 100), // Convert to cents
           currency: 'cad',
           customer: passenger.stripeCustomerId,
-          payment_method: paymentMethodId,
+          payment_method: finalPaymentMethodId, // Use validated payment method (may be different from original)
           off_session: true,
           confirm: true,
           description: `Tip payment for ride ${ride.rideId || ride._id}`,
@@ -4169,6 +4269,9 @@ export const transferTipToDriverExternalAccount = async (
             rideId: ride._id.toString(),
             tipAmount: parsedAmount.toString(),
             driverId: driver._id.toString(),
+            originalPaymentMethodId: paymentMethodId, // Track original for reference
+            usedPaymentMethodId: finalPaymentMethodId, // Track what was actually used
+            ...(attachmentResult.usedFallback ? { usedFallback: 'true' } : {}),
           },
         });
 
