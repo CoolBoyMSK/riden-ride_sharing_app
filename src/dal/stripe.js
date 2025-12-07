@@ -4128,32 +4128,6 @@ export const transferTipToDriverExternalAccount = async (
   try {
     let paymentIntentId = null;
     let chargeId = null;
-    let payout = null;
-    let transfer = null;
-
-    // Validate driver has Stripe account and external account
-    if (!driver.stripeAccountId) {
-      throw new Error('Driver has no Stripe account linked');
-    }
-
-    // Check for default external account
-    const externalAccounts = await stripe.accounts.listExternalAccounts(
-      driver.stripeAccountId,
-    );
-
-    const defaultAccount = externalAccounts.data.find(
-      (account) => account.default_for_currency === true,
-    );
-
-    if (!defaultAccount) {
-      throw new Error(
-        'Driver has no default external account (bank account) set up',
-      );
-    }
-
-    if (defaultAccount.deleted) {
-      throw new Error('Default external account has been deleted');
-    }
 
     // Validate tip amount
     const parsedAmount = Number(tipAmount);
@@ -4309,61 +4283,43 @@ export const transferTipToDriverExternalAccount = async (
         ).then((res) => res[0]);
       }
 
-      // Transfer tip to driver's connected account
-      if (chargeId) {
-        // Transfer from card payment charge
-        transfer = await stripe.transfers.create({
-          amount: Math.round(parsedAmount * 100), // Full tip amount (no commission)
-          currency: 'cad',
-          destination: driver.stripeAccountId,
-          source_transaction: chargeId,
-          description: `Tip transfer for ride ${ride.rideId || ride._id}`,
-          metadata: {
-            rideId: ride._id.toString(),
-            tipAmount: parsedAmount.toString(),
-            driverId: driver._id.toString(),
-            paymentMethod: paymentMethod,
-          },
-        });
+      // Add tip to driver's wallet pendingBalance
+      // Tip will be paid out via weekly payout worker
+      // Handle driver balance updates (similar to ride payment)
+      if (driverWallet.negativeBalance > 0) {
+        const negative = driverWallet.negativeBalance;
+
+        if (parsedAmount >= negative) {
+          // Enough to clear all negative balance
+          await DriverWallet.findOneAndUpdate(
+            { driverId: driver._id },
+            { $inc: { negativeBalance: -negative } },
+            { session },
+          );
+
+          const remaining = parsedAmount - negative;
+          if (remaining > 0) {
+            // Add remaining to pending balance
+            await DriverWallet.findOneAndUpdate(
+              { driverId: driver._id },
+              { $inc: { pendingBalance: remaining } },
+              { session },
+            );
+          }
+        } else {
+          // Not enough to clear all negative balance
+          await DriverWallet.findOneAndUpdate(
+            { driverId: driver._id },
+            { $inc: { negativeBalance: -parsedAmount } },
+            { session },
+          );
+        }
       } else {
-        // For wallet payments, create a transfer from platform account to driver's connected account
-        // Note: This requires the platform account to have sufficient balance
-        // In production, ensure platform account has funds or handle wallet tips differently
-        transfer = await stripe.transfers.create({
-          amount: Math.round(parsedAmount * 100), // Full tip amount (no commission)
-          currency: 'cad',
-          destination: driver.stripeAccountId,
-          description: `Tip transfer for ride ${ride.rideId || ride._id} (Wallet)`,
-          metadata: {
-            rideId: ride._id.toString(),
-            tipAmount: parsedAmount.toString(),
-            driverId: driver._id.toString(),
-            paymentMethod: 'WALLET',
-          },
-        });
-      }
-
-      // Create instant payout to driver's external account
-      payout = await stripe.payouts.create(
-        {
-          amount: Math.round(parsedAmount * 100),
-          currency: 'cad',
-          method: 'instant',
-          description: `Tip payout for ride ${ride.rideId || ride._id}`,
-          metadata: {
-            rideId: ride._id.toString(),
-            tipAmount: parsedAmount.toString(),
-            transferId: transfer?.id || 'wallet_tip',
-          },
-        },
-        {
-          stripeAccount: driver.stripeAccountId,
-        },
-      );
-
-      if (!payout || !payout.id || payout.status === 'failed') {
-        throw new Error(
-          `Payout failed: ${payout?.failure_message || 'Unknown error'}`,
+        // No negative balance - add tip to pending balance
+        await DriverWallet.findOneAndUpdate(
+          { driverId: driver._id },
+          { $inc: { pendingBalance: parsedAmount } },
+          { session },
         );
       }
 
@@ -4381,13 +4337,13 @@ export const transferTipToDriverExternalAccount = async (
             metadata: {
               tipAmount: parsedAmount,
               rideId: ride._id.toString(),
-              payoutId: payout.id,
-              transferId: transfer?.id,
+              paymentIntentId: paymentIntentId || null,
+              chargeId: chargeId || null,
               paymentMethod: paymentMethod,
+              payoutMethod: 'weekly', // Will be paid via weekly payout
             },
             status: 'succeeded',
-            referenceId: payout.id,
-            receiptUrl: payout.id,
+            referenceId: `tip_${ride._id}_${Date.now()}`,
           },
         ],
         { session },
@@ -4409,7 +4365,7 @@ export const transferTipToDriverExternalAccount = async (
       notifyUser({
         userId: driver.userId?._id,
         title: 'Tip Received',
-        message: `You received a $${parsedAmount} tip! It has been transferred to your bank account`,
+        message: `You received a $${parsedAmount} tip! It will be included in your weekly payout`,
         module: 'payment',
         metadata: { rideId: ride._id, tipAmount: parsedAmount },
         type: 'ALERT',
@@ -4420,9 +4376,8 @@ export const transferTipToDriverExternalAccount = async (
     return {
       success: true,
       tipAmount: parsedAmount,
-      payoutId: payout?.id || null,
-      transferId: transfer?.id || null,
       paymentIntentId: paymentIntentId || null,
+      message: 'Tip added to driver wallet. Will be paid via weekly payout.',
     };
   } catch (error) {
     console.error(`TIP TRANSFER ERROR: ${error.message}`);
