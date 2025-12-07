@@ -1491,8 +1491,11 @@ export const toggleFeedbackById = async (id, { status }) => {
     const updateField =
       feedback.type === 'by_passenger' ? 'driverRating' : 'passengerRating';
 
+    // Set isRatingAllow to false when feedback is rejected
+    // This prevents user from submitting rating again
     await Booking.findByIdAndUpdate(feedback.rideId, {
       $unset: { [updateField]: 1 },
+      $set: { isRatingAllow: false },
     });
 
     return true;
