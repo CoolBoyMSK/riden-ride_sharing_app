@@ -1,8 +1,10 @@
 import PDFDocument from 'pdfkit';
 import mongoose from 'mongoose';
+import moment from 'moment';
 import Ride from '../models/Ride.js';
 import RideTransaction from '../models/RideTransaction.js';
 import RideReceipt from '../models/RideReceipt.js';
+import Commission from '../models/Commission.js';
 import { findPassengerById } from '../dal/passenger.js';
 import { findDriverById } from '../dal/driver.js';
 import env from '../config/envConfig.js';
@@ -547,14 +549,10 @@ export const generateRideReceipt = async (bookingId) => {
       throw new Error('Ride not found with required status and payment conditions');
     }
 
-    // Get related data - allow PROCESSING and PENDING transaction status
-    const [passenger, driver, transaction] = await Promise.all([
+    // Get related data
+    const [passenger, driver] = await Promise.all([
       findPassengerById(ride.passengerId),
       findDriverById(ride.driverId),
-      RideTransaction.findOne({
-        rideId: ride._id,
-        status: { $in: ['COMPLETED', 'PROCESSING', 'PENDING'] },
-      }).lean(),
     ]);
 
     if (!passenger) {
@@ -563,19 +561,72 @@ export const generateRideReceipt = async (bookingId) => {
     if (!driver) {
       throw new Error(`Driver not found for ride ${bookingId}`);
     }
+
+    // If transaction doesn't exist, create it on the fly from ride data
+    let transaction = await RideTransaction.findOne({
+      rideId: ride._id,
+    }).lean();
+
     if (!transaction) {
-      // Check if any transaction exists for this ride
-      const anyTransaction = await RideTransaction.findOne({
-        rideId: ride._id,
+      // Create transaction on the fly from ride data
+      console.log(
+        `📄 [generateRideReceipt] No transaction found for ride ${bookingId}, creating transaction on the fly...`,
+      );
+
+      // Calculate commission
+      const commissionDoc = await Commission.findOne({
+        carType: ride.carType,
       }).lean();
-      
-      if (anyTransaction) {
+
+      if (!commissionDoc) {
         throw new Error(
-          `Transaction found but status is '${anyTransaction.status}' which is not allowed. Allowed statuses: COMPLETED, PROCESSING, PENDING`,
+          `Commission configuration not found for car type: ${ride.carType}`,
         );
-      } else {
+      }
+
+      const actualFare = ride.actualFare || ride.estimatedFare || 0;
+      const discount = ride.fareBreakdown?.promoDiscount || 0;
+      const tip = ride.tipBreakdown?.amount || 0;
+      const commissionPercentage = commissionDoc.percentage;
+      const commissionAmount = Math.floor((actualFare / 100) * commissionPercentage);
+      const driverEarning = actualFare - commissionAmount;
+
+      // Get payout week
+      const getPayoutWeek = (date = new Date()) => {
+        const weekStart = moment(date).startOf('isoWeek');
+        return weekStart.format('DD-MM-YYYY');
+      };
+
+      // Create transaction - use COMPLETED status (valid enum value)
+      const newTransaction = await RideTransaction.create({
+        rideId: ride._id,
+        driverId: ride.driverId,
+        passengerId: ride.passengerId,
+        amount: actualFare,
+        commission: commissionAmount,
+        discount: discount,
+        tip: tip,
+        driverEarning: driverEarning,
+        paymentMethod: ride.paymentMethod,
+        status: 'COMPLETED', // RideTransaction model only allows: COMPLETED, REFUNDED, DISPUTED
+        payoutWeek: getPayoutWeek(new Date()),
+        metadata: {
+          createdOnFly: true,
+          createdAt: new Date().toISOString(),
+          originalPaymentStatus: ride.paymentStatus,
+        },
+      });
+
+      transaction = newTransaction.toObject();
+      console.log(
+        `✅ [generateRideReceipt] Transaction created on the fly for ride ${bookingId}`,
+      );
+    } else {
+      // Transaction exists, but check if status is allowed
+      const allowedStatuses = ['COMPLETED', 'REFUNDED', 'DISPUTED'];
+      if (!allowedStatuses.includes(transaction.status)) {
         throw new Error(
-          `No transaction found for ride ${bookingId}. Receipt can only be generated for rides with transactions.`,
+          `Transaction found but status is '${transaction.status}' which is not allowed. Allowed statuses: ${allowedStatuses.join(', ')}`,
         );
       }
     }
