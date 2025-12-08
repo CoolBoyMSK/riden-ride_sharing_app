@@ -661,10 +661,30 @@ export const sendPushNotification = async ({
 
     const response = await firebaseAdmin.messaging().send(message);
 
-    console.log(`Push notification sent successfully: ${response}`);
+    console.log(`✅ Push notification sent successfully: ${response}`);
     return { success: true, response };
   } catch (error) {
-    console.error(`Error sending push notification: ${error.message}`);
+    // Check if it's a token not found error
+    const isTokenNotFound = error.message.includes('Requested entity was not found') || 
+                           error.code === 'messaging/registration-token-not-registered' ||
+                           error.code === 'messaging/invalid-registration-token';
+    
+    if (isTokenNotFound) {
+      console.warn('⚠️ [NOTIFICATION] Device token not found or invalid (user may have uninstalled app)', {
+        token: message.token,
+        error: error.message,
+        errorCode: error.code,
+        timestamp: new Date().toISOString(),
+      });
+    } else {
+      console.error('❌ [NOTIFICATION] Error sending push notification', {
+        token: message.token,
+        error: error.message,
+        errorCode: error.code,
+        stack: error.stack,
+        timestamp: new Date().toISOString(),
+      });
+    }
     return { success: false, error: error.message };
   }
 };

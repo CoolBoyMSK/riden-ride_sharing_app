@@ -3684,6 +3684,15 @@ export const initSocket = (server) => {
 
     socket.on('ride:passenger_cancel_ride', async ({ rideId, reason }) => {
       const objectType = 'cancel-ride-passenger';
+      const cancelStartTime = Date.now();
+      
+      console.log('🚫 [CANCELLATION] Passenger cancel ride request received', {
+        userId,
+        rideId,
+        reason,
+        timestamp: new Date().toISOString(),
+      });
+      
       if (!userId) {
         return socket.emit('error', {
           success: false,
@@ -3697,6 +3706,11 @@ export const initSocket = (server) => {
       try {
         const passenger = await findPassengerByUserId(userId);
         if (!passenger) {
+          console.error('❌ [CANCELLATION] Passenger not found', {
+            userId,
+            rideId,
+            timestamp: new Date().toISOString(),
+          });
           return socket.emit('error', {
             success: false,
             objectType,
@@ -3708,13 +3722,30 @@ export const initSocket = (server) => {
         const ride = await findRideById(rideId);
         const passengerId = ride?.passengerId?._id;
         if (!ride) {
+          console.error('❌ [CANCELLATION] Ride not found', {
+            userId,
+            rideId,
+            timestamp: new Date().toISOString(),
+          });
           return socket.emit('error', {
             success: false,
             objectType,
             code: 'NOT_FOUND',
             message: 'Ride not found',
           });
-        } else if (passengerId.toString() !== passenger._id.toString()) {
+        }
+
+        console.log('✅ [CANCELLATION] Ride found for cancellation', {
+          userId,
+          rideId,
+          rideStatus: ride.status,
+          isScheduledRide: ride.isScheduledRide,
+          scheduledTime: ride.scheduledTime,
+          hasDriver: !!ride.driverId,
+          driverId: ride.driverId?._id || ride.driverId,
+          passengerId: passengerId?.toString(),
+          timestamp: new Date().toISOString(),
+        }); else if (passengerId.toString() !== passenger._id.toString()) {
           return socket.emit('error', {
             success: false,
             objectType,
@@ -3845,6 +3876,13 @@ export const initSocket = (server) => {
         if (ride.paymentIntentId) {
           try {
             const estimatedFare = ride.estimatedFare || 0;
+            console.log('💰 [CANCELLATION] Processing payment capture', {
+              rideId: ride._id,
+              paymentIntentId: ride.paymentIntentId,
+              estimatedFare,
+              timestamp: new Date().toISOString(),
+            });
+            
             if (estimatedFare > 0) {
               const captureResult = await captureFullPaymentOnCancellation(
                 ride.paymentIntentId,
@@ -3853,29 +3891,64 @@ export const initSocket = (server) => {
               );
               if (!captureResult.success) {
                 // Log error but don't fail the cancellation
-                console.error(
-                  `Failed to capture full payment on cancellation for ride ${ride._id}:`,
-                  captureResult.error,
-                );
+                console.error('❌ [CANCELLATION] Failed to capture full payment', {
+                  rideId: ride._id,
+                  paymentIntentId: ride.paymentIntentId,
+                  error: captureResult.error,
+                  timestamp: new Date().toISOString(),
+                });
               } else {
-                console.log(
-                  `Full payment captured on cancellation for ride ${ride._id}:`,
-                  captureResult,
-                );
+                console.log('✅ [CANCELLATION] Full payment captured successfully', {
+                  rideId: ride._id,
+                  paymentIntentId: ride.paymentIntentId,
+                  capturedAmount: captureResult.amount,
+                  timestamp: new Date().toISOString(),
+                });
               }
             }
           } catch (captureError) {
             // Log error but don't fail the cancellation
-            console.error(
-              `Error capturing full payment on cancellation for ride ${ride._id}:`,
-              captureError,
-            );
+            console.error('❌ [CANCELLATION] Error capturing full payment', {
+              rideId: ride._id,
+              paymentIntentId: ride.paymentIntentId,
+              error: captureError.message,
+              stack: captureError.stack,
+              timestamp: new Date().toISOString(),
+            });
           }
+        } else {
+          console.log('ℹ️ [CANCELLATION] No payment intent to capture', {
+            rideId: ride._id,
+            timestamp: new Date().toISOString(),
+          });
         }
 
         await onRideCancelled(updatedRide._id);
 
         await session.commitTransaction();
+        
+        const cancelTime = Date.now() - cancelStartTime;
+        console.log('✅ [CANCELLATION] Ride cancelled successfully', {
+          userId,
+          rideId: ride._id,
+          oldStatus: ride.status,
+          newStatus: updatedRide.status,
+          cancellationReason: reason,
+          isScheduledRide: ride.isScheduledRide,
+          processingTimeMs: cancelTime,
+          timestamp: new Date().toISOString(),
+        });
+        
+        const cancelTime = Date.now() - cancelStartTime;
+        console.log('✅ [CANCELLATION] Ride cancelled successfully', {
+          userId,
+          rideId: ride._id,
+          oldStatus: ride.status,
+          newStatus: updatedRide.status,
+          cancellationReason: reason,
+          processingTimeMs: cancelTime,
+          timestamp: new Date().toISOString(),
+        });
 
         const mailTo = await findUserById(ride.passengerId?.userId);
         if (!mailTo) {
