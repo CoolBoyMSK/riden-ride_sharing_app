@@ -96,7 +96,7 @@ export const sendDriverReceiptEmail = async (req, res) => {
 
     // Send email with PDF attachment
     const mailOptions = {
-      from: `"Riden App" <${env.EMAIL_FROM}>`,
+      from: `"Riden" <${env.EMAIL_FROM}>`,
       to: email || 'test@example.com', // Use provided email or default test email
       subject: emailSubject,
       html: emailHtml,
@@ -246,7 +246,7 @@ export const sendPassengerReceiptEmail = async (req, res) => {
 
     // Send email with PDF attachment
     const mailOptions = {
-      from: `"Riden App" <${env.EMAIL_FROM}>`,
+      from: `"Riden" <${env.EMAIL_FROM}>`,
       to: email || 'test@example.com', // Use provided email or default test email
       subject: emailSubject,
       html: emailHtml,

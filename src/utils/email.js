@@ -3,7 +3,7 @@ import env from '../config/envConfig.js';
 
 const sendEmail = async ({ to, subject, html }) => {
   const mailOptions = {
-    from: `"Riden App" <${env.EMAIL_FROM}>`,
+    from: `"Riden" <${env.EMAIL_FROM}>`,
     to,
     subject,
     html,

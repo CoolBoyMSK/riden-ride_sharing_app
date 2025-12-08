@@ -684,6 +684,19 @@ export const sendPushNotification = async ({
         errorCode: error.code,
         timestamp: new Date().toISOString(),
       });
+      
+      // Remove invalid token from database if userId is provided
+      if (userId && mongoose.Types.ObjectId.isValid(userId)) {
+        try {
+          await User.updateOne(
+            { _id: userId },
+            { $unset: { userDeviceToken: 1 } }
+          );
+          console.log(`✅ [NOTIFICATION] Removed invalid token from user ${userId}`);
+        } catch (cleanupError) {
+          console.error('❌ [NOTIFICATION] Failed to remove invalid token from database:', cleanupError);
+        }
+      }
     } else {
       console.error('❌ [NOTIFICATION] Error sending push notification', {
         userId,
