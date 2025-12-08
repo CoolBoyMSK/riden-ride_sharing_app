@@ -27,7 +27,27 @@ const messaging = firebaseAdmin.messaging();
 
 const parseDateDMY = (dateStr, endOfDay = false) => {
   if (!dateStr) return null;
-  const [day, month, year] = dateStr.split('-').map(Number);
+  
+  // Handle both formats: DD-MM-YYYY and YYYY-MM-DD
+  const parts = dateStr.split('-').map(Number);
+  
+  let day, month, year;
+  
+  // Check if it's YYYY-MM-DD format (first part is 4 digits or > 31)
+  if (parts[0] > 31 || parts[0].toString().length === 4) {
+    // YYYY-MM-DD format
+    year = parts[0];
+    month = parts[1];
+    day = parts[2];
+  } else {
+    // DD-MM-YYYY format
+    day = parts[0];
+    month = parts[1];
+    year = parts[2];
+  }
+  
+  if (!day || !month || !year) return null;
+  
   if (endOfDay) {
     return new Date(year, month - 1, day, 23, 59, 59, 999);
   }
@@ -1740,12 +1760,28 @@ export const findGenericAnalytics = async (
 
   // --- Handle date filters ---
   let dateFilter = {};
+  
+  // Priority: If startDate and endDate are provided, use them (ignore filter)
+  // Otherwise, use filter to determine date range
   if (startDate && endDate) {
-    // ✅ Custom range with DD-MM-YYYY
+    // ✅ Custom range - supports both DD-MM-YYYY and YYYY-MM-DD formats
+    const start = parseDateDMY(startDate);
+    const end = parseDateDMY(endDate, true);
+    
+    if (!start || !end) {
+      console.error('[findGenericAnalytics] Invalid date format:', { startDate, endDate });
+      return {
+        totalRides: 0,
+        totalDrivers: 0,
+        totalRevenue: 0,
+        satisfactionRate: 0,
+      };
+    }
+    
     dateFilter = {
       createdAt: {
-        $gte: parseDateDMY(startDate),
-        $lte: parseDateDMY(endDate, true),
+        $gte: start,
+        $lte: end,
       },
     };
   } else if (filter) {
