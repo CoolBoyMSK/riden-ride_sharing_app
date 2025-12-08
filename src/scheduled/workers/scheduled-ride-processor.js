@@ -740,58 +740,108 @@ const handleScheduledRide = async (ride) => {
       logger.info('✅ [ACTIVATION] Pre-assigned driver is available, activating ride', {
         rideId: ride._id,
         driverId,
+        currentStatus: ride.status,
         timestamp: new Date().toISOString(),
       });
 
-      // If driver is pre-assigned and available, change status to DRIVER_ASSIGNED instead of REQUESTED
-      updatedRide = await updateRideById(ride._id, {
-        status: 'DRIVER_ASSIGNED',
-        requestedAt: new Date(),
-      });
+      // If driver is pre-assigned and available, ensure status is DRIVER_ASSIGNED
+      // Note: If driver accepted before scheduled time, status might already be DRIVER_ASSIGNED
+      const needsStatusUpdate = ride.status !== 'DRIVER_ASSIGNED';
+      
+      if (needsStatusUpdate) {
+        updatedRide = await updateRideById(ride._id, {
+          status: 'DRIVER_ASSIGNED',
+          requestedAt: new Date(),
+        });
 
-      if (!updatedRide) {
-        logger.error('❌ [ACTIVATION] Failed to update ride status', {
+        if (!updatedRide) {
+          logger.error('❌ [ACTIVATION] Failed to update ride status', {
+            rideId: ride._id,
+            timestamp: new Date().toISOString(),
+          });
+          throw new Error('Failed to update ride status');
+        }
+
+        logger.info('✅ [ACTIVATION] Ride status updated to DRIVER_ASSIGNED', {
           rideId: ride._id,
+          oldStatus: ride.status,
+          newStatus: updatedRide.status,
+          requestedAt: updatedRide.requestedAt,
           timestamp: new Date().toISOString(),
         });
-        throw new Error('Failed to update ride status');
-      }
+      } else {
+        // Status already DRIVER_ASSIGNED (driver accepted before scheduled time)
+        // Just update requestedAt to mark that scheduled time has arrived
+        updatedRide = await updateRideById(ride._id, {
+          requestedAt: new Date(),
+        });
 
-      logger.info('✅ [ACTIVATION] Ride status updated to DRIVER_ASSIGNED', {
-        rideId: ride._id,
-        newStatus: updatedRide.status,
-        requestedAt: updatedRide.requestedAt,
-        timestamp: new Date().toISOString(),
-      });
+        if (!updatedRide) {
+          logger.error('❌ [ACTIVATION] Failed to update ride requestedAt', {
+            rideId: ride._id,
+            timestamp: new Date().toISOString(),
+          });
+          throw new Error('Failed to update ride');
+        }
+
+        logger.info('✅ [ACTIVATION] Ride already DRIVER_ASSIGNED, updated requestedAt', {
+          rideId: ride._id,
+          status: updatedRide.status,
+          requestedAt: updatedRide.requestedAt,
+          timestamp: new Date().toISOString(),
+        });
+      }
 
       // IMPORTANT: For scheduled rides with pre-assigned drivers, we must set
       // DriverLocation.currentRideId so that passengers receive
       // `ride:driver_update_location` events in real time.
+      // Note: If driver accepted before scheduled time, this might already be set
       try {
-        const updatedDriverLocation = await DriverLocation.findOneAndUpdate(
-          { driverId },
-          {
-            currentRideId: updatedRide._id,
-            isAvailable: false,
-            lastUpdated: new Date(),
-          },
-          { new: true },
-        );
-
-        logger.info('Updated driver location with currentRideId for scheduled ride', {
-          rideId: ride._id,
-          driverId,
-          driverLocationId: updatedDriverLocation?._id,
-        });
-      } catch (locationError) {
-        logger.error(
-          'Failed to update driver location with currentRideId for scheduled ride',
-          {
+        const existingDriverLocation = await DriverLocation.findOne({ driverId }).lean();
+        const needsLocationUpdate = !existingDriverLocation?.currentRideId || 
+                                   existingDriverLocation.currentRideId.toString() !== updatedRide._id.toString();
+        
+        if (needsLocationUpdate) {
+          logger.info('🔧 [ACTIVATION] Updating driver location with currentRideId', {
             rideId: ride._id,
             driverId,
-            error: locationError.message,
-          },
-        );
+            existingCurrentRideId: existingDriverLocation?.currentRideId,
+            timestamp: new Date().toISOString(),
+          });
+          
+          const updatedDriverLocation = await DriverLocation.findOneAndUpdate(
+            { driverId },
+            {
+              currentRideId: updatedRide._id,
+              isAvailable: false,
+              lastUpdated: new Date(),
+            },
+            { new: true },
+          );
+
+          logger.info('✅ [ACTIVATION] Updated driver location with currentRideId', {
+            rideId: ride._id,
+            driverId,
+            driverLocationId: updatedDriverLocation?._id,
+            currentRideId: updatedDriverLocation?.currentRideId,
+            timestamp: new Date().toISOString(),
+          });
+        } else {
+          logger.info('ℹ️ [ACTIVATION] Driver location already has correct currentRideId', {
+            rideId: ride._id,
+            driverId,
+            currentRideId: existingDriverLocation.currentRideId,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      } catch (locationError) {
+        logger.error('❌ [ACTIVATION] Failed to update driver location with currentRideId', {
+          rideId: ride._id,
+          driverId,
+          error: locationError.message,
+          stack: locationError.stack,
+          timestamp: new Date().toISOString(),
+        });
       }
 
       // Get passenger and driver user IDs for socket notifications
