@@ -1335,6 +1335,51 @@ export const cancelPaymentHold = async (paymentIntentId) => {
       throw new Error('Payment intent ID is required');
     }
 
+    // First, retrieve the payment intent to check its status
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+
+    // If payment intent is already succeeded, there's nothing to cancel
+    // The payment has already been captured, so we just return success
+    if (paymentIntent.status === 'succeeded') {
+      return {
+        success: true,
+        paymentIntentId: paymentIntent.id,
+        status: paymentIntent.status,
+        message: 'Payment intent already succeeded. No cancellation needed.',
+      };
+    }
+
+    // If payment intent is already cancelled, return success
+    if (paymentIntent.status === 'canceled') {
+      return {
+        success: true,
+        paymentIntentId: paymentIntent.id,
+        status: paymentIntent.status,
+        message: 'Payment intent already cancelled.',
+      };
+    }
+
+    // Check if payment intent can be cancelled
+    // Only these statuses can be cancelled: requires_payment_method, requires_capture, 
+    // requires_reauthorization, requires_confirmation, requires_action, processing
+    const cancellableStatuses = [
+      'requires_payment_method',
+      'requires_capture',
+      'requires_reauthorization',
+      'requires_confirmation',
+      'requires_action',
+      'processing',
+    ];
+
+    if (!cancellableStatuses.includes(paymentIntent.status)) {
+      return {
+        success: false,
+        error: `Payment intent cannot be cancelled. Current status: ${paymentIntent.status}. Only payment intents with statuses: ${cancellableStatuses.join(', ')} can be cancelled.`,
+        paymentIntentId: paymentIntent.id,
+        status: paymentIntent.status,
+      };
+    }
+
     // Cancel the payment intent to release the hold
     const cancelledIntent = await stripe.paymentIntents.cancel(paymentIntentId);
 
@@ -1345,9 +1390,63 @@ export const cancelPaymentHold = async (paymentIntentId) => {
     };
   } catch (error) {
     console.error('STRIPE ERROR: ', error);
+    
+    // Handle specific Stripe error codes
+    if (error.code === 'payment_intent_unexpected_state') {
+      // Payment intent is in a state that doesn't allow cancellation
+      // Check if error message indicates payment already succeeded
+      const errorMessage = error.message || '';
+      if (errorMessage.includes('succeeded') || errorMessage.includes('status of succeeded')) {
+        // Try to retrieve it to confirm status
+        try {
+          const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+          if (paymentIntent.status === 'succeeded') {
+            return {
+              success: true,
+              paymentIntentId: paymentIntent.id,
+              status: paymentIntent.status,
+              message: 'Payment intent already succeeded. Payment was already captured, proceed with normal refund flow.',
+            };
+          }
+        } catch (retrieveError) {
+          // If we can't retrieve but error says succeeded, assume it's succeeded
+          return {
+            success: true,
+            paymentIntentId: paymentIntentId,
+            status: 'succeeded',
+            message: 'Payment intent appears to be succeeded based on error. Proceed with normal refund flow.',
+          };
+        }
+      }
+      
+      // For other unexpected state errors, try to retrieve status
+      try {
+        const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+        if (paymentIntent.status === 'succeeded') {
+          return {
+            success: true,
+            paymentIntentId: paymentIntent.id,
+            status: paymentIntent.status,
+            message: 'Payment intent already succeeded. Payment was already captured, proceed with normal refund flow.',
+          };
+        }
+        if (paymentIntent.status === 'canceled') {
+          return {
+            success: true,
+            paymentIntentId: paymentIntent.id,
+            status: paymentIntent.status,
+            message: 'Payment intent already cancelled.',
+          };
+        }
+      } catch (retrieveError) {
+        // If we can't retrieve, return the original error
+      }
+    }
+
     return {
       success: false,
       error: error.message || 'Failed to cancel payment hold',
+      errorCode: error.code || null,
     };
   }
 };

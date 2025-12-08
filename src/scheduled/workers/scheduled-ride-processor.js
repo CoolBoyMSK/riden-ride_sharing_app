@@ -13,7 +13,7 @@ import {
   cancelPaymentHold,
   partialRefundPaymentHold,
 } from '../../dal/stripe.js';
-import { startProgressiveDriverSearch } from '../../dal/driver.js';
+import { startProgressiveDriverSearch, updateDriverByUserId } from '../../dal/driver.js';
 import IORedis from 'ioredis';
 import env from '../../config/envConfig.js';
 
@@ -55,22 +55,32 @@ const cancelRideWithPaymentHold = async (
     try {
       const cancelResult = await cancelPaymentHold(paymentIntentId);
       if (!cancelResult.success) {
-        logger.error('Failed to cancel payment hold for scheduled ride', {
+        // Log error but don't fail the cancellation process
+        // Payment might already be succeeded/captured, which is fine
+        logger.warn('Payment hold cancellation result for scheduled ride', {
           rideId,
           paymentIntentId,
+          success: cancelResult.success,
           error: cancelResult.error,
+          status: cancelResult.status,
+          message: cancelResult.message,
         });
       } else {
-        logger.info('Payment hold cancelled for scheduled ride', {
+        logger.info('Payment hold processed for scheduled ride', {
           rideId,
           paymentIntentId,
+          status: cancelResult.status,
+          message: cancelResult.message || 'Payment hold cancelled successfully',
         });
       }
     } catch (cancelError) {
-      logger.error('Error cancelling payment hold for scheduled ride', {
+      // Log error but don't fail the ride cancellation
+      // The ride will still be marked as cancelled even if payment hold cancellation fails
+      logger.error('Error processing payment hold cancellation for scheduled ride', {
         rideId,
         paymentIntentId,
         error: cancelError.message,
+        stack: cancelError.stack,
       });
     }
   }
@@ -873,6 +883,43 @@ const handleScheduledRide = async (ride) => {
         updatedRide.driverId?.userId?._id?.toString() ||
         updatedRide.driverId?.userId?.toString() ||
         ride.driverId?.userId;
+
+      // Update driver status to 'on_ride' when scheduled ride is activated
+      // This is required so driver can mark as arrived and proceed with ride flow
+      if (driverUserId) {
+        try {
+          const updatedDriver = await updateDriverByUserId(driverUserId, {
+            status: 'on_ride',
+          });
+          
+          if (updatedDriver) {
+            logger.info('✅ [ACTIVATION] Updated driver status to on_ride', {
+              rideId: ride._id,
+              driverId,
+              driverUserId,
+              newStatus: 'on_ride',
+              timestamp: new Date().toISOString(),
+            });
+          } else {
+            logger.warn('⚠️ [ACTIVATION] Failed to update driver status to on_ride - driver not found', {
+              rideId: ride._id,
+              driverId,
+              driverUserId,
+              timestamp: new Date().toISOString(),
+            });
+          }
+        } catch (driverStatusError) {
+          logger.error('❌ [ACTIVATION] Failed to update driver status to on_ride', {
+            rideId: ride._id,
+            driverId,
+            driverUserId,
+            error: driverStatusError.message,
+            stack: driverStatusError.stack,
+            timestamp: new Date().toISOString(),
+          });
+          // Don't fail the activation if driver status update fails, but log it
+        }
+      }
 
       const passengerName =
         ride.bookedFor === 'SOMEONE'

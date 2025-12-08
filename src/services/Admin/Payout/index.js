@@ -264,49 +264,67 @@ export const refundPassenger = async (user, { id, reason }, resp) => {
         isRefunded: false,
       });
 
-      // If no transaction exists but paymentIntentId exists, cancel the payment hold
+      // If no transaction exists but paymentIntentId exists, try to cancel the payment hold
       if (!existingTransaction && ride.paymentIntentId) {
         const cancelResult = await cancelPaymentHold(ride.paymentIntentId);
-        if (!cancelResult.success) {
+        
+        // Check if payment was already succeeded (either success with succeeded status, or error mentioning succeeded)
+        const isPaymentSucceeded = 
+          (cancelResult.success && cancelResult.status === 'succeeded') ||
+          (cancelResult.message && cancelResult.message.includes('succeeded')) ||
+          (cancelResult.error && cancelResult.error.includes('succeeded'));
+        
+        if (isPaymentSucceeded) {
+          // Payment was already captured/succeeded, proceed with normal refund flow
+          // This means payment went through, so we need to refund it normally using Stripe refund
+          console.log('Payment intent already succeeded, proceeding with normal refund flow', {
+            rideId: id,
+            paymentIntentId: ride.paymentIntentId,
+            status: cancelResult.status,
+          });
+          // Continue to normal refund flow below - will process refund through Stripe
+        } else if (!cancelResult.success) {
+          // Some other error occurred (not related to succeeded status)
           resp.error = true;
           resp.error_message = `Failed to cancel payment hold: ${cancelResult.error || 'Unknown error'}`;
           return resp;
-        }
+        } else {
+          // Payment hold cancelled successfully (status was cancellable and got cancelled)
+          // Get passenger and driver IDs (handle both populated and non-populated cases)
+          const passengerId = ride.passengerId?._id || ride.passengerId;
+          const driverId = ride.driverId?._id || ride.driverId;
+          const refundAmount = ride.actualFare || ride.fareBreakdown?.finalAmount || 0;
 
-        // Get passenger and driver IDs (handle both populated and non-populated cases)
-        const passengerId = ride.passengerId?._id || ride.passengerId;
-        const driverId = ride.driverId?._id || ride.driverId;
-        const refundAmount = ride.actualFare || ride.fareBreakdown?.finalAmount || 0;
+          if (!passengerId || !driverId) {
+            resp.error = true;
+            resp.error_message = 'Passenger or driver information not found';
+            return resp;
+          }
 
-        if (!passengerId || !driverId) {
-          resp.error = true;
-          resp.error_message = 'Passenger or driver information not found';
+          // Update ride payment status to REFUNDED
+          await updateRideById(id, {
+            paymentStatus: 'REFUNDED',
+          });
+
+          // Create refund transaction record
+          await RefundTransaction.create({
+            rideId: id,
+            passengerId: passengerId,
+            driverId: driverId,
+            refundAmount: refundAmount,
+            refundReason: reason || 'Payment hold cancelled by admin',
+            resolvedBy: 'admin',
+          });
+
+          resp.data = {
+            success: true,
+            refundType: 'PAYMENT_HOLD_CANCELLED',
+            message: cancelResult.message || 'Payment hold cancelled successfully',
+            paymentIntentId: ride.paymentIntentId,
+            refundAmount: refundAmount,
+          };
           return resp;
         }
-
-        // Update ride payment status to REFUNDED
-        await updateRideById(id, {
-          paymentStatus: 'REFUNDED',
-        });
-
-        // Create refund transaction record
-        await RefundTransaction.create({
-          rideId: id,
-          passengerId: passengerId,
-          driverId: driverId,
-          refundAmount: refundAmount,
-          refundReason: reason || 'Payment hold cancelled by admin',
-          resolvedBy: 'admin',
-        });
-
-        resp.data = {
-          success: true,
-          refundType: 'PAYMENT_HOLD_CANCELLED',
-          message: 'Payment hold cancelled successfully',
-          paymentIntentId: ride.paymentIntentId,
-          refundAmount: refundAmount,
-        };
-        return resp;
       }
 
       // If no transaction and no paymentIntentId, payment might be in an invalid state
@@ -316,7 +334,7 @@ export const refundPassenger = async (user, { id, reason }, resp) => {
         return resp;
       }
 
-      // If transaction exists, proceed with normal refund flow below
+      // If transaction exists OR payment was already succeeded, proceed with normal refund flow below
     }
 
     // Process refund based on payment method (for COMPLETED or PROCESSING with transactions)
