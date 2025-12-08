@@ -51,6 +51,12 @@ const safeSliceId = (id, length = 8) => {
   return id.toString().slice(-length);
 };
 
+const getFirstName = (fullName) => {
+  if (!fullName || typeof fullName !== 'string') return 'N/A';
+  const nameParts = fullName.trim().split(/\s+/);
+  return nameParts[0] || 'N/A';
+};
+
 // Fixed PDF generation function
 const generatePDFBuffer = (ride, transaction, driver, passenger, receiptType = 'passenger') => {
   return new Promise((resolve, reject) => {
@@ -196,7 +202,7 @@ const generatePassengerReceiptContent = (doc, ride, transaction, driver, passeng
       .font('Helvetica');
     
     doc.text(`Driver Id: ${driver.uniqueId || 'N/A'}`, driverInfoX, rowContentY, { lineBreak: false });
-    doc.text(`Name: ${driver.userId?.name || 'N/A'}`, driverInfoX, rowContentY + 15, { lineBreak: false });
+    doc.text(`Name: ${getFirstName(driver.userId?.name)}`, driverInfoX, rowContentY + 15, { lineBreak: false });
     doc.text(`Vehicle: ${driver.vehicle?.type || 'N/A'}`, driverInfoX, rowContentY + 30, { lineBreak: false });
 
     // Passenger Information Section (Right Column)
