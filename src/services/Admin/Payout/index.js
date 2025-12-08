@@ -210,8 +210,12 @@ export const refundPassenger = async (user, { id, reason }, resp) => {
       return resp;
     }
 
-    // Check if already refunded
+    // Check if already refunded - multiple indicators
     const RefundTransaction = (await import('../../../models/RefundTransaction.js')).default;
+    const TransactionModel = (await import('../../../models/Transaction.js')).default;
+    const RideTransaction = (await import('../../../models/RideTransaction.js')).default;
+
+    // Check 1: RefundTransaction record
     const existingRefund = await RefundTransaction.findOne({ rideId: id });
     if (existingRefund) {
       resp.error = true;
@@ -219,9 +223,39 @@ export const refundPassenger = async (user, { id, reason }, resp) => {
       return resp;
     }
 
+    // Check 2: Payment status is REFUNDED
+    if (ride.paymentStatus === 'REFUNDED') {
+      resp.error = true;
+      resp.error_message = `Ride payment status is already REFUNDED. Cannot process refund again.`;
+      return resp;
+    }
+
+    // Check 3: Check if transactions are marked as refunded
+    const refundedTransaction = await TransactionModel.findOne({
+      rideId: id,
+      type: 'DEBIT',
+      for: 'passenger',
+      isRefunded: true,
+    });
+    if (refundedTransaction) {
+      resp.error = true;
+      resp.error_message = `Ride has already been refunded. Transaction ID: ${refundedTransaction._id}`;
+      return resp;
+    }
+
+    // Check 4: Check RideTransaction status
+    const refundedRideTransaction = await RideTransaction.findOne({
+      rideId: id,
+      status: 'REFUNDED',
+    });
+    if (refundedRideTransaction) {
+      resp.error = true;
+      resp.error_message = `Ride transaction is already marked as REFUNDED. Cannot process refund again.`;
+      return resp;
+    }
+
     // Handle PROCESSING status - check if payment was captured (transactions exist)
     if (ride.paymentStatus === 'PROCESSING') {
-      const TransactionModel = (await import('../../../models/Transaction.js')).default;
       const existingTransaction = await TransactionModel.findOne({
         rideId: id,
         type: 'DEBIT',
