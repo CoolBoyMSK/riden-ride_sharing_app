@@ -9,8 +9,10 @@ import {
   transferToDriverAccount,
   refundCardPaymentToPassenger,
   refundWalletPaymentToPassenger,
+  cancelPaymentHold,
 } from '../../../dal/stripe.js';
 import { findCompletedRide } from '../../../dal/driver.js';
+import { updateRideById } from '../../../dal/ride.js';
 
 export const getUpcomingPayouts = async (
   user,
@@ -201,10 +203,10 @@ export const refundPassenger = async (user, { id, reason }, resp) => {
       return resp;
     }
 
-    // Check payment status
-    if (ride.paymentStatus !== 'COMPLETED') {
+    // Check payment status - allow PROCESSING and COMPLETED
+    if (ride.paymentStatus !== 'COMPLETED' && ride.paymentStatus !== 'PROCESSING') {
       resp.error = true;
-      resp.error_message = `Payment is not completed. Current payment status: ${ride.paymentStatus || 'UNKNOWN'}`;
+      resp.error_message = `Payment cannot be refunded. Current payment status: ${ride.paymentStatus || 'UNKNOWN'}. Only PROCESSING or COMPLETED payments can be refunded.`;
       return resp;
     }
 
@@ -217,8 +219,74 @@ export const refundPassenger = async (user, { id, reason }, resp) => {
       return resp;
     }
 
-    // Process refund based on payment method
-    if (ride.paymentMethod === 'CARD') {
+    // Handle PROCESSING status - check if payment was captured (transactions exist)
+    if (ride.paymentStatus === 'PROCESSING') {
+      const TransactionModel = (await import('../../../models/Transaction.js')).default;
+      const existingTransaction = await TransactionModel.findOne({
+        rideId: id,
+        type: 'DEBIT',
+        status: 'succeeded',
+        for: 'passenger',
+        isRefunded: false,
+      });
+
+      // If no transaction exists but paymentIntentId exists, cancel the payment hold
+      if (!existingTransaction && ride.paymentIntentId) {
+        const cancelResult = await cancelPaymentHold(ride.paymentIntentId);
+        if (!cancelResult.success) {
+          resp.error = true;
+          resp.error_message = `Failed to cancel payment hold: ${cancelResult.error || 'Unknown error'}`;
+          return resp;
+        }
+
+        // Get passenger and driver IDs (handle both populated and non-populated cases)
+        const passengerId = ride.passengerId?._id || ride.passengerId;
+        const driverId = ride.driverId?._id || ride.driverId;
+        const refundAmount = ride.actualFare || ride.fareBreakdown?.finalAmount || 0;
+
+        if (!passengerId || !driverId) {
+          resp.error = true;
+          resp.error_message = 'Passenger or driver information not found';
+          return resp;
+        }
+
+        // Update ride payment status to REFUNDED
+        await updateRideById(id, {
+          paymentStatus: 'REFUNDED',
+        });
+
+        // Create refund transaction record
+        await RefundTransaction.create({
+          rideId: id,
+          passengerId: passengerId,
+          driverId: driverId,
+          refundAmount: refundAmount,
+          refundReason: reason || 'Payment hold cancelled by admin',
+          resolvedBy: 'admin',
+        });
+
+        resp.data = {
+          success: true,
+          refundType: 'PAYMENT_HOLD_CANCELLED',
+          message: 'Payment hold cancelled successfully',
+          paymentIntentId: ride.paymentIntentId,
+          refundAmount: refundAmount,
+        };
+        return resp;
+      }
+
+      // If no transaction and no paymentIntentId, payment might be in an invalid state
+      if (!existingTransaction && !ride.paymentIntentId) {
+        resp.error = true;
+        resp.error_message = 'Payment is in PROCESSING status but no payment intent or transaction found. Payment may be in an invalid state.';
+        return resp;
+      }
+
+      // If transaction exists, proceed with normal refund flow below
+    }
+
+    // Process refund based on payment method (for COMPLETED or PROCESSING with transactions)
+    if (ride.paymentMethod === 'CARD' || ride.paymentMethod === 'GOOGLE_PAY' || ride.paymentMethod === 'APPLE_PAY') {
       const success = await refundCardPaymentToPassenger(ride._id, reason);
       if (!success || !success.success) {
         resp.error = true;
@@ -240,7 +308,7 @@ export const refundPassenger = async (user, { id, reason }, resp) => {
       return resp;
     } else {
       resp.error = true;
-      resp.error_message = `Invalid payment method: ${ride.paymentMethod || 'UNKNOWN'}. Only CARD and WALLET payments can be refunded.`;
+      resp.error_message = `Invalid payment method: ${ride.paymentMethod || 'UNKNOWN'}. Only CARD, GOOGLE_PAY, APPLE_PAY, and WALLET payments can be refunded.`;
       return resp;
     }
   } catch (error) {
