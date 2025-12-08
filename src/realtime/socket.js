@@ -2453,6 +2453,10 @@ export const initSocket = (server) => {
           findUserById(ride.passengerId?.userId),
         ]);
 
+        const passengerUserId = newPassenger.userId?._id?.toString() || 
+                                newPassenger.userId?._id || 
+                                ride.passengerId?.userId;
+
         const notifyDriver = await notifyUser({
           userId: newDriver.userId?._id,
           title: 'Driver Arrived',
@@ -2463,9 +2467,9 @@ export const initSocket = (server) => {
           storeInDB: false,
         });
         const notifyPassenger = await notifyUser({
-          userId: newPassenger.userId?._id,
+          userId: passengerUserId,
           title: 'Driver Arrived',
-          message: `${newDriver.userId?.name} has arrived.`,
+          message: `${newDriver.userId?.name} has arrived at pickup location.`,
           module: 'ride',
           metadata: updatedRide,
           actionLink: 'ride:driver_arrived',
@@ -2476,12 +2480,24 @@ export const initSocket = (server) => {
         }
 
         socket.join(`ride:${updatedRide._id}`);
+        
+        // Emit to ride room
         io.to(`ride:${ride._id}`).emit('ride:driver_arrived', {
           success: true,
           objectType,
           data: updatedRide,
           message: 'Ride status updated to DRIVER_ARRIVED',
         });
+
+        // Also emit to passenger's personal room to ensure they receive the notification
+        if (passengerUserId) {
+          emitToUser(passengerUserId, 'ride:driver_arrived', {
+            success: true,
+            objectType,
+            data: updatedRide,
+            message: `${newDriver.userId?.name} has arrived at pickup location.`,
+          });
+        }
       } catch (error) {
         console.error(`SOCKET ERROR: ${error}`);
         return socket.emit('error', {
@@ -2557,6 +2573,28 @@ export const initSocket = (server) => {
           });
         }
 
+        // Check if passenger is ready (optional - driver can start ride even if passenger hasn't marked ready)
+        // But we'll notify driver if passenger hasn't marked ready yet
+        const passengerReady = !!ride.passengerReadyAt;
+        const driverArrivedAt = ride.driverArrivedAt ? new Date(ride.driverArrivedAt) : null;
+        const timeSinceArrival = driverArrivedAt 
+          ? Math.floor((Date.now() - driverArrivedAt.getTime()) / 1000) // seconds
+          : 0;
+        
+        // Allow driver to start ride if:
+        // 1. Passenger has marked ready, OR
+        // 2. Driver has been waiting for more than 30 seconds (passenger might be ready but didn't mark)
+        const canStartRide = passengerReady || timeSinceArrival >= 30;
+
+        if (!canStartRide) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Please wait for passenger to mark themselves as ready, or wait 30 seconds after arrival.',
+          });
+        }
+
         const updatedRide = await updateRideById(ride._id, {
           status: 'RIDE_STARTED',
           rideStartedAt: new Date(),
@@ -2575,6 +2613,10 @@ export const initSocket = (server) => {
           findUserById(ride.passengerId?.userId),
         ]);
 
+        const passengerUserId = newPassenger.userId?._id?.toString() || 
+                                newPassenger.userId?._id || 
+                                ride.passengerId?.userId;
+
         const notifyDriver = await notifyUser({
           userId: newDriver.userId._id,
           title: 'Ride Started',
@@ -2585,7 +2627,7 @@ export const initSocket = (server) => {
           storeInDB: false,
         });
         const notifyPassenger = await notifyUser({
-          userId: ride.passengerId?.userId,
+          userId: passengerUserId,
           title: 'Ride Started',
           message: `Ride started with ${newDriver.userId?.name}.`,
           module: 'ride',
@@ -2598,12 +2640,24 @@ export const initSocket = (server) => {
         }
 
         socket.join(`ride:${updatedRide._id}`);
+        
+        // Emit to ride room
         io.to(`ride:${ride._id}`).emit('ride:driver_start_ride', {
           success: true,
           objectType,
           data: updatedRide,
           message: 'Ride status updated to RIDE_STARTED',
         });
+
+        // Also emit to passenger's personal room to ensure they receive the notification
+        if (passengerUserId) {
+          emitToUser(passengerUserId, 'ride:driver_start_ride', {
+            success: true,
+            objectType,
+            data: updatedRide,
+            message: `Ride started with ${newDriver.userId?.name}.`,
+          });
+        }
       } catch (error) {
         console.error(`SOCKET ERROR: ${error}`);
         return socket.emit('error', {
