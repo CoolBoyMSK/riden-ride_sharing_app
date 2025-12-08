@@ -256,14 +256,37 @@ export const getDriverTodayEarnings = async (driverId) => {
   console.log('  Start of Day:', startOfDay.toISOString());
   console.log('  End of Day:', endOfDay.toISOString());
 
+  // First, find rides completed today (same logic as stats)
+  const RideModel = (await import('../models/Ride.js')).default;
+  const todayCompletedRides = await RideModel.find({
+    driverId,
+    status: 'RIDE_COMPLETED',
+    requestedAt: { $gte: startOfDay, $lte: endOfDay },
+  })
+    .select('_id')
+    .lean();
+
+  const todayRideIds = todayCompletedRides.map((ride) => ride._id);
+  console.log('  Today completed rides count:', todayRideIds.length);
+  console.log('  Today ride IDs:', todayRideIds);
+
+  // If no rides completed today, return 0
+  if (todayRideIds.length === 0) {
+    console.log('  No rides completed today, returning balance: 0');
+    return {
+      balance: 0,
+    };
+  }
+
+  // Find transactions linked to today's completed rides
   const query = {
     driverId,
+    rideId: { $in: todayRideIds }, // Link to today's completed rides
     status: 'succeeded',
     isRefunded: false,
     type: 'CREDIT', // Driver earnings are CREDIT (money added to driver)
     category: { $in: ['PAYOUT', 'TIP'] }, // Driver earnings from rides (PAYOUT) and tips (TIP)
     for: 'driver', // Transactions for driver
-    createdAt: { $gte: startOfDay, $lte: endOfDay },
   };
 
   console.log('  Query:', JSON.stringify(query, null, 2));
@@ -276,45 +299,45 @@ export const getDriverTodayEarnings = async (driverId) => {
   });
   console.log('  Total driver CREDIT transactions (all time):', totalDriverTransactions);
 
-  // Check today's transactions without filters
+  // Check transactions linked to today's rides
   const todayTransactionsCount = await TransactionModel.countDocuments({
     driverId,
-    createdAt: { $gte: startOfDay, $lte: endOfDay },
+    rideId: { $in: todayRideIds },
   });
-  console.log('  Today\'s transactions (any type/category):', todayTransactionsCount);
+  console.log('  Today\'s transactions (linked to today\'s rides):', todayTransactionsCount);
 
   // Check with each filter separately
   const withStatusFilter = await TransactionModel.countDocuments({
     driverId,
+    rideId: { $in: todayRideIds },
     status: 'succeeded',
-    createdAt: { $gte: startOfDay, $lte: endOfDay },
   });
   console.log('  Today\'s transactions (status=succeeded):', withStatusFilter);
 
   const withTypeFilter = await TransactionModel.countDocuments({
     driverId,
+    rideId: { $in: todayRideIds },
     type: 'CREDIT',
-    createdAt: { $gte: startOfDay, $lte: endOfDay },
   });
   console.log('  Today\'s transactions (type=CREDIT):', withTypeFilter);
 
   const withCategoryFilter = await TransactionModel.countDocuments({
     driverId,
+    rideId: { $in: todayRideIds },
     category: { $in: ['PAYOUT', 'TIP'] },
-    createdAt: { $gte: startOfDay, $lte: endOfDay },
   });
   console.log('  Today\'s transactions (category=PAYOUT|TIP):', withCategoryFilter);
 
   const withForFilter = await TransactionModel.countDocuments({
     driverId,
+    rideId: { $in: todayRideIds },
     for: 'driver',
-    createdAt: { $gte: startOfDay, $lte: endOfDay },
   });
   console.log('  Today\'s transactions (for=driver):', withForFilter);
 
   // Execute main query
   const transactions = await TransactionModel.find(query)
-    .select('amount category type status createdAt')
+    .select('amount category type status createdAt rideId')
     .lean();
 
   console.log('  Found transactions:', transactions.length);
