@@ -671,14 +671,14 @@ export const sendPushNotification = async ({
     
     if (isTokenNotFound) {
       console.warn('⚠️ [NOTIFICATION] Device token not found or invalid (user may have uninstalled app)', {
-        token: message.token,
+        token: deviceToken,
         error: error.message,
         errorCode: error.code,
         timestamp: new Date().toISOString(),
       });
     } else {
       console.error('❌ [NOTIFICATION] Error sending push notification', {
-        token: message.token,
+        token: deviceToken,
         error: error.message,
         errorCode: error.code,
         stack: error.stack,
