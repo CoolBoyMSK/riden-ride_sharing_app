@@ -3479,11 +3479,12 @@ export const findAllAlerts = async ({
     if (toDate) filter.createdAt.$lte = parseDate(toDate, true); // end of day
   }
 
-  // Search filter (title, status, or createdAt as string)
+  // Search filter (title in blocks, status, or createdAt as string)
   if (search) {
     const regex = new RegExp(search, 'i'); // case-insensitive
     filter.$or = [
-      { title: regex },
+      { 'blocks.title': regex },
+      { 'blocks.body': regex },
       { status: regex },
       {
         $expr: {
@@ -3508,8 +3509,14 @@ export const findAllAlerts = async ({
     Alert.countDocuments(filter),
   ]);
 
+  // Add title field to each alert from blocks[0].title for dropdown display
+  const alertsWithTitle = alerts.map((alert) => ({
+    ...alert,
+    title: alert.blocks && alert.blocks.length > 0 ? alert.blocks[0].title : '',
+  }));
+
   return {
-    data: alerts,
+    data: alertsWithTitle,
     pagination: {
       total,
       page: safePage,
