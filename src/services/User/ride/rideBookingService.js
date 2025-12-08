@@ -336,14 +336,14 @@ export const bookRide = async (userId, rideData) => {
       const time = new Date(scheduledTime);
       const now = new Date();
 
-      const MIN_SCHEDULE_MS = 30 * 60 * 1000; // 30 minutes
+      const MIN_SCHEDULE_MS = 1 * 60 * 1000; // 1 minute
       const MAX_SCHEDULE_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
 
       if (time < now) {
         return {
           success: false,
           message:
-            'Scheduled time must be in the future. You can schedule a ride at least 30 minutes and up to 3 days from now.',
+            'Scheduled time must be in the future. You can schedule a ride at least 1 minute and up to 3 days from now.',
         };
       }
 
@@ -353,7 +353,7 @@ export const bookRide = async (userId, rideData) => {
         const minutesFromNow = Math.ceil(MIN_SCHEDULE_MS / (60 * 1000));
         return {
           success: false,
-          message: `You can schedule a ride at least ${minutesFromNow} minutes from now.`,
+          message: `You can schedule a ride at least ${minutesFromNow} minute from now.`,
         };
       }
 
