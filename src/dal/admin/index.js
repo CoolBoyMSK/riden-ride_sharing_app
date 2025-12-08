@@ -552,24 +552,45 @@ export const findScheduledBookings = async ({
   const paged = filtered.slice(start, start + safeLimit);
 
   // --- map result ---
-  const data = paged.map((b) => ({
-    _id: b._id,
-    rideId: b.rideId,
-    status: b.status,
-    scheduledTime: b.scheduledTime,
-    createdAt: b.createdAt,
-    updatedAt: b.updatedAt,
-    estimatedFare: b.estimatedFare,
-    carType: b.carType,
-    passenger: {
-      uniqueId: b.passengerId?.uniqueId || '',
-      name: b.passengerId?.userId?.name || '',
-      email: b.passengerId?.userId?.email || '',
-      phoneNumber: b.passengerId?.userId?.phoneNumber || '',
-      profileImg: b.passengerId?.userId?.profileImg || '',
-    },
-    isDriverAssigned: b.driverId ? true : false,
-  }));
+  const data = paged.map((b) => {
+    // Determine status based on ride state
+    let displayStatus = b.status;
+    
+    // If ride is cancelled or completed, always show actual status
+    const isCancelledOrCompleted = [
+      'CANCELLED_BY_PASSENGER',
+      'CANCELLED_BY_DRIVER',
+      'CANCELLED_BY_SYSTEM',
+      'RIDE_COMPLETED',
+    ].includes(b.status);
+    
+    // Check if driver is assigned - driverId can be ObjectId, string, or null/undefined
+    const hasDriver = b.driverId != null && b.driverId !== '';
+    
+    // Only override to PENDING if ride is active and no driver assigned
+    if (!isCancelledOrCompleted && !hasDriver) {
+      displayStatus = 'PENDING';
+    }
+
+    return {
+      _id: b._id,
+      rideId: b.rideId,
+      status: b.status,
+      scheduledTime: b.scheduledTime,
+      createdAt: b.createdAt,
+      updatedAt: b.updatedAt,
+      estimatedFare: b.estimatedFare,
+      carType: b.carType,
+      passenger: {
+        uniqueId: b.passengerId?.uniqueId || '',
+        name: b.passengerId?.userId?.name || '',
+        email: b.passengerId?.userId?.email || '',
+        phoneNumber: b.passengerId?.userId?.phoneNumber || '',
+        profileImg: b.passengerId?.userId?.profileImg || '',
+      },
+      isDriverAssigned: b.driverId ? true : false,
+    };
+  });
 
   return {
     data,

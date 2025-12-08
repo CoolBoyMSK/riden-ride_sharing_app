@@ -206,6 +206,7 @@ export const findAllBookingsByPassengerId = async (
   // Scheduled rides are now served via findScheduledBookingsByPassengerId.
   // Explicitly exclude scheduled rides - only include rides where isScheduledRide is NOT true
   // This handles cases where isScheduledRide is false, null, undefined, or doesn't exist
+  // Include all rides including cancelled ones (CANCELLED_BY_PASSENGER, CANCELLED_BY_SYSTEM)
   const baseQuery = {
     passengerId,
     isScheduledRide: { $ne: true },
@@ -228,7 +229,7 @@ export const findAllBookingsByPassengerId = async (
   };
 };
 
-// Scheduled bookings for a passenger (only scheduled rides: future + in-progress)
+// Scheduled bookings for a passenger (scheduled rides: future + in-progress + cancelled)
 export const findScheduledBookingsByPassengerId = async (
   passengerId,
   page = 1,
@@ -260,6 +261,12 @@ export const findScheduledBookingsByPassengerId = async (
             'RIDE_STARTED',
             'RIDE_IN_PROGRESS',
           ],
+        },
+      },
+      // Cancelled scheduled rides (by passenger or system)
+      {
+        status: {
+          $in: ['CANCELLED_BY_PASSENGER', 'CANCELLED_BY_SYSTEM'],
         },
       },
     ],

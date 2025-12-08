@@ -2391,6 +2391,14 @@ export const initSocket = (server) => {
             message: 'Driver not found',
           });
         } else if (driver.status !== 'on_ride') {
+          console.error('[Invalid driver status] ride:driver_arrived', {
+            driverId: driver._id?.toString(),
+            userId: userId?.toString(),
+            currentStatus: driver.status,
+            expectedStatus: 'on_ride',
+            rideId: rideId,
+            objectType,
+          });
           return socket.emit('error', {
             success: false,
             objectType,
@@ -2506,6 +2514,14 @@ export const initSocket = (server) => {
             message: 'Driver not found',
           });
         } else if (driver.status !== 'on_ride') {
+          console.error('[Invalid driver status] ride:driver_start_ride', {
+            driverId: driver._id?.toString(),
+            userId: userId?.toString(),
+            currentStatus: driver.status,
+            expectedStatus: 'on_ride',
+            rideId: rideId,
+            objectType,
+          });
           return socket.emit('error', {
             success: false,
             objectType,
@@ -2625,6 +2641,14 @@ export const initSocket = (server) => {
             driver.status !== 'on_ride' &&
             driver.status !== 'online'
           ) {
+            console.error('[Invalid driver status] ride:driver_complete_ride', {
+              driverId: driver._id?.toString(),
+              userId: userId?.toString(),
+              currentStatus: driver.status,
+              expectedStatus: ['on_ride', 'online'],
+              rideId: rideId,
+              objectType,
+            });
             return socket.emit('error', {
               success: false,
               objectType,
@@ -2867,6 +2891,14 @@ export const initSocket = (server) => {
               message: 'Driver not found',
             });
           } else if (!['online', 'on_ride'].includes(driver.status)) {
+            console.error('[Invalid driver status] ride:driver_rate_passenger', {
+              driverId: driver._id?.toString(),
+              userId: userId?.toString(),
+              currentStatus: driver.status,
+              expectedStatus: ['online', 'on_ride'],
+              rideId: rideId,
+              objectType,
+            });
             return socket.emit('error', {
               success: false,
               objectType,
@@ -3114,6 +3146,14 @@ export const initSocket = (server) => {
               message: 'Driver background not verified',
             });
           } else if (!['online', 'on_ride'].includes(driver.status)) {
+            console.error('[Invalid driver status] driver:update_location', {
+              driverId: driver._id?.toString(),
+              userId: userId?.toString(),
+              currentStatus: driver.status,
+              expectedStatus: ['online', 'on_ride'],
+              objectType,
+              isAvailable,
+            });
             return socket.emit('error', {
               success: false,
               objectType,
@@ -3387,6 +3427,13 @@ export const initSocket = (server) => {
             message: 'Driver background not verified',
           });
         } else if (driver.status !== 'online') {
+          console.error('[Invalid driver status] ride:find_destination_rides', {
+            driverId: driver._id?.toString(),
+            userId: userId?.toString(),
+            currentStatus: driver.status,
+            expectedStatus: 'online',
+            objectType,
+          });
           return socket.emit('error', {
             success: false,
             objectType,
@@ -3487,6 +3534,14 @@ export const initSocket = (server) => {
             message: 'Driver not found',
           });
         } else if (driver.status !== 'on_ride') {
+          console.error('[Invalid driver status] ride:driver_join_ride', {
+            driverId: driver._id?.toString(),
+            userId: userId?.toString(),
+            currentStatus: driver.status,
+            expectedStatus: 'on_ride',
+            rideId: rideId,
+            objectType,
+          });
           return socket.emit('error', {
             success: false,
             objectType,
@@ -4666,6 +4721,14 @@ export const initSocket = (server) => {
                 message: 'Driver background not verified',
               });
             } else if (!['online', 'on_ride'].includes(sender.status)) {
+              console.error('[Invalid driver status] ride:send_message (driver)', {
+                driverId: sender._id?.toString(),
+                userId: userId?.toString(),
+                currentStatus: sender.status,
+                expectedStatus: ['online', 'on_ride'],
+                rideId: rideId,
+                objectType,
+              });
               return socket.emit('error', {
                 success: false,
                 objectType,
@@ -4846,6 +4909,14 @@ export const initSocket = (server) => {
               message: 'Driver background not verified',
             });
           } else if (!['online', 'on_ride'].includes(reader.status)) {
+            console.error('[Invalid driver status] ride:read_messages (driver)', {
+              driverId: reader._id?.toString(),
+              userId: userId?.toString(),
+              currentStatus: reader.status,
+              expectedStatus: ['online', 'on_ride'],
+              rideId: rideId,
+              objectType,
+            });
             return socket.emit('error', {
               success: false,
               objectType,
@@ -4953,6 +5024,14 @@ export const initSocket = (server) => {
               message: 'Driver background not verified',
             });
           } else if (!['online', 'on_ride'].includes(sender.status)) {
+            console.error('[Invalid driver status] ride:edit_message (driver)', {
+              driverId: sender._id?.toString(),
+              userId: userId?.toString(),
+              currentStatus: sender.status,
+              expectedStatus: ['online', 'on_ride'],
+              messageId: messageId,
+              objectType,
+            });
             return socket.emit('error', {
               success: false,
               objectType,
@@ -5068,6 +5147,15 @@ export const initSocket = (server) => {
                 message: 'Driver background not verified',
               });
             } else if (!['online', 'on_ride'].includes(sender.status)) {
+              console.error('[Invalid driver status] ride:reply_message (driver)', {
+                driverId: sender._id?.toString(),
+                userId: userId?.toString(),
+                currentStatus: sender.status,
+                expectedStatus: ['online', 'on_ride'],
+                rideId: rideId,
+                messageId: messageId,
+                objectType,
+              });
               return socket.emit('error', {
                 success: false,
                 objectType,
@@ -5233,6 +5321,14 @@ export const initSocket = (server) => {
               message: 'Driver background not verified',
             });
           } else if (!['online', 'on_ride'].includes(sender.status)) {
+            console.error('[Invalid driver status] ride:delete_message (driver)', {
+              driverId: sender._id?.toString(),
+              userId: userId?.toString(),
+              currentStatus: sender.status,
+              expectedStatus: ['online', 'on_ride'],
+              messageId: messageId,
+              objectType,
+            });
             return socket.emit('error', {
               success: false,
               objectType,
@@ -5344,6 +5440,15 @@ export const initSocket = (server) => {
                 message: 'Driver background not verified',
               });
             } else if (!['online', 'on_ride'].includes(caller.status)) {
+              console.error('[Invalid driver status] ride:start_call (driver)', {
+                driverId: caller._id?.toString(),
+                userId: userId?.toString(),
+                currentStatus: caller.status,
+                expectedStatus: ['online', 'on_ride'],
+                rideId: rideId,
+                callType,
+                objectType,
+              });
               return socket.emit('error', {
                 success: false,
                 objectType,
@@ -5736,6 +5841,14 @@ export const initSocket = (server) => {
               message: 'Driver background not verified',
             });
           } else if (!['online', 'on_ride'].includes(receiver.status)) {
+            console.error('[Invalid driver status] ride:decline_call (driver)', {
+              driverId: receiver._id?.toString(),
+              userId: userId?.toString(),
+              currentStatus: receiver.status,
+              expectedStatus: ['online', 'on_ride'],
+              callLogId: callLogId,
+              objectType,
+            });
             return socket.emit('error', {
               success: false,
               objectType,
@@ -5915,6 +6028,14 @@ export const initSocket = (server) => {
               message: 'Driver background not verified',
             });
           } else if (!['online', 'on_ride'].includes(caller.status)) {
+            console.error('[Invalid driver status] ride:cancel_call (driver)', {
+              driverId: caller._id?.toString(),
+              userId: userId?.toString(),
+              currentStatus: caller.status,
+              expectedStatus: ['online', 'on_ride'],
+              callLogId: callLogId,
+              objectType,
+            });
             return socket.emit('error', {
               success: false,
               objectType,
@@ -6094,6 +6215,14 @@ export const initSocket = (server) => {
               message: 'Driver background not verified',
             });
           } else if (!['online', 'on_ride'].includes(member.status)) {
+            console.error('[Invalid driver status] ride:end_call (driver)', {
+              driverId: member._id?.toString(),
+              userId: userId?.toString(),
+              currentStatus: member.status,
+              expectedStatus: ['online', 'on_ride'],
+              callLogId: callLogId,
+              objectType,
+            });
             return socket.emit('error', {
               success: false,
               objectType,
@@ -6266,6 +6395,14 @@ export const initSocket = (server) => {
               message: 'Driver background not verified',
             });
           } else if (!['online', 'on_ride'].includes(member.status)) {
+            console.error('[Invalid driver status] ride:join_call (driver)', {
+              driverId: member._id?.toString(),
+              userId: userId?.toString(),
+              currentStatus: member.status,
+              expectedStatus: ['online', 'on_ride'],
+              callLogId: callLogId,
+              objectType,
+            });
             return socket.emit('error', {
               success: false,
               objectType,
