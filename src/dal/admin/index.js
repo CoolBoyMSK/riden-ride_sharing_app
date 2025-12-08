@@ -439,7 +439,18 @@ export const findBookingById = async (id) => {
       $unwind: { path: '$passengerFeedback', preserveNullAndEmptyArrays: true },
     },
 
-    // ✅ Final projection including vehicle details
+    // Lookup RefundTransaction to check if ride is refunded
+    {
+      $lookup: {
+        from: 'refundtransactions',
+        localField: '_id',
+        foreignField: 'rideId',
+        as: 'refundTransaction',
+      },
+    },
+    { $unwind: { path: '$refundTransaction', preserveNullAndEmptyArrays: true } },
+
+    // ✅ Final projection including vehicle details and refund info
     {
       $project: {
         _id: 1,
@@ -456,6 +467,7 @@ export const findBookingById = async (id) => {
         estimatedFaree: 1,
         estimatedDistance: 1,
         paymentMethod: 1,
+        paymentStatus: 1,
         fareBreakdown: '$fareBreakdown',
         tipBreakdown: '$tipBreakdown',
         passengerFeedback: '$passengerFeedback',
@@ -465,6 +477,25 @@ export const findBookingById = async (id) => {
           passengerData: '$passengerData',
         },
         driver: { driverUser: '$driverUser', driverData: '$driverData' },
+        isRefunded: {
+          $or: [
+            { $eq: ['$paymentStatus', 'REFUNDED'] },
+            { $ifNull: ['$refundTransaction', false] },
+          ],
+        },
+        refundTransaction: {
+          $cond: [
+            { $ifNull: ['$refundTransaction', false] },
+            {
+              _id: '$refundTransaction._id',
+              refundAmount: '$refundTransaction.refundAmount',
+              refundReason: '$refundTransaction.refundReason',
+              resolvedBy: '$refundTransaction.resolvedBy',
+              createdAt: '$refundTransaction.createdAt',
+            },
+            null,
+          ],
+        },
       },
     },
   ]);
