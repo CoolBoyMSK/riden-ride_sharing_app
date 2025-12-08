@@ -931,7 +931,7 @@ const addScheduledRideToQueue = async (ride) => {
       rideId: rideId,
       notificationJobId: notificationJob.id,
       activationJobId: activationJob.id,
-      cancellationJobId: cancellationJob.id,
+      // cancellationJobId: cancellationJob.id, // Cancellation job is currently disabled
     });
   } catch (error) {
     console.error('❌ Error adding scheduled ride to queue:', {
