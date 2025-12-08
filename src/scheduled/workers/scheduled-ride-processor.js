@@ -113,42 +113,66 @@ export const startScheduledRideProcessor = () => {
   const worker = new Worker(
     queueName,
     async (job) => {
+      const jobStartTime = Date.now();
       const { rideId, jobType } = job.data;
 
-      logger.info('📥 Job received by worker', {
+      logger.info('📥 [WORKER] Job received by worker', {
         jobId: job.id,
         rideId,
         jobType,
+        jobName: job.name,
+        attemptsMade: job.attemptsMade,
         timestamp: new Date().toISOString(),
       });
 
       try {
+        logger.info('🔍 [WORKER] Fetching ride from database', {
+          jobId: job.id,
+          rideId,
+          jobType,
+          timestamp: new Date().toISOString(),
+        });
+        
         const ride = await findRideById(rideId);
         if (!ride) {
-          logger.warn('Ride not found', { rideId });
+          logger.warn('❌ [WORKER] Ride not found in database', {
+            jobId: job.id,
+            rideId,
+            jobType,
+            timestamp: new Date().toISOString(),
+          });
           return { status: 'skipped', reason: 'ride_not_found' };
         }
 
-        logger.info('Processing scheduled ride job', {
+        logger.info('✅ [WORKER] Ride fetched successfully', {
+          jobId: job.id,
           rideId,
           jobType,
           rideStatus: ride.status,
           isScheduledRide: ride.isScheduledRide,
           scheduledTime: ride.scheduledTime,
+          hasDriver: !!ride.driverId,
+          driverId: ride.driverId?._id || ride.driverId,
+          passengerId: ride.passengerId?._id || ride.passengerId,
+          timestamp: new Date().toISOString(),
         });
 
         // Check if ride is still scheduled based on job type
         let shouldProcess = false;
+        let allowedStatuses = [];
+        
         switch (jobType) {
           case 'send_notification':
             // Only process if ride is SCHEDULED or DRIVER_ASSIGNED
             shouldProcess =
               ride.status === 'SCHEDULED' || ride.status === 'DRIVER_ASSIGNED';
+            allowedStatuses = ['SCHEDULED', 'DRIVER_ASSIGNED'];
             break;
           case 'activate_ride':
             // Only process if ride is SCHEDULED or DRIVER_ASSIGNED
             shouldProcess =
               ride.status === 'SCHEDULED' || ride.status === 'DRIVER_ASSIGNED';
+            allowedStatuses = ['SCHEDULED', 'DRIVER_ASSIGNED'];
             break;
           case 'cancel_if_no_response':
             // Process if ride is in any of these states
@@ -157,11 +181,27 @@ export const startScheduledRideProcessor = () => {
               ride.status === 'DRIVER_ASSIGNED' ||
               ride.status === 'DRIVER_ARRIVING' ||
               ride.status === 'DRIVER_ARRIVED';
+            allowedStatuses = ['SCHEDULED', 'DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'DRIVER_ARRIVED'];
             break;
           default:
-            logger.warn('Unknown job type', { jobType, rideId });
+            logger.warn('❌ [WORKER] Unknown job type', {
+              jobId: job.id,
+              jobType,
+              rideId,
+              timestamp: new Date().toISOString(),
+            });
             return { status: 'skipped', reason: 'unknown_job_type' };
         }
+
+        logger.info('🔍 [WORKER] Checking ride status for job processing', {
+          jobId: job.id,
+          rideId,
+          jobType,
+          currentStatus: ride.status,
+          allowedStatuses,
+          shouldProcess,
+          timestamp: new Date().toISOString(),
+        });
 
         // Skip if ride has been cancelled or completed
         if (
@@ -172,52 +212,99 @@ export const startScheduledRideProcessor = () => {
           ride.status === 'RIDE_STARTED' ||
           ride.status === 'RIDE_IN_PROGRESS'
         ) {
-          logger.info('Ride already processed or cancelled', {
+          logger.info('⏭️ [WORKER] Ride already processed or cancelled, skipping job', {
+            jobId: job.id,
             rideId,
             currentStatus: ride.status,
             jobType,
+            timestamp: new Date().toISOString(),
           });
           return { status: 'skipped', reason: 'ride_already_processed' };
         }
 
         if (!shouldProcess) {
-          logger.info('Ride status does not allow processing this job', {
+          logger.info('⏭️ [WORKER] Ride status does not allow processing this job', {
+            jobId: job.id,
             rideId,
             currentStatus: ride.status,
             jobType,
+            allowedStatuses,
+            timestamp: new Date().toISOString(),
           });
           return { status: 'skipped', reason: 'invalid_status_for_job' };
         }
 
+        logger.info('✅ [WORKER] Ride status validated, proceeding with job processing', {
+          jobId: job.id,
+          rideId,
+          jobType,
+          rideStatus: ride.status,
+          timestamp: new Date().toISOString(),
+        });
+
+        const handlerStartTime = Date.now();
         switch (jobType) {
           case 'send_notification':
+            logger.info('📧 [WORKER] Processing send_notification job', {
+              jobId: job.id,
+              rideId,
+              scheduledTime: ride.scheduledTime,
+              timestamp: new Date().toISOString(),
+            });
             await handleScheduledRideNotification(ride);
             break;
           case 'activate_ride':
+            logger.info('🚀 [WORKER] Processing activate_ride job', {
+              jobId: job.id,
+              rideId,
+              scheduledTime: ride.scheduledTime,
+              hasDriver: !!ride.driverId,
+              driverId: ride.driverId?._id || ride.driverId,
+              timestamp: new Date().toISOString(),
+            });
             await handleScheduledRide(ride);
             break;
           case 'cancel_if_no_response':
+            logger.info('❌ [WORKER] Processing cancel_if_no_response job', {
+              jobId: job.id,
+              rideId,
+              scheduledTime: ride.scheduledTime,
+              timestamp: new Date().toISOString(),
+            });
             await handleCancelScheduledRideIfNoResponse(ride);
             break;
           default:
-            logger.warn('Unknown job type', { jobType, rideId });
+            logger.warn('❌ [WORKER] Unknown job type in switch', {
+              jobId: job.id,
+              jobType,
+              rideId,
+              timestamp: new Date().toISOString(),
+            });
         }
 
-        logger.info('✅ Job processed successfully', {
+        const handlerTime = Date.now() - handlerStartTime;
+        const totalJobTime = Date.now() - jobStartTime;
+        logger.info('✅ [WORKER] Job processed successfully', {
           jobId: job.id,
           rideId,
           jobType,
           status: 'completed',
+          handlerTimeMs: handlerTime,
+          totalJobTimeMs: totalJobTime,
+          timestamp: new Date().toISOString(),
         });
 
         return { status: 'completed', jobType, rideId };
       } catch (error) {
-        logger.error('❌ Error processing scheduled ride job', {
+        const totalJobTime = Date.now() - jobStartTime;
+        logger.error('❌ [WORKER] Error processing scheduled ride job', {
           jobId: job.id,
           rideId,
           jobType,
           error: error.message,
           stack: error.stack,
+          totalJobTimeMs: totalJobTime,
+          timestamp: new Date().toISOString(),
         });
         throw error;
       }
@@ -292,21 +379,28 @@ export const startScheduledRideProcessor = () => {
 
 // Send notification to passenger and driver (if assigned) before scheduled time
 const handleScheduledRideNotification = async (ride) => {
+  const startTime = Date.now();
   try {
-    logger.info('📧 Processing notification for scheduled ride', {
+    logger.info('📧 [NOTIFICATION] Starting notification handler', {
       rideId: ride._id,
       scheduledTime: ride.scheduledTime,
       status: ride.status,
+      timestamp: new Date().toISOString(),
     });
 
     const scheduledTime = new Date(ride.scheduledTime);
     const now = new Date();
     const minutesUntilRide = Math.floor((scheduledTime - now) / (1000 * 60));
+    const secondsUntilRide = Math.floor((scheduledTime - now) / 1000);
 
-    logger.info('⏰ Time calculation', {
+    logger.info('⏰ [NOTIFICATION] Time calculation', {
+      rideId: ride._id,
       scheduledTime: scheduledTime.toISOString(),
-      now: now.toISOString(),
+      currentTime: now.toISOString(),
       minutesUntilRide,
+      secondsUntilRide,
+      timeDifferenceMs: scheduledTime.getTime() - now.getTime(),
+      timestamp: new Date().toISOString(),
     });
 
     // Get passenger userId
@@ -315,10 +409,20 @@ const handleScheduledRideNotification = async (ride) => {
       ride.passengerId?.userId?.toString() ||
       ride.passengerId?.userId;
 
+    logger.info('👤 [NOTIFICATION] Extracted passenger information', {
+      rideId: ride._id,
+      passengerUserId,
+      passengerId: ride.passengerId?._id || ride.passengerId,
+      bookedFor: ride.bookedFor,
+      bookedForName: ride.bookedForName,
+      timestamp: new Date().toISOString(),
+    });
+
     if (!passengerUserId) {
-      logger.error('❌ Cannot find passenger userId', {
+      logger.error('❌ [NOTIFICATION] Cannot find passenger userId', {
         rideId: ride._id,
         passengerId: ride.passengerId,
+        timestamp: new Date().toISOString(),
       });
       throw new Error('Passenger userId not found');
     }
@@ -426,17 +530,24 @@ const handleScheduledRideNotification = async (ride) => {
       }
     }
 
-    logger.info('✅ Scheduled ride notification processed', {
+    const processingTime = Date.now() - startTime;
+    logger.info('✅ [NOTIFICATION] Scheduled ride notification processed successfully', {
       rideId: ride._id,
       minutesUntilRide,
       passengerNotified: !!passengerNotification?.success,
       driverNotified: !!ride.driverId,
+      driverId: ride.driverId?._id || ride.driverId,
+      processingTimeMs: processingTime,
+      timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    logger.error('❌ Error sending scheduled ride notification', {
+    const processingTime = Date.now() - startTime;
+    logger.error('❌ [NOTIFICATION] Error sending scheduled ride notification', {
       rideId: ride._id,
       error: error.message,
       stack: error.stack,
+      processingTimeMs: processingTime,
+      timestamp: new Date().toISOString(),
     });
     throw error;
   }
@@ -444,19 +555,52 @@ const handleScheduledRideNotification = async (ride) => {
 
 // Activate scheduled ride: change status to REQUESTED and start driver search
 const handleScheduledRide = async (ride) => {
+  const startTime = Date.now();
   try {
+    logger.info('🚀 [ACTIVATION] Starting scheduled ride activation', {
+      rideId: ride._id,
+      scheduledTime: ride.scheduledTime,
+      status: ride.status,
+      bookedFor: ride.bookedFor,
+      hasDriver: !!ride.driverId,
+      driverId: ride.driverId?._id || ride.driverId,
+      timestamp: new Date().toISOString(),
+    });
+
     // Check if passenger is available (not on another active ride)
     // Only check if bookedFor is not SOMEONE (since SOMEONE rides don't check passenger availability)
     if (ride.bookedFor !== 'SOMEONE' && ride.passengerId) {
+      logger.info('🔍 [ACTIVATION] Checking passenger availability', {
+        rideId: ride._id,
+        passengerId: ride.passengerId._id || ride.passengerId,
+        timestamp: new Date().toISOString(),
+      });
+      
       const activeRide = await findActiveRideByPassenger(
         ride.passengerId._id || ride.passengerId,
       );
+      
+      logger.info('✅ [ACTIVATION] Passenger availability check completed', {
+        rideId: ride._id,
+        hasActiveRide: !!activeRide,
+        activeRideId: activeRide?._id,
+        activeRideIsScheduled: activeRide?.isScheduledRide,
+        timestamp: new Date().toISOString(),
+      });
+      
       // Check if there's an active ride that's not this scheduled ride
       if (
         activeRide &&
         activeRide._id.toString() !== ride._id.toString() &&
         !activeRide.isScheduledRide
       ) {
+        logger.warn('⚠️ [ACTIVATION] Passenger is on another active ride, cancelling scheduled ride', {
+          rideId: ride._id,
+          activeRideId: activeRide._id,
+          activeRideStatus: activeRide.status,
+          timestamp: new Date().toISOString(),
+        });
+        
         await cancelRideWithPaymentHold(
           ride._id,
           ride.paymentIntentId,
@@ -467,17 +611,46 @@ const handleScheduledRide = async (ride) => {
         );
         throw new Error('Passenger is already on another active ride');
       }
+    } else {
+      logger.info('ℹ️ [ACTIVATION] Skipping passenger availability check', {
+        rideId: ride._id,
+        reason: ride.bookedFor === 'SOMEONE' ? 'booked_for_someone' : 'no_passenger_id',
+        timestamp: new Date().toISOString(),
+      });
     }
 
     // Check if ride already has a driver assigned (scheduled ride with pre-assigned driver)
     const hasPreAssignedDriver = !!ride.driverId;
     let updatedRide;
 
+    logger.info('🔍 [ACTIVATION] Checking driver assignment status', {
+      rideId: ride._id,
+      hasPreAssignedDriver,
+      driverId: ride.driverId?._id || ride.driverId,
+      timestamp: new Date().toISOString(),
+    });
+
     if (hasPreAssignedDriver) {
+      logger.info('👨‍✈️ [ACTIVATION] Ride has pre-assigned driver, checking driver availability', {
+        rideId: ride._id,
+        driverId: ride.driverId?._id || ride.driverId,
+        timestamp: new Date().toISOString(),
+      });
+      
       // Check if driver is still available before activating with pre-assigned driver
       const DriverLocation = (await import('../../models/DriverLocation.js')).default;
       const driverId = ride.driverId?._id || ride.driverId;
       const driverLocation = await DriverLocation.findOne({ driverId }).lean();
+      
+      logger.info('✅ [ACTIVATION] Driver location fetched', {
+        rideId: ride._id,
+        driverId,
+        driverLocationFound: !!driverLocation,
+        driverStatus: driverLocation?.status,
+        driverIsAvailable: driverLocation?.isAvailable,
+        driverCurrentRideId: driverLocation?.currentRideId,
+        timestamp: new Date().toISOString(),
+      });
 
       // If driver is not available, fall back to searching for a new driver
       if (
@@ -486,12 +659,17 @@ const handleScheduledRide = async (ride) => {
         driverLocation.currentRideId ||
         !driverLocation.isAvailable
       ) {
-        logger.warn('Pre-assigned driver not available, starting new driver search', {
+        logger.warn('⚠️ [ACTIVATION] Pre-assigned driver not available, starting new driver search', {
           rideId: ride._id,
           driverId,
           driverStatus: driverLocation?.status,
           isAvailable: driverLocation?.isAvailable,
           currentRideId: driverLocation?.currentRideId,
+          reason: !driverLocation ? 'driver_location_not_found' :
+                  driverLocation.status !== 'online' ? 'driver_not_online' :
+                  driverLocation.currentRideId ? 'driver_on_another_ride' :
+                  !driverLocation.isAvailable ? 'driver_not_available' : 'unknown',
+          timestamp: new Date().toISOString(),
         });
 
         // Clear the driver assignment and start fresh search
@@ -552,11 +730,18 @@ const handleScheduledRide = async (ride) => {
           });
         });
 
-        logger.info('Started new driver search after pre-assigned driver unavailable', {
+        logger.info('✅ [ACTIVATION] Started new driver search after pre-assigned driver unavailable', {
           rideId: ride._id,
+          timestamp: new Date().toISOString(),
         });
         return;
       }
+
+      logger.info('✅ [ACTIVATION] Pre-assigned driver is available, activating ride', {
+        rideId: ride._id,
+        driverId,
+        timestamp: new Date().toISOString(),
+      });
 
       // If driver is pre-assigned and available, change status to DRIVER_ASSIGNED instead of REQUESTED
       updatedRide = await updateRideById(ride._id, {
@@ -565,8 +750,19 @@ const handleScheduledRide = async (ride) => {
       });
 
       if (!updatedRide) {
+        logger.error('❌ [ACTIVATION] Failed to update ride status', {
+          rideId: ride._id,
+          timestamp: new Date().toISOString(),
+        });
         throw new Error('Failed to update ride status');
       }
+
+      logger.info('✅ [ACTIVATION] Ride status updated to DRIVER_ASSIGNED', {
+        rideId: ride._id,
+        newStatus: updatedRide.status,
+        requestedAt: updatedRide.requestedAt,
+        timestamp: new Date().toISOString(),
+      });
 
       // IMPORTANT: For scheduled rides with pre-assigned drivers, we must set
       // DriverLocation.currentRideId so that passengers receive
@@ -700,11 +896,20 @@ const handleScheduledRide = async (ride) => {
         });
       }
 
-      logger.info('Scheduled ride with pre-assigned driver activated', {
+      const activationTime = Date.now() - startTime;
+      logger.info('✅ [ACTIVATION] Scheduled ride with pre-assigned driver activated successfully', {
         rideId: ride._id,
         driverId: ride.driverId?._id || ride.driverId,
+        status: updatedRide.status,
+        activationTimeMs: activationTime,
+        timestamp: new Date().toISOString(),
       });
     } else {
+      logger.info('🔍 [ACTIVATION] No pre-assigned driver, starting driver search', {
+        rideId: ride._id,
+        timestamp: new Date().toISOString(),
+      });
+      
       // No pre-assigned driver - keep status as SCHEDULED and start driver search in background
       // Ride will only become active (REQUESTED/DRIVER_ASSIGNED) when driver is assigned
       // Just update requestedAt to track when scheduled time arrived
@@ -714,14 +919,27 @@ const handleScheduledRide = async (ride) => {
       });
 
       if (!updatedRide) {
+        logger.error('❌ [ACTIVATION] Failed to update ride', {
+          rideId: ride._id,
+          timestamp: new Date().toISOString(),
+        });
         throw new Error('Failed to update ride');
       }
 
+      logger.info('✅ [ACTIVATION] Ride updated, starting driver search', {
+        rideId: ride._id,
+        status: updatedRide.status,
+        requestedAt: updatedRide.requestedAt,
+        timestamp: new Date().toISOString(),
+      });
+
       // Start driver search (non-blocking) - this will work with SCHEDULED status for scheduled rides
       startProgressiveDriverSearch(updatedRide).catch((error) => {
-        logger.error('Error starting driver search for scheduled ride', {
+        logger.error('❌ [ACTIVATION] Error starting driver search for scheduled ride', {
           rideId: ride._id,
           error: error.message,
+          stack: error.stack,
+          timestamp: new Date().toISOString(),
         });
         // If driver search fails, cancel the ride
         cancelRideWithPaymentHold(
@@ -732,9 +950,11 @@ const handleScheduledRide = async (ride) => {
           'Your scheduled ride could not be activated due to a technical issue. Full refund has been processed.',
           ride.passengerId?.userId,
         ).catch((cancelError) => {
-          logger.error('Error cancelling ride after search failure', {
+          logger.error('❌ [ACTIVATION] Error cancelling ride after search failure', {
             rideId: ride._id,
             error: cancelError.message,
+            stack: cancelError.stack,
+            timestamp: new Date().toISOString(),
           });
         });
       });
@@ -746,6 +966,12 @@ const handleScheduledRide = async (ride) => {
         ride.passengerId?.userId;
 
       if (passengerUserId) {
+        logger.info('📤 [ACTIVATION] Sending driver search notification to passenger', {
+          rideId: ride._id,
+          passengerUserId,
+          timestamp: new Date().toISOString(),
+        });
+        
         await notifyUser({
           userId: ride.passengerId?.userId,
           title: 'Searching for Driver',
@@ -754,16 +980,30 @@ const handleScheduledRide = async (ride) => {
           module: 'ride',
           metadata: updatedRide,
         });
+        
+        logger.info('✅ [ACTIVATION] Driver search notification sent to passenger', {
+          rideId: ride._id,
+          passengerUserId,
+          timestamp: new Date().toISOString(),
+        });
       }
 
-      logger.info('Scheduled ride driver search started (status remains SCHEDULED until driver assigned)', {
+      const activationTime = Date.now() - startTime;
+      logger.info('✅ [ACTIVATION] Scheduled ride driver search started (status remains SCHEDULED until driver assigned)', {
         rideId: ride._id,
+        status: updatedRide.status,
+        activationTimeMs: activationTime,
+        timestamp: new Date().toISOString(),
       });
     }
   } catch (error) {
-    logger.error('Error activating scheduled ride', {
+    const activationTime = Date.now() - startTime;
+    logger.error('❌ [ACTIVATION] Error activating scheduled ride', {
       rideId: ride._id,
       error: error.message,
+      stack: error.stack,
+      activationTimeMs: activationTime,
+      timestamp: new Date().toISOString(),
     });
     throw error;
   }
@@ -783,15 +1023,30 @@ const isPassengerReady = (ride) => {
 
 // Cancel scheduled ride if no response from driver and passenger after scheduled time + 5 minutes
 const handleCancelScheduledRideIfNoResponse = async (ride) => {
+  const startTime = Date.now();
   try {
+    logger.info('❌ [CANCELLATION] Starting cancellation check for scheduled ride', {
+      rideId: ride._id,
+      scheduledTime: ride.scheduledTime,
+      timestamp: new Date().toISOString(),
+    });
+    
     const currentRide = await findRideById(ride._id);
 
     if (!currentRide) {
-      logger.warn('Ride not found for cancellation check', {
+      logger.warn('⚠️ [CANCELLATION] Ride not found for cancellation check', {
         rideId: ride._id,
+        timestamp: new Date().toISOString(),
       });
       return;
     }
+
+    logger.info('✅ [CANCELLATION] Ride fetched for cancellation check', {
+      rideId: ride._id,
+      status: currentRide.status,
+      scheduledTime: currentRide.scheduledTime,
+      timestamp: new Date().toISOString(),
+    });
 
     // If ride has been cancelled, completed, or driver assigned, don't cancel
     if (
@@ -978,17 +1233,25 @@ const handleCancelScheduledRideIfNoResponse = async (ride) => {
       type: 'ALERT',
     });
 
-    logger.info('Scheduled ride cancelled due to no response', {
+    const cancellationTime = Date.now() - startTime;
+    logger.info('✅ [CANCELLATION] Scheduled ride cancelled due to no response', {
       rideId: ride._id,
       driverReady,
       passengerReady,
       passengerOnAnotherRide,
       refundType,
+      cancellationReason,
+      cancellationTimeMs: cancellationTime,
+      timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    logger.error('Error cancelling scheduled ride', {
+    const cancellationTime = Date.now() - startTime;
+    logger.error('❌ [CANCELLATION] Error cancelling scheduled ride', {
       rideId: ride._id,
       error: error.message,
+      stack: error.stack,
+      cancellationTimeMs: cancellationTime,
+      timestamp: new Date().toISOString(),
     });
     throw error;
   }

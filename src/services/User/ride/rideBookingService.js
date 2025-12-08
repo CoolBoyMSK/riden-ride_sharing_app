@@ -333,6 +333,13 @@ export const bookRide = async (userId, rideData) => {
 
     let fareResult;
     if (scheduledTime) {
+      console.log('📅 [VALIDATION] Validating scheduled ride time', {
+        userId,
+        scheduledTime,
+        currentTime: new Date().toISOString(),
+        timestamp: new Date().toISOString(),
+      });
+      
       const time = new Date(scheduledTime);
       const now = new Date();
 
@@ -340,6 +347,13 @@ export const bookRide = async (userId, rideData) => {
       const MAX_SCHEDULE_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
 
       if (time < now) {
+        console.warn('⚠️ [VALIDATION] Scheduled time is in the past', {
+          userId,
+          scheduledTime: time.toISOString(),
+          currentTime: now.toISOString(),
+          timeDifferenceMs: time.getTime() - now.getTime(),
+          timestamp: new Date().toISOString(),
+        });
         return {
           success: false,
           message:
@@ -349,8 +363,26 @@ export const bookRide = async (userId, rideData) => {
 
       const timeDifference = time.getTime() - now.getTime();
 
+      console.log('⏰ [VALIDATION] Scheduled time validation', {
+        userId,
+        scheduledTime: time.toISOString(),
+        currentTime: now.toISOString(),
+        timeDifferenceMs: timeDifference,
+        timeDifferenceMinutes: Math.floor(timeDifference / (60 * 1000)),
+        minScheduleMs: MIN_SCHEDULE_MS,
+        maxScheduleMs: MAX_SCHEDULE_MS,
+        timestamp: new Date().toISOString(),
+      });
+
       if (timeDifference < MIN_SCHEDULE_MS) {
         const minutesFromNow = Math.ceil(MIN_SCHEDULE_MS / (60 * 1000));
+        console.warn('⚠️ [VALIDATION] Scheduled time is too soon', {
+          userId,
+          scheduledTime: time.toISOString(),
+          timeDifferenceMs: timeDifference,
+          requiredMinutes: minutesFromNow,
+          timestamp: new Date().toISOString(),
+        });
         return {
           success: false,
           message: `You can schedule a ride at least ${minutesFromNow} minute from now.`,
@@ -359,11 +391,25 @@ export const bookRide = async (userId, rideData) => {
 
       if (timeDifference > MAX_SCHEDULE_MS) {
         const hoursFromNow = Math.floor(MAX_SCHEDULE_MS / (60 * 60 * 1000));
+        console.warn('⚠️ [VALIDATION] Scheduled time is too far in the future', {
+          userId,
+          scheduledTime: time.toISOString(),
+          timeDifferenceMs: timeDifference,
+          maxHours: hoursFromNow,
+          timestamp: new Date().toISOString(),
+        });
         return {
           success: false,
           message: `You can schedule a ride up to ${hoursFromNow} hours (3 days) from now.`,
         };
       }
+
+      console.log('✅ [VALIDATION] Scheduled time validation passed', {
+        userId,
+        scheduledTime: time.toISOString(),
+        timeDifferenceMinutes: Math.floor(timeDifference / (60 * 1000)),
+        timestamp: new Date().toISOString(),
+      });
 
       fareResult = await calculateEstimatedFare(
         carType,
@@ -510,6 +556,19 @@ export const bookRide = async (userId, rideData) => {
     const rideObject = ride.toObject ? ride.toObject() : ride;
 
     if (rideObject.isScheduledRide) {
+      console.log('📅 [SCHEDULED RIDE FLOW] Starting scheduled ride booking process', {
+        rideId: rideObject._id,
+        passengerId: passenger._id,
+        userId: userId,
+        scheduledTime: rideObject.scheduledTime,
+        bookedFor: rideObject.bookedFor,
+        bookedForName: rideObject.bookedForName,
+        status: rideObject.status,
+        paymentMethod: rideObject.paymentMethod,
+        paymentIntentId: rideObject.paymentIntentId,
+        timestamp: new Date().toISOString(),
+      });
+
       const notifyPassenger = await notifyUser({
         userId: passenger.userId?._id,
         title: 'Scheduling Request Sent',
@@ -518,10 +577,23 @@ export const bookRide = async (userId, rideData) => {
         metadata: rideObject,
       });
       if (!notifyPassenger) {
-        console.error('Failed to send notification');
+        console.error('❌ [SCHEDULED RIDE FLOW] Failed to send passenger notification', {
+          rideId: rideObject._id,
+          userId: passenger.userId?._id,
+        });
+      } else {
+        console.log('✅ [SCHEDULED RIDE FLOW] Passenger notification sent', {
+          rideId: rideObject._id,
+          userId: passenger.userId?._id,
+        });
       }
 
       if (rideObject.bookedFor === 'SOMEONE') {
+        console.log('📤 [SCHEDULED RIDE FLOW] Sending admin notification for ride booked for someone else', {
+          rideId: rideObject._id,
+          bookedForName: rideObject.bookedForName,
+          bookedForPhoneNumber: rideObject.bookedForPhoneNumber,
+        });
         const notifyAdmin = await createAdminNotification({
           title: 'New Ride Scheduling Request',
           message: `A new scheduling request has been sent by ${rideObject.userId?.name} for ${rideObject.bookedForName} with phone number ${rideObject.bookedForPhoneNumber}`,
@@ -529,9 +601,19 @@ export const bookRide = async (userId, rideData) => {
           module: 'ride',
         });
         if (!notifyAdmin) {
-          console.error('Failed to send notification');
+          console.error('❌ [SCHEDULED RIDE FLOW] Failed to send admin notification', {
+            rideId: rideObject._id,
+          });
+        } else {
+          console.log('✅ [SCHEDULED RIDE FLOW] Admin notification sent', {
+            rideId: rideObject._id,
+          });
         }
       } else {
+        console.log('📤 [SCHEDULED RIDE FLOW] Sending admin notification for self-booking', {
+          rideId: rideObject._id,
+          passengerName: passenger.userId?.name,
+        });
         const notifyAdmin = await createAdminNotification({
           title: 'New Ride Scheduling Request',
           message: `A new scheduling request has been sent by a ${passenger.userId?.name}`,
@@ -539,54 +621,81 @@ export const bookRide = async (userId, rideData) => {
           module: 'ride',
         });
         if (!notifyAdmin) {
-          console.error('Failed to send notification');
+          console.error('❌ [SCHEDULED RIDE FLOW] Failed to send admin notification', {
+            rideId: rideObject._id,
+          });
+        } else {
+          console.log('✅ [SCHEDULED RIDE FLOW] Admin notification sent', {
+            rideId: rideObject._id,
+          });
         }
       }
 
       // Add scheduled ride to queue for processing
       try {
-        console.log('🚀 Attempting to add scheduled ride to queue:', {
+        console.log('🚀 [SCHEDULED RIDE FLOW] Attempting to add scheduled ride to queue', {
           rideId: rideObject._id,
           scheduledTime: rideObject.scheduledTime,
           isScheduledRide: rideObject.isScheduledRide,
           status: rideObject.status,
+          timestamp: new Date().toISOString(),
         });
         await addScheduledRideToQueue(rideObject);
-        console.log(
-          `✅ Scheduled ride ${rideObject._id} successfully added to queue`,
-        );
+        console.log('✅ [SCHEDULED RIDE FLOW] Scheduled ride successfully added to queue', {
+          rideId: rideObject._id,
+          scheduledTime: rideObject.scheduledTime,
+          timestamp: new Date().toISOString(),
+        });
       } catch (queueError) {
-        console.error('❌ Failed to add scheduled ride to queue:', {
+        console.error('❌ [SCHEDULED RIDE FLOW] Failed to add scheduled ride to queue', {
+          rideId: rideObject._id,
           error: queueError.message,
           stack: queueError.stack,
-          rideId: rideObject._id,
+          scheduledTime: rideObject.scheduledTime,
+          timestamp: new Date().toISOString(),
         });
         // Still return success since ride is created, but log the error
       }
+      
       try {
-        console.log(
-          `📢 Notifying drivers within 20km radius for scheduled ride ${rideObject._id}`,
-        );
+        console.log('📢 [SCHEDULED RIDE FLOW] Notifying drivers within 20km radius', {
+          rideId: rideObject._id,
+          pickupLocation: rideObject.pickupLocation,
+          radius: 20,
+          timestamp: new Date().toISOString(),
+        });
         const notificationResult = await notifyDriversInRadius(
           rideObject,
           20,
           0,
         );
         if (notificationResult) {
-          console.log(
-            `✅ Drivers notified successfully for scheduled ride ${rideObject._id}`,
-          );
+          console.log('✅ [SCHEDULED RIDE FLOW] Drivers notified successfully', {
+            rideId: rideObject._id,
+            notificationResult: notificationResult,
+            timestamp: new Date().toISOString(),
+          });
         } else {
-          console.log(
-            `ℹ️ No drivers found in 20km radius for scheduled ride ${rideObject._id}`,
-          );
+          console.log('ℹ️ [SCHEDULED RIDE FLOW] No drivers found in 20km radius', {
+            rideId: rideObject._id,
+            timestamp: new Date().toISOString(),
+          });
         }
       } catch (notificationError) {
-        console.error(
-          `❌ Failed to notify drivers for scheduled ride ${rideObject._id}:`,
-          notificationError,
-        );
+        console.error('❌ [SCHEDULED RIDE FLOW] Failed to notify drivers', {
+          rideId: rideObject._id,
+          error: notificationError.message,
+          stack: notificationError.stack,
+          timestamp: new Date().toISOString(),
+        });
       }
+
+      console.log('✅ [SCHEDULED RIDE FLOW] Scheduled ride booking completed successfully', {
+        rideId: rideObject._id,
+        scheduledTime: rideObject.scheduledTime,
+        status: rideObject.status,
+        timestamp: new Date().toISOString(),
+      });
 
       return {
         success: true,
@@ -789,39 +898,40 @@ const createRideRecord = async (params) => {
 };
 
 const addScheduledRideToQueue = async (ride) => {
+  const startTime = Date.now();
   try {
-    console.log('🔍 addScheduledRideToQueue called with ride:', {
+    console.log('🔍 [QUEUE] addScheduledRideToQueue called', {
       rideId: ride?._id,
       scheduledTime: ride?.scheduledTime,
       isScheduledRide: ride?.isScheduledRide,
       status: ride?.status,
+      timestamp: new Date().toISOString(),
     });
 
     if (!ride) {
-      console.error(
-        '❌ addScheduledRideToQueue: Ride object is null or undefined',
-      );
+      console.error('❌ [QUEUE] Ride object is null or undefined', {
+        timestamp: new Date().toISOString(),
+      });
       return;
     }
 
     // Ensure ride._id exists (might be a Mongoose document)
     const rideId = ride._id?.toString() || ride._id;
     if (!rideId) {
-      console.error('❌ addScheduledRideToQueue: Ride ID is missing', {
-        ride: JSON.stringify(ride, null, 2),
+      console.error('❌ [QUEUE] Ride ID is missing', {
+        rideKeys: Object.keys(ride || {}),
+        timestamp: new Date().toISOString(),
       });
       return;
     }
 
     if (!ride.scheduledTime || !ride.isScheduledRide) {
-      console.error(
-        '❌ addScheduledRideToQueue: Ride is not a scheduled ride',
-        {
-          rideId: rideId,
-          scheduledTime: ride.scheduledTime,
-          isScheduledRide: ride.isScheduledRide,
-        },
-      );
+      console.error('❌ [QUEUE] Ride is not a scheduled ride', {
+        rideId: rideId,
+        scheduledTime: ride.scheduledTime,
+        isScheduledRide: ride.isScheduledRide,
+        timestamp: new Date().toISOString(),
+      });
       return;
     }
 
@@ -829,16 +939,24 @@ const addScheduledRideToQueue = async (ride) => {
     const now = new Date();
     const timeUntilScheduled = scheduledTime.getTime() - now.getTime();
 
+    console.log('⏰ [QUEUE] Time calculations', {
+      rideId: rideId,
+      scheduledTime: scheduledTime.toISOString(),
+      currentTime: now.toISOString(),
+      timeUntilScheduledMs: timeUntilScheduled,
+      timeUntilScheduledMinutes: Math.floor(timeUntilScheduled / (60 * 1000)),
+      timestamp: new Date().toISOString(),
+    });
+
     if (timeUntilScheduled <= 0) {
-      console.error(
-        '❌ addScheduledRideToQueue: Scheduled time is in the past',
-        {
-          rideId: rideId,
-          scheduledTime: scheduledTime.toISOString(),
-          now: now.toISOString(),
-          timeUntilScheduled: timeUntilScheduled,
-        },
-      );
+      console.error('❌ [QUEUE] Scheduled time is in the past', {
+        rideId: rideId,
+        scheduledTime: scheduledTime.toISOString(),
+        now: now.toISOString(),
+        timeUntilScheduled: timeUntilScheduled,
+        timeDifferenceMinutes: Math.floor(timeUntilScheduled / (60 * 1000)),
+        timestamp: new Date().toISOString(),
+      });
       return;
     }
 
@@ -847,15 +965,25 @@ const addScheduledRideToQueue = async (ride) => {
     const activationDelay = timeUntilScheduled; // At scheduled time
     const cancellationDelay = timeUntilScheduled + 5 * 60 * 1000; // 5 minutes after scheduled time
 
-    console.log('📅 Scheduling jobs:', {
+    console.log('📅 [QUEUE] Calculating job delays', {
       rideId: rideId,
       scheduledTime: scheduledTime.toISOString(),
-      notificationDelay: `${Math.floor(notificationDelay / 1000 / 60)} minutes`,
-      activationDelay: `${Math.floor(activationDelay / 1000 / 60)} minutes`,
-      cancellationDelay: `${Math.floor(cancellationDelay / 1000 / 60)} minutes`,
+      notificationDelayMs: notificationDelay,
+      notificationDelayMinutes: Math.floor(notificationDelay / (60 * 1000)),
+      activationDelayMs: activationDelay,
+      activationDelayMinutes: Math.floor(activationDelay / (60 * 1000)),
+      cancellationDelayMs: cancellationDelay,
+      cancellationDelayMinutes: Math.floor(cancellationDelay / (60 * 1000)),
+      timestamp: new Date().toISOString(),
     });
 
     // Job 1: Send notification (5 minutes before scheduled time, or immediately if less than 5 minutes)
+    console.log('📤 [QUEUE] Adding notification job', {
+      rideId: rideId,
+      delay: notificationDelay,
+      jobId: `scheduled-ride-notification-${rideId}`,
+      timestamp: new Date().toISOString(),
+    });
     const notificationJob = await scheduledRideQueue.add(
       'send-notification',
       {
@@ -873,9 +1001,21 @@ const addScheduledRideToQueue = async (ride) => {
         },
       },
     );
-    console.log('✅ Notification job added:', notificationJob.id);
+    console.log('✅ [QUEUE] Notification job added successfully', {
+      rideId: rideId,
+      jobId: notificationJob.id,
+      jobName: notificationJob.name,
+      delay: notificationDelay,
+      timestamp: new Date().toISOString(),
+    });
 
     // Job 2: Activate ride at scheduled time (change status to REQUESTED and start driver search)
+    console.log('🚀 [QUEUE] Adding activation job', {
+      rideId: rideId,
+      delay: activationDelay,
+      jobId: `scheduled-ride-activate-${rideId}`,
+      timestamp: new Date().toISOString(),
+    });
     const activationJob = await scheduledRideQueue.add(
       'activate-ride',
       {
@@ -893,7 +1033,13 @@ const addScheduledRideToQueue = async (ride) => {
         },
       },
     );
-    console.log('✅ Activation job added:', activationJob.id);
+    console.log('✅ [QUEUE] Activation job added successfully', {
+      rideId: rideId,
+      jobId: activationJob.id,
+      jobName: activationJob.name,
+      delay: activationDelay,
+      timestamp: new Date().toISOString(),
+    });
 
     // // Job 3: Cancel ride if no response after scheduled time + 5 minutes
     // const cancellationJob = await scheduledRideQueue.add(
@@ -918,26 +1064,33 @@ const addScheduledRideToQueue = async (ride) => {
     // Verify jobs were added by checking queue
     const waitingJobs = await scheduledRideQueue.getWaiting();
     const delayedJobs = await scheduledRideQueue.getDelayed();
-    console.log('📊 Queue status:', {
+    console.log('📊 [QUEUE] Queue status after adding jobs', {
+      rideId: rideId,
       waitingJobs: waitingJobs.length,
       delayedJobs: delayedJobs.length,
       totalJobs: waitingJobs.length + delayedJobs.length,
+      timestamp: new Date().toISOString(),
     });
 
-    console.log(
-      `✅ Scheduled ride ${rideId} added to queue successfully. Notification: ${Math.floor(notificationDelay / 1000 / 60)}min, Activation: ${Math.floor(activationDelay / 1000 / 60)}min, Cancellation: ${Math.floor(cancellationDelay / 1000 / 60)}min`,
-    );
-    console.log('📋 Queue jobs added:', {
+    const processingTime = Date.now() - startTime;
+    console.log('✅ [QUEUE] Scheduled ride added to queue successfully', {
       rideId: rideId,
       notificationJobId: notificationJob.id,
       activationJobId: activationJob.id,
-      // cancellationJobId: cancellationJob.id, // Cancellation job is currently disabled
+      notificationDelayMinutes: Math.floor(notificationDelay / (60 * 1000)),
+      activationDelayMinutes: Math.floor(activationDelay / (60 * 1000)),
+      cancellationDelayMinutes: Math.floor(cancellationDelay / (60 * 1000)),
+      processingTimeMs: processingTime,
+      timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    console.error('❌ Error adding scheduled ride to queue:', {
+    const processingTime = Date.now() - startTime;
+    console.error('❌ [QUEUE] Error adding scheduled ride to queue', {
       rideId: ride?._id,
       error: error.message,
       stack: error.stack,
+      processingTimeMs: processingTime,
+      timestamp: new Date().toISOString(),
     });
     throw error; // Re-throw to be caught by caller
   }
