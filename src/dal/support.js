@@ -242,16 +242,34 @@ export const adminComplainReply = async (id, text, attachments) => {
   }
 
   // Notification Logic Start
+  console.log('📤 Admin replying to complaint:', {
+    complaintId: id,
+    recipientUserId: reply.userId?._id,
+    recipientName: reply.userId?.name,
+    recipientRole: reply.userId?.roles?.[0],
+    category: reply.category,
+  });
+
   const notify = await notifyUser({
     userId: reply.userId?._id,
     title: 'Support Reply ✅',
-    message: 'You’ve got a new response from Riden Support — tap to view.',
+    message: "You've got a new response from Riden Support — tap to view.",
     module: 'support',
     metadata: reply,
     type: 'ALERT',
     actionLink: `support_reply`,
   });
-  if (!notify) {
+
+  console.log('📬 Notification result:', {
+    success: notify?.success,
+    message: notify?.message,
+    hasDbNotification: !!notify?.dbNotification,
+    hasPushNotification: !!notify?.pushNotification,
+    pushSuccess: notify?.pushNotification?.success,
+  });
+
+  if (!notify || !notify.success) {
+    console.error('❌ Failed to send notification:', notify);
     throw new Error('Failed to send notification');
   }
   // Notification Logic End
