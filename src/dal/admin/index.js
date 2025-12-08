@@ -1968,11 +1968,27 @@ export const driversAnalytics = async (filter = 'today') => {
     isDeleted: { $ne: true },
   });
 
+  // Count unique drivers who have been reported
+  const uniqueReportedDrivers = await Report.distinct('driverId', {
+    type: 'by_passenger',
+    driverId: { $ne: null, $exists: true },
+  });
+
+  // Count unique drivers who have received feedback
+  const uniqueReviewedDrivers = await Feedback.distinct('driverId', {
+    type: 'by_passenger',
+    driverId: { $ne: null, $exists: true },
+  });
+
   const reportedDriversPercentage =
-    totalDrivers > 0 ? (totalReportedDrivers / totalDrivers) * 100 : 0;
+    totalDrivers > 0
+      ? (uniqueReportedDrivers.length / totalDrivers) * 100
+      : 0;
 
   const reviewedDriversPercentage =
-    totalDrivers > 0 ? (totalFeedbacks / totalDrivers) * 100 : 0;
+    totalDrivers > 0
+      ? (uniqueReviewedDrivers.length / totalDrivers) * 100
+      : 0;
 
   // --- Date range ---
   const now = new Date();
@@ -2115,8 +2131,9 @@ export const driversAnalytics = async (filter = 'today') => {
     });
   });
 
-  // --- Format helper ---
+  // --- Format helpers ---
   const formatHours = (hours) => Number(hours.toFixed(2)); // 2 decimals
+  const formatPercentage = (percentage) => Number(percentage.toFixed(2)); // 2 decimals for percentages
 
   // --- Fill missing slots ---
   const chartData = [];
@@ -2187,8 +2204,8 @@ export const driversAnalytics = async (filter = 'today') => {
     totalOfflineDrivers,
     totalFeedbacks,
     totalReportedDrivers,
-    reportedDriversPercentage: formatHours(reportedDriversPercentage),
-    reviewedDriversPercentage: formatHours(reviewedDriversPercentage),
+    reportedDriversPercentage: formatPercentage(reportedDriversPercentage),
+    reviewedDriversPercentage: formatPercentage(reviewedDriversPercentage),
     rideHoursChart: chartData,
     monthlyComplaintsAndRatingsChart,
   };
