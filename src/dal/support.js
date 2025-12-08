@@ -116,7 +116,27 @@ export const getAllComplainTickets = async ({
 
   // --- Base filter ---
   const filter = {};
-  if (category) filter.category = category;
+  if (category) {
+    // Validate category value
+    const validCategories = ['by_driver', 'by_passenger'];
+    if (validCategories.includes(category)) {
+      filter.category = category;
+    } else {
+      console.error(`[getAllComplainTickets] Invalid category: ${category}`);
+      // Don't filter if invalid category - return empty or all?
+      // For now, return empty result
+      return {
+        data: [],
+        currentPage: safePage,
+        totalPages: 0,
+        limit: safeLimit,
+        totalRecords: 0,
+      };
+    }
+  }
+
+  console.log('[getAllComplainTickets] Filter:', JSON.stringify(filter, null, 2));
+  console.log('[getAllComplainTickets] Category requested:', category);
 
   // --- Date filter ---
   if (fromDate || toDate) {
@@ -204,12 +224,21 @@ export const getAllComplainTickets = async ({
 
   const countPipeline = [...baseStages, { $count: 'total' }];
 
+  console.log('[getAllComplainTickets] Data pipeline match stage:', JSON.stringify(baseStages[0], null, 2));
+  
   const [tickets, totalCountResult] = await Promise.all([
     mongoose.model('ComplainTicket').aggregate(dataPipeline),
     mongoose.model('ComplainTicket').aggregate(countPipeline),
   ]);
 
   const totalRecords = totalCountResult[0]?.total || 0;
+
+  console.log('[getAllComplainTickets] Results:', {
+    category,
+    totalRecords,
+    ticketsCount: tickets.length,
+    sampleCategories: tickets.slice(0, 3).map(t => ({ id: t._id, category: t.category })),
+  });
 
   return {
     data: tickets,

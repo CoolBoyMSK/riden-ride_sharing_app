@@ -1783,11 +1783,16 @@ export const findGenericAnalytics = async (
   }
 
   // --- Total rides & total actual fare ---
+  // Use requestedAt for date filter (same as stats endpoint)
+  const rideDateFilter = dateFilter.createdAt
+    ? { requestedAt: dateFilter.createdAt }
+    : {};
+
   const rideStats = await Booking.aggregate([
     {
       $match: {
         status: { $nin: excludeStatuses },
-        ...dateFilter,
+        ...rideDateFilter,
       },
     },
     {
@@ -1799,8 +1804,9 @@ export const findGenericAnalytics = async (
             $cond: [
               {
                 $and: [
-                  { $ifNull: ['$actualFare', false] },
-                  { $eq: ['$paymentStatus', 'COMPLETED'] },
+                  { $ne: ['$actualFare', null] },
+                  { $gt: ['$actualFare', 0] },
+                  { $eq: ['$status', 'RIDE_COMPLETED'] }, // Count revenue from completed rides
                 ],
               },
               '$actualFare',
@@ -1812,19 +1818,51 @@ export const findGenericAnalytics = async (
     },
   ]);
 
-  // --- Total drivers ---
-  const driverFilter = dateFilter.createdAt
-    ? { createdAt: dateFilter.createdAt }
-    : {};
-  const totalDrivers = await Driver.countDocuments(driverFilter);
+  // --- Total drivers (active drivers who completed rides today) ---
+  const driverDateFilter = rideDateFilter.requestedAt
+    ? { requestedAt: rideDateFilter.requestedAt, status: 'RIDE_COMPLETED' }
+    : { status: 'RIDE_COMPLETED' };
+  
+  const activeDriversResult = await Booking.aggregate([
+    {
+      $match: driverDateFilter,
+    },
+    {
+      $group: {
+        _id: '$driverId',
+      },
+    },
+    {
+      $count: 'totalDrivers',
+    },
+  ]);
+  const totalDrivers = activeDriversResult[0]?.totalDrivers || 0;
 
-  // --- Passenger feedback stats ---
+  // --- Passenger feedback stats (feedbacks for today's rides) ---
+  // First get today's completed ride IDs
+  const todayRideIds = await Booking.find({
+    ...rideDateFilter,
+    status: 'RIDE_COMPLETED',
+  })
+    .select('_id')
+    .lean();
+  
+  const rideIds = todayRideIds.map((ride) => ride._id);
+
+  // Only query feedbacks if there are rides today
+  const feedbackMatch = rideIds.length > 0
+    ? {
+        type: 'by_passenger',
+        rideId: { $in: rideIds }, // Feedbacks for today's rides
+      }
+    : {
+        type: 'by_passenger',
+        rideId: { $in: [] }, // Empty array - no matches
+      };
+
   const feedbackStats = await Feedback.aggregate([
     {
-      $match: {
-        type: 'by_passenger',
-        ...dateFilter,
-      },
+      $match: feedbackMatch,
     },
     {
       $group: {

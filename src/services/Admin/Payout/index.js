@@ -168,18 +168,61 @@ export const getInstantPayoutRequestsCount = async (user, resp) => {
 
 export const refundPassenger = async (user, { id, reason }, resp) => {
   try {
-    let ride = await findCompletedRide(id);
-    if (!ride) {
+    // Validate ID format
+    if (!id) {
       resp.error = true;
-      resp.error_message = 'Failed to find completed ride';
+      resp.error_message = 'Ride ID is required';
       return resp;
     }
 
+    const mongoose = (await import('mongoose')).default;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      resp.error = true;
+      resp.error_message = `Invalid ride ID format: ${id}`;
+      return resp;
+    }
+
+    // Check if ride exists
+    const RideModel = (await import('../../../models/Ride.js')).default;
+    const ride = await RideModel.findById(id)
+      .populate('passengerId driverId')
+      .lean();
+
+    if (!ride) {
+      resp.error = true;
+      resp.error_message = `Ride not found with ID: ${id}`;
+      return resp;
+    }
+
+    // Check ride status
+    if (ride.status !== 'RIDE_COMPLETED') {
+      resp.error = true;
+      resp.error_message = `Ride is not completed. Current status: ${ride.status || 'UNKNOWN'}`;
+      return resp;
+    }
+
+    // Check payment status
+    if (ride.paymentStatus !== 'COMPLETED') {
+      resp.error = true;
+      resp.error_message = `Payment is not completed. Current payment status: ${ride.paymentStatus || 'UNKNOWN'}`;
+      return resp;
+    }
+
+    // Check if already refunded
+    const RefundTransaction = (await import('../../../models/RefundTransaction.js')).default;
+    const existingRefund = await RefundTransaction.findOne({ rideId: id });
+    if (existingRefund) {
+      resp.error = true;
+      resp.error_message = `Ride has already been refunded. Refund ID: ${existingRefund._id}`;
+      return resp;
+    }
+
+    // Process refund based on payment method
     if (ride.paymentMethod === 'CARD') {
       const success = await refundCardPaymentToPassenger(ride._id, reason);
-      if (!success) {
+      if (!success || !success.success) {
         resp.error = true;
-        resp.error_message = 'Failed to refund card passenger';
+        resp.error_message = success?.error || 'Failed to refund card payment';
         return resp;
       }
 
@@ -187,10 +230,9 @@ export const refundPassenger = async (user, { id, reason }, resp) => {
       return resp;
     } else if (ride.paymentMethod === 'WALLET') {
       const success = await refundWalletPaymentToPassenger(ride._id, reason);
-      console.log(success);
-      if (!success) {
+      if (!success || !success.success) {
         resp.error = true;
-        resp.error_message = 'Failed to refund wallet passenger';
+        resp.error_message = success?.error || 'Failed to refund wallet payment';
         return resp;
       }
 
@@ -198,11 +240,12 @@ export const refundPassenger = async (user, { id, reason }, resp) => {
       return resp;
     } else {
       resp.error = true;
-      resp.error_message = 'Invalid payment method';
+      resp.error_message = `Invalid payment method: ${ride.paymentMethod || 'UNKNOWN'}. Only CARD and WALLET payments can be refunded.`;
       return resp;
     }
   } catch (error) {
     console.error(`API ERROR: ${error}`);
+    console.error(`API ERROR Stack: ${error.stack}`);
     resp.error = true;
     resp.error_message = error.message || 'Something went wrong';
     return resp;
