@@ -626,6 +626,8 @@ export const sendPushNotification = async ({
   body,
   data = {},
   imageUrl = null,
+  userId = null,
+  userRole = null,
 }) => {
   try {
     if (!deviceToken) {
@@ -661,7 +663,11 @@ export const sendPushNotification = async ({
 
     const response = await firebaseAdmin.messaging().send(message);
 
-    console.log(`✅ Push notification sent successfully: ${response}`);
+    console.log(`✅ Push notification sent successfully: ${response}`, {
+      userId,
+      userRole,
+      timestamp: new Date().toISOString(),
+    });
     return { success: true, response };
   } catch (error) {
     // Check if it's a token not found error
@@ -671,6 +677,8 @@ export const sendPushNotification = async ({
     
     if (isTokenNotFound) {
       console.warn('⚠️ [NOTIFICATION] Device token not found or invalid (user may have uninstalled app)', {
+        userId,
+        userRole,
         token: deviceToken,
         error: error.message,
         errorCode: error.code,
@@ -678,6 +686,8 @@ export const sendPushNotification = async ({
       });
     } else {
       console.error('❌ [NOTIFICATION] Error sending push notification', {
+        userId,
+        userRole,
         token: deviceToken,
         error: error.message,
         errorCode: error.code,
@@ -765,6 +775,8 @@ export const notifyUser = async ({
             ...metadata,
           },
           imageUrl: actionLink || undefined,
+          userId: user._id?.toString() || userId,
+          userRole: user.roles?.[0] || null,
         });
 
         return {
