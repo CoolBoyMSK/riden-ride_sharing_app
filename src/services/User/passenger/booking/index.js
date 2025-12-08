@@ -193,7 +193,7 @@ export const generateReceipt = async ({ id }, resp) => {
       return resp;
     }
 
-    const success = await generateRideReceipt(id);
+    const success = await generateRideReceipt(id, 'passenger');
     if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to generate receipt';
@@ -218,39 +218,28 @@ export const downloadReceipt = async ({ id }, res, resp) => {
       return resp;
     }
 
-    let success = await findReceipt(id);
-    if (!success) {
-      // Auto-generate receipt if ride is completed but receipt does not exist
-      console.log(
-        `📄 [downloadReceipt][passenger] No receipt found for ride ${id}, attempting to generate...`,
+    // Generate passenger receipt on-the-fly
+    console.log(
+      `📄 [downloadReceipt][passenger] Generating passenger receipt for ride ${id}...`,
+    );
+
+    const generated = await generateRideReceipt(id, 'passenger');
+
+    if (!generated?.success) {
+      console.error(
+        `❌ [downloadReceipt][passenger] Failed to generate receipt for ride ${id}:`,
+        generated?.error,
       );
-
-      const generated = await generateRideReceipt(id);
-
-      if (!generated?.success) {
-        console.error(
-          `❌ [downloadReceipt][passenger] Failed to generate receipt for ride ${id}:`,
-          generated?.error,
-        );
-        resp.error = true;
-        resp.error_message =
-          generated?.error || 'Failed to generate receipt for this ride';
-        return resp;
-      }
-
-      // Re-fetch receipt after successful generation
-      success = await findReceipt(id);
-      if (!success) {
-        console.error(
-          `❌ [downloadReceipt][passenger] Receipt generated but not found in database for ride ${id}`,
-        );
-        resp.error = true;
-        resp.error_message = 'Failed to find receipt after generation';
-        return resp;
-      }
+      resp.error = true;
+      resp.error_message =
+        generated?.error || 'Failed to generate receipt for this ride';
+      return resp;
     }
 
-    if (!success.pdfData || !Buffer.isBuffer(success.pdfData)) {
+    // Get the PDF buffer from the generated receipt
+    const pdfBuffer = Buffer.from(generated.receipt.base64, 'base64');
+
+    if (!pdfBuffer || pdfBuffer.length < 100) {
       console.error(
         `❌ [downloadReceipt][passenger] Invalid PDF data for ride ${id}`,
       );
@@ -262,11 +251,11 @@ export const downloadReceipt = async ({ id }, res, resp) => {
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="${success.fileName || `receipt-${id}.pdf`}"`,
+      `attachment; filename="${generated.receipt.fileName || `receipt-${id}-passenger.pdf`}"`,
     );
-    res.setHeader('Content-Length', success.pdfData.length);
+    res.setHeader('Content-Length', pdfBuffer.length);
 
-    resp.data = success.pdfData;
+    resp.data = pdfBuffer;
     return resp;
   } catch (error) {
     console.error(`❌ [downloadReceipt][passenger] Error for ride ${id}:`, {
