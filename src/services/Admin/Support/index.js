@@ -8,6 +8,8 @@ import {
   updateReportStatusById,
 } from '../../../dal/support.js';
 import { uploadAdminImage } from '../../../utils/s3Uploader.js';
+import { createAdminNotification } from '../../../dal/notification.js';
+import env from '../../../config/envConfig.js';
 
 export const findAllComplainTickets = async (
   user,
@@ -107,6 +109,20 @@ export const replyToComplain = async (user, { id }, { text }, files, resp) => {
       resp.error = true;
       resp.error_message = 'Failed to fetch update status';
       return resp;
+    }
+
+    // Create admin notification for support ticket reply
+    const notify = await createAdminNotification({
+      title: 'Support Ticket Reply Sent',
+      message: `You replied to a support ticket. User will be notified.`,
+      metadata: success,
+      module: 'support_ticket',
+      type: 'ALERT',
+      actionLink: `${env.FRONTEND_URL}/api/admin/support/get?id=${success._id}`,
+    });
+    
+    if (!notify || !notify.success) {
+      console.error('Failed to create admin notification for support reply:', notify);
     }
 
     resp.data = success;
