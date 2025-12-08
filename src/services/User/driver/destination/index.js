@@ -16,10 +16,17 @@ export const addDestination = async (
   { startLocation, endLocation },
   resp,
 ) => {
+  console.log('[addDestination] Starting - User ID:', user._id);
+  console.log('[addDestination] Request data:', {
+    startLocation,
+    endLocation,
+  });
+
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
     const driver = await findDriverByUserId(user._id, { session });
+    console.log('[addDestination] Driver found:', driver ? 'Yes' : 'No');
     if (!driver) {
       await session.abortTransaction();
       session.endSession();
@@ -30,7 +37,11 @@ export const addDestination = async (
     }
 
     // Validate locations
+    console.log('[addDestination] Validating locations...');
     if (!startLocation?.coordinates || !endLocation?.coordinates) {
+      console.log('[addDestination] ERROR: Missing coordinates');
+      console.log('[addDestination] startLocation:', startLocation);
+      console.log('[addDestination] endLocation:', endLocation);
       await session.abortTransaction();
       session.endSession();
       resp.error = true;
@@ -38,12 +49,17 @@ export const addDestination = async (
       return resp;
     }
 
+    console.log('[addDestination] Checking coordinate format...');
+    console.log('[addDestination] startLocation.coordinates:', startLocation.coordinates, 'Type:', typeof startLocation.coordinates, 'IsArray:', Array.isArray(startLocation.coordinates));
+    console.log('[addDestination] endLocation.coordinates:', endLocation.coordinates, 'Type:', typeof endLocation.coordinates, 'IsArray:', Array.isArray(endLocation.coordinates));
+
     if (
       !Array.isArray(startLocation.coordinates) ||
       startLocation.coordinates.length !== 2 ||
       !Array.isArray(endLocation.coordinates) ||
       endLocation.coordinates.length !== 2
     ) {
+      console.log('[addDestination] ERROR: Invalid coordinates format');
       await session.abortTransaction();
       session.endSession();
       resp.error = true;
@@ -51,28 +67,71 @@ export const addDestination = async (
       return resp;
     }
 
+    // Ensure coordinates are numbers (convert strings to numbers if needed)
+    const startCoords = [
+      Number(startLocation.coordinates[0]),
+      Number(startLocation.coordinates[1]),
+    ];
+    const endCoords = [
+      Number(endLocation.coordinates[0]),
+      Number(endLocation.coordinates[1]),
+    ];
+
+    console.log('[addDestination] Converted coordinates:');
+    console.log('[addDestination] startCoords:', startCoords);
+    console.log('[addDestination] endCoords:', endCoords);
+
+    // Validate coordinates are valid numbers
+    if (
+      isNaN(startCoords[0]) ||
+      isNaN(startCoords[1]) ||
+      isNaN(endCoords[0]) ||
+      isNaN(endCoords[1])
+    ) {
+      console.log('[addDestination] ERROR: Invalid coordinates - NaN detected');
+      await session.abortTransaction();
+      session.endSession();
+      resp.error = true;
+      resp.error_message = 'Invalid coordinates. Coordinates must be valid numbers';
+      return resp;
+    }
+
     // Update driver with destination ride information
-    const updated = await updateDriverByUserId(
-      user._id,
-      {
+    // Use $set operator explicitly for nested object updates
+    const updateData = {
+      $set: {
         'destinationRide.isActive': true,
         'destinationRide.startLocation': {
-          coordinates: startLocation.coordinates,
+          coordinates: startCoords,
           address: startLocation.address || '',
           placeName: startLocation.placeName || '',
         },
         'destinationRide.endLocation': {
-          coordinates: endLocation.coordinates,
+          coordinates: endCoords,
           address: endLocation.address || '',
           placeName: endLocation.placeName || '',
         },
         'destinationRide.activatedAt': new Date(),
         isDestination: true, // Keep this for backward compatibility
       },
+    };
+
+    console.log('[addDestination] Update data:', JSON.stringify(updateData, null, 2));
+    console.log('[addDestination] Attempting to update driver...');
+
+    const updated = await updateDriverByUserId(
+      user._id,
+      updateData,
       { session },
     );
 
+    console.log('[addDestination] Update result:', updated ? 'Success' : 'Failed');
+    if (updated) {
+      console.log('[addDestination] Updated destinationRide:', JSON.stringify(updated.destinationRide, null, 2));
+    }
+
     if (!updated) {
+      console.log('[addDestination] ERROR: updateDriverByUserId returned null/undefined');
       await session.abortTransaction();
       session.endSession();
       resp.error = true;
@@ -80,19 +139,25 @@ export const addDestination = async (
       return resp;
     }
 
+    console.log('[addDestination] Committing transaction...');
     await session.commitTransaction();
     session.endSession();
 
+    console.log('[addDestination] Success - Destination ride saved');
     resp.data = {
       destinationRide: updated.destinationRide,
       message: 'Destination ride activated successfully',
     };
     return resp;
   } catch (error) {
+    console.error('[addDestination] CATCH ERROR - Full error:', error);
+    console.error('[addDestination] CATCH ERROR - Message:', error.message);
+    console.error('[addDestination] CATCH ERROR - Stack:', error.stack);
+    console.error('[addDestination] CATCH ERROR - Name:', error.name);
+    
     await session.abortTransaction();
     session.endSession();
 
-    console.error(`API ERROR: ${error}`);
     resp.error = true;
     resp.error_message = error.message || 'Something went wrong';
     return resp;

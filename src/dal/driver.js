@@ -60,21 +60,37 @@ export const toggleDriverLocation = async (driverId, status, isAvailable) =>
   );
 
 export const updateDriverByUserId = async (id, update, options = {}) => {
+  console.log('[updateDriverByUserId] Starting update');
+  console.log('[updateDriverByUserId] User ID:', id);
+  console.log('[updateDriverByUserId] Update object:', JSON.stringify(update, null, 2));
+  console.log('[updateDriverByUserId] Options:', options);
+
   const objectId = mongoose.Types.ObjectId.isValid(id)
     ? new mongoose.Types.ObjectId(id)
     : id;
 
-  const updatedDriver = await DriverModel.findOneAndUpdate(
-    { userId: objectId },
-    update,
-    { new: true, session: options.session },
-  );
+  console.log('[updateDriverByUserId] Converted ObjectId:', objectId);
 
-  if (!updatedDriver) {
-    throw new Error('Driver not found');
+  try {
+    const updatedDriver = await DriverModel.findOneAndUpdate(
+      { userId: objectId },
+      update,
+      { new: true, session: options.session, runValidators: true },
+    );
+
+    console.log('[updateDriverByUserId] Update result:', updatedDriver ? 'Success' : 'Failed');
+    if (!updatedDriver) {
+      console.log('[updateDriverByUserId] ERROR: Driver not found with userId:', objectId);
+      throw new Error('Driver not found');
+    }
+
+    console.log('[updateDriverByUserId] Updated driver destinationRide:', updatedDriver.destinationRide);
+    return updatedDriver;
+  } catch (error) {
+    console.error('[updateDriverByUserId] ERROR:', error.message);
+    console.error('[updateDriverByUserId] ERROR Stack:', error.stack);
+    throw error;
   }
-
-  return updatedDriver;
 };
 
 export const countDrivers = () => DriverModel.countDocuments();
