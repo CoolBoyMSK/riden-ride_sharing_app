@@ -3733,19 +3733,7 @@ export const initSocket = (server) => {
             code: 'NOT_FOUND',
             message: 'Ride not found',
           });
-        }
-
-        console.log('✅ [CANCELLATION] Ride found for cancellation', {
-          userId,
-          rideId,
-          rideStatus: ride.status,
-          isScheduledRide: ride.isScheduledRide,
-          scheduledTime: ride.scheduledTime,
-          hasDriver: !!ride.driverId,
-          driverId: ride.driverId?._id || ride.driverId,
-          passengerId: passengerId?.toString(),
-          timestamp: new Date().toISOString(),
-        }); else if (passengerId.toString() !== passenger._id.toString()) {
+        } else if (passengerId.toString() !== passenger._id.toString()) {
           return socket.emit('error', {
             success: false,
             objectType,
@@ -3781,6 +3769,18 @@ export const initSocket = (server) => {
             message: 'Cannot cancel a completed ride',
           });
         }
+
+        console.log('✅ [CANCELLATION] Ride found for cancellation', {
+          userId,
+          rideId,
+          rideStatus: ride.status,
+          isScheduledRide: ride.isScheduledRide,
+          scheduledTime: ride.scheduledTime,
+          hasDriver: !!ride.driverId,
+          driverId: ride.driverId?._id || ride.driverId,
+          passengerId: passengerId?.toString(),
+          timestamp: new Date().toISOString(),
+        });
 
         const cancellableStatuses = [
           'SCHEDULED', // Allow cancelling scheduled rides before they become active
@@ -3935,17 +3935,6 @@ export const initSocket = (server) => {
           newStatus: updatedRide.status,
           cancellationReason: reason,
           isScheduledRide: ride.isScheduledRide,
-          processingTimeMs: cancelTime,
-          timestamp: new Date().toISOString(),
-        });
-        
-        const cancelTime = Date.now() - cancelStartTime;
-        console.log('✅ [CANCELLATION] Ride cancelled successfully', {
-          userId,
-          rideId: ride._id,
-          oldStatus: ride.status,
-          newStatus: updatedRide.status,
-          cancellationReason: reason,
           processingTimeMs: cancelTime,
           timestamp: new Date().toISOString(),
         });
