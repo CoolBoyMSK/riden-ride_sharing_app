@@ -1055,6 +1055,32 @@ export const assignDriverToScheduledRide = async ({ rideId, driverId }) => {
       ? updatedRide.bookedForName
       : updatedRide.passengerId?.userId?.name || 'Passenger';
 
+  // Extract passenger userId - similar to driver userId extraction
+  let passengerUserId = null;
+  if (updatedRide.passengerId?.userId) {
+    // If userId is an object (populated), get _id
+    if (
+      typeof updatedRide.passengerId.userId === 'object' &&
+      updatedRide.passengerId.userId._id
+    ) {
+      passengerUserId = updatedRide.passengerId.userId._id.toString();
+    }
+    // If userId is already an ObjectId or string
+    else if (updatedRide.passengerId.userId.toString) {
+      passengerUserId = updatedRide.passengerId.userId.toString();
+    }
+    // Fallback: try to use it directly
+    else {
+      passengerUserId = updatedRide.passengerId.userId;
+    }
+  }
+
+  // Extract driver name
+  const driverName =
+    updatedRide.driverId?.userId?.name ||
+    driver.userId?.name ||
+    'Driver';
+
   try {
     // Send push notification to driver
     console.log('📤 Sending notification to driver:', {
