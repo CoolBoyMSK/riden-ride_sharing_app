@@ -353,10 +353,27 @@ export const refundPassenger = async (user, { id, reason }, resp) => {
         const stripe = new Stripe(env.STRIPE_SECRET_KEY);
         
         try {
-          // Check payment intent status in Stripe
-          const paymentIntent = await stripe.paymentIntents.retrieve(ride.paymentIntentId);
+          // Check payment intent status in Stripe - expand charges to get actual charge details
+          const paymentIntent = await stripe.paymentIntents.retrieve(ride.paymentIntentId, {
+            expand: ['charges']
+          });
           
           if (paymentIntent.status === 'succeeded') {
+            // Get actual amount charged
+            // amount_received is what was actually captured (in cents)
+            // This is the real amount that can be refunded, not the authorized amount
+            const chargeAmount = paymentIntent.amount_received || paymentIntent.amount || 0;
+            
+            if (!chargeAmount || chargeAmount <= 0) {
+              resp.error = true;
+              resp.error_message = 'No charge amount found for this payment intent';
+              return resp;
+            }
+            
+            // Get charge ID for refund (if available)
+            const charges = paymentIntent.charges?.data || [];
+            const succeededCharge = charges.find(charge => charge.status === 'succeeded');
+            
             // Check if refund already exists
             const existingRefunds = await stripe.refunds.list({
               payment_intent: ride.paymentIntentId,
@@ -367,13 +384,12 @@ export const refundPassenger = async (user, { id, reason }, resp) => {
               .filter(refund => refund.status === 'succeeded')
               .reduce((sum, refund) => sum + (refund.amount || 0), 0);
             
-            // Get actual charge amount from payment intent
-            const chargeAmount = paymentIntent.amount || 0; // Amount in cents
+            // Available refund amount = what was actually charged - what's already refunded
             const availableRefundAmount = chargeAmount - totalRefunded;
             
             if (availableRefundAmount <= 0) {
               resp.error = true;
-              resp.error_message = `Payment has already been fully refunded in Stripe. Total refunded: $${(totalRefunded / 100).toFixed(2)}`;
+              resp.error_message = `Payment has already been fully refunded in Stripe. Charge amount: $${(chargeAmount / 100).toFixed(2)}, Total refunded: $${(totalRefunded / 100).toFixed(2)}`;
               return resp;
             }
             
@@ -385,18 +401,29 @@ export const refundPassenger = async (user, { id, reason }, resp) => {
             console.log('Refund calculation:', {
               rideId: id,
               paymentIntentId: ride.paymentIntentId,
+              chargeId: succeededCharge?.id || 'N/A',
               chargeAmount: chargeAmount / 100,
+              paymentIntentAmount: paymentIntent.amount / 100,
+              amountReceived: paymentIntent.amount_received ? paymentIntent.amount_received / 100 : 'N/A',
               totalRefunded: totalRefunded / 100,
               availableRefundAmount: refundAmount,
               rideActualFare: ride.actualFare,
             });
             
             // Create refund in Stripe
-            const stripeRefund = await stripe.refunds.create({
-              payment_intent: ride.paymentIntentId,
+            // Use charge ID if available (more accurate), otherwise payment intent
+            const refundParams = {
               amount: refundAmountInCents,
               reason: reason || 'requested_by_customer',
-            });
+            };
+            
+            if (succeededCharge?.id) {
+              refundParams.charge = succeededCharge.id;
+            } else {
+              refundParams.payment_intent = ride.paymentIntentId;
+            }
+            
+            const stripeRefund = await stripe.refunds.create(refundParams);
             
             // Get passenger and driver IDs
             const passengerId = ride.passengerId?._id || ride.passengerId;
