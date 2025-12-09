@@ -453,11 +453,12 @@ export const createAdminNotification = async ({
       recipients,
     });
 
-    // --- Emit socket event to all admins with notification ID included ---
-    adminsWithAccess.forEach((a) => {
+    // --- Emit socket events to all admins ---
+    for (const a of adminsWithAccess) {
       // Convert admin ID to string to ensure proper socket room matching
       const adminId = a.admin?.toString ? a.admin.toString() : String(a.admin);
       
+      // 1. Emit single new notification event
       emitToUser(adminId, 'admin:new_notification', {
         _id: notification._id,
         title,
@@ -470,15 +471,39 @@ export const createAdminNotification = async ({
         updatedAt: notification.updatedAt,
       });
       
+      // 2. Emit updated notifications list via admin:get_notifications event
+      try {
+        const notificationsData = await findAdminNotifications(adminId, 1, 10);
+        if (notificationsData) {
+          emitToUser(adminId, 'admin:get_notifications', {
+            success: true,
+            objectType: 'get-notifications',
+            data: notificationsData,
+            message: 'Notifications fetched successfully',
+          });
+          
+          console.log('📬 [ADMIN NOTIFICATION] Emitted admin:get_notifications to admin', {
+            adminId,
+            notificationId: notification._id,
+            module,
+            totalNotifications: notificationsData.notifications?.length || 0,
+            unreadCount: notificationsData.unreadCount || 0,
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching notifications for admin:', adminId, error);
+        // Continue even if fetching fails - single notification already sent
+      }
+      
       // Log for debugging
       console.log('📬 [ADMIN NOTIFICATION] Emitting socket event to admin', {
         adminId,
         adminIdType: typeof adminId,
         notificationId: notification._id,
         module,
-        event: 'admin:new_notification',
+        events: ['admin:new_notification', 'admin:get_notifications'],
       });
-    });
+    }
 
     return {
       success: true,

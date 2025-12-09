@@ -357,20 +357,39 @@ export const refundPassenger = async (user, { id, reason }, resp) => {
           const paymentIntent = await stripe.paymentIntents.retrieve(ride.paymentIntentId);
           
           if (paymentIntent.status === 'succeeded') {
-            // Payment was successful, create refund through Stripe
-            const refundAmount = ride.actualFare || ride.fareBreakdown?.finalAmount || 0;
-            const refundAmountInCents = Math.round(refundAmount * 100);
-            
             // Check if refund already exists
             const existingRefunds = await stripe.refunds.list({
               payment_intent: ride.paymentIntentId,
             });
             
-            if (existingRefunds.data.length > 0) {
+            // Calculate total already refunded amount
+            const totalRefunded = existingRefunds.data
+              .filter(refund => refund.status === 'succeeded')
+              .reduce((sum, refund) => sum + (refund.amount || 0), 0);
+            
+            // Get actual charge amount from payment intent
+            const chargeAmount = paymentIntent.amount || 0; // Amount in cents
+            const availableRefundAmount = chargeAmount - totalRefunded;
+            
+            if (availableRefundAmount <= 0) {
               resp.error = true;
-              resp.error_message = `Payment has already been refunded in Stripe. Refund ID: ${existingRefunds.data[0].id}`;
+              resp.error_message = `Payment has already been fully refunded in Stripe. Total refunded: $${(totalRefunded / 100).toFixed(2)}`;
               return resp;
             }
+            
+            // Use available refund amount (not ride.actualFare, as charge might be partial)
+            const refundAmountInCents = availableRefundAmount;
+            const refundAmount = refundAmountInCents / 100;
+            
+            // Log for debugging
+            console.log('Refund calculation:', {
+              rideId: id,
+              paymentIntentId: ride.paymentIntentId,
+              chargeAmount: chargeAmount / 100,
+              totalRefunded: totalRefunded / 100,
+              availableRefundAmount: refundAmount,
+              rideActualFare: ride.actualFare,
+            });
             
             // Create refund in Stripe
             const stripeRefund = await stripe.refunds.create({

@@ -4024,18 +4024,47 @@ export const refundCardPaymentToPassenger = async (
           payment_intent: referenceId,
         });
 
-        if (
-          existingRefunds.data.length > 0 &&
-          existingRefunds.data[0].status === 'succeeded'
-        ) {
-          // Use existing refund
-          refund = existingRefunds.data[0];
-          console.log('Using existing Stripe refund:', refund.id);
+        // Calculate total already refunded amount
+        const totalRefunded = existingRefunds.data
+          .filter((r) => r.status === 'succeeded')
+          .reduce((sum, r) => sum + (r.amount || 0), 0);
+
+        // Get payment intent to check actual charge amount
+        const paymentIntent = await stripe.paymentIntents.retrieve(referenceId);
+        const chargeAmount = paymentIntent.amount || 0; // Amount in cents
+        const availableRefundAmount = chargeAmount - totalRefunded;
+
+        if (availableRefundAmount <= 0) {
+          if (existingRefunds.data.length > 0) {
+            // Use existing refund if available
+            refund = existingRefunds.data[0];
+            console.log('Using existing Stripe refund:', refund.id);
+          } else {
+            throw new Error(
+              `No refundable amount available. Charge amount: $${(chargeAmount / 100).toFixed(2)}, Already refunded: $${(totalRefunded / 100).toFixed(2)}`,
+            );
+          }
         } else {
-          // Process new refund
+          // Process new refund with available amount
+          // Use minimum of actualAmountPaid and availableRefundAmount
+          const refundAmountInCents = Math.min(
+            Math.round(actualAmountPaid * 100),
+            availableRefundAmount,
+          );
+
+          console.log('Refund calculation:', {
+            rideId,
+            paymentIntentId: referenceId,
+            chargeAmount: chargeAmount / 100,
+            totalRefunded: totalRefunded / 100,
+            availableRefundAmount: availableRefundAmount / 100,
+            actualAmountPaid,
+            refundAmountInCents: refundAmountInCents / 100,
+          });
+
           refund = await stripe.refunds.create({
             payment_intent: referenceId,
-            amount: actualAmountPaid * 100, // Refund full amount passenger paid
+            amount: refundAmountInCents,
             reason: 'requested_by_customer',
           });
 
