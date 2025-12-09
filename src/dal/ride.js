@@ -658,6 +658,7 @@ export const isRideInRestrictedArea = async (coords) => {
     throw new Error(`Invalid coordinates provided: ${JSON.stringify(coords)}`);
   }
 
+  // First check Zone collection
   const zone = await Zone.findOne({
     boundaries: {
       $geoIntersects: {
@@ -673,9 +674,36 @@ export const isRideInRestrictedArea = async (coords) => {
 
   if (zone) {
     return true;
-  } else {
-    return false;
   }
+
+  // If not found in Zone collection, check FareManagement for airport zones
+  // Airport zones in FareManagement have zoneType: 'premium' but we need to check by name/type
+  const fareZone = await Fare.findOne({
+    'zone.boundaries': {
+      $geoIntersects: {
+        $geometry: {
+          type: 'Point',
+          coordinates: coords,
+        },
+      },
+    },
+    'zone.isActive': true,
+    // Check if zone name contains 'airport' or 'Airport' (case insensitive)
+    $or: [
+      { 'zone.name': { $regex: /airport/i } },
+      { 'zone.zoneType': 'premium' }, // Airport zones are typically premium
+    ],
+  }).lean();
+
+  if (fareZone && fareZone.zone) {
+    // Additional check: if zone name contains airport, consider it restricted
+    const zoneName = fareZone.zone.name || '';
+    if (zoneName.toLowerCase().includes('airport')) {
+      return true;
+    }
+  }
+
+  return false;
 };
 
 export const filterRidesForDriver = (
