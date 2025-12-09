@@ -320,14 +320,40 @@ export const updateLocation = async (user, { coordinates, heading, speed, accura
     const airportZones = await Zone.find({ type: 'airport', isActive: true }).lean();
     console.log(`\n🔍 DEBUG: Found ${airportZones.length} active airport zone(s) in database`);
     if (airportZones.length > 0) {
-      airportZones.forEach((zone, index) => {
-        console.log(`   Zone ${index + 1}: ${zone.name || 'N/A'} (ID: ${zone._id})`);
+      for (const zone of airportZones) {
+        const index = airportZones.indexOf(zone) + 1;
+        console.log(`   Zone ${index}: ${zone.name || 'N/A'} (ID: ${zone._id})`);
         console.log(`   Has boundaries: ${zone.boundaries ? 'Yes' : 'No'}`);
         if (zone.boundaries && zone.boundaries.coordinates) {
           console.log(`   Boundaries type: ${zone.boundaries.type}`);
           console.log(`   Coordinates count: ${zone.boundaries.coordinates[0]?.length || 0}`);
+          
+          // Check if coordinates are within this zone
+          if (zone.boundaries.type === 'Polygon' && zone.boundaries.coordinates[0]) {
+            const boundaryCoords = zone.boundaries.coordinates[0];
+            console.log(`   Boundary coordinates (first 3):`);
+            for (let i = 0; i < Math.min(3, boundaryCoords.length); i++) {
+              const coord = boundaryCoords[i];
+              console.log(`     Point ${i + 1}: [${coord[0]}, ${coord[1]}]`);
+            }
+            
+            // Try to check if point is within using MongoDB query
+            const testZone = await Zone.findOne({
+              _id: zone._id,
+              boundaries: {
+                $geoIntersects: {
+                  $geometry: {
+                    type: 'Point',
+                    coordinates: coordinates,
+                  },
+                },
+              },
+            }).lean();
+            
+            console.log(`   📍 Test coordinates [${coordinates[0]}, ${coordinates[1]}] within this zone: ${testZone ? 'YES ✅' : 'NO ❌'}`);
+          }
         }
-      });
+      }
     } else {
       console.log(`   ⚠️ WARNING: No active airport zones found in database!`);
       console.log(`   Please check if airport zone is properly configured in admin panel.`);
