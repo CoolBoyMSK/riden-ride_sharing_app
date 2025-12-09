@@ -85,6 +85,7 @@ import {
   sendPassengerRideCancellationWarningEmail,
   sendDriverRideCancellationEmail,
 } from '../templates/emails/user/index.js';
+import { scheduledRideQueue } from '../scheduled/queues/index.js';
 
 let ioInstance = null;
 
@@ -2899,12 +2900,30 @@ export const initSocket = (server) => {
           });
 
           socket.join(`ride:${updatedRide._id}`);
+          
+          // Emit to ride room (for all participants)
           io.to(`ride:${updatedRide._id}`).emit('ride:driver_complete_ride', {
             success: true,
             objectType,
             data: updatedRide,
             message: 'Ride status updated to RIDE_COMPLETED',
           });
+
+          // Also emit directly to passenger's personal room to ensure they receive the notification
+          // This is especially important for scheduled rides where passenger might not be actively in ride room
+          const passengerUserId =
+            updatedRide.passengerId?.userId?._id?.toString() ||
+            updatedRide.passengerId?.userId?.toString() ||
+            ride.passengerId?.userId;
+          
+          if (passengerUserId) {
+            emitToUser(passengerUserId, 'ride:driver_complete_ride', {
+              success: true,
+              objectType,
+              data: updatedRide,
+              message: 'Ride completed successfully',
+            });
+          }
 
           // Trigger payment processing directly
           setImmediate(() => {
@@ -4033,6 +4052,74 @@ export const initSocket = (server) => {
         }
 
         await onRideCancelled(updatedRide._id);
+
+        // If this is a scheduled ride, remove scheduled jobs from queue
+        if (ride.isScheduledRide) {
+          try {
+            const rideIdStr = ride._id.toString();
+            const jobIds = [
+              `scheduled-ride-notification-${rideIdStr}`,
+              `scheduled-ride-activate-${rideIdStr}`,
+              `scheduled-ride-cancel-${rideIdStr}`,
+            ];
+
+            console.log('🗑️ [CANCELLATION] Removing scheduled ride jobs from queue', {
+              rideId: ride._id,
+              jobIds,
+              timestamp: new Date().toISOString(),
+            });
+
+            // Remove jobs from queue
+            const removePromises = jobIds.map(async (jobId) => {
+              try {
+                const job = await scheduledRideQueue.getJob(jobId);
+                if (job) {
+                  await job.remove();
+                  console.log('✅ [CANCELLATION] Removed scheduled ride job', {
+                    rideId: ride._id,
+                    jobId,
+                    timestamp: new Date().toISOString(),
+                  });
+                  return { jobId, removed: true };
+                } else {
+                  console.log('ℹ️ [CANCELLATION] Scheduled ride job not found (may already be processed)', {
+                    rideId: ride._id,
+                    jobId,
+                    timestamp: new Date().toISOString(),
+                  });
+                  return { jobId, removed: false, reason: 'not_found' };
+                }
+              } catch (removeError) {
+                console.error('❌ [CANCELLATION] Failed to remove scheduled ride job', {
+                  rideId: ride._id,
+                  jobId,
+                  error: removeError.message,
+                  timestamp: new Date().toISOString(),
+                });
+                return { jobId, removed: false, error: removeError.message };
+              }
+            });
+
+            const removeResults = await Promise.all(removePromises);
+            const removedCount = removeResults.filter((r) => r.removed).length;
+
+            console.log('✅ [CANCELLATION] Scheduled ride jobs removal completed', {
+              rideId: ride._id,
+              totalJobs: jobIds.length,
+              removedCount,
+              results: removeResults,
+              timestamp: new Date().toISOString(),
+            });
+          } catch (queueError) {
+            // Log error but don't fail the cancellation
+            console.error('❌ [CANCELLATION] Error removing scheduled ride jobs from queue', {
+              rideId: ride._id,
+              error: queueError.message,
+              stack: queueError.stack,
+              timestamp: new Date().toISOString(),
+            });
+          }
+        }
 
         await session.commitTransaction();
         

@@ -997,6 +997,43 @@ const handleScheduledRide = async (ride) => {
           message: 'Your scheduled ride is now active',
         });
 
+        // Automatically join driver to ride room to send/receive location updates
+        try {
+          const io = getIO();
+          if (io) {
+            const driverSocketIds = await getSocketIds(driverUserId);
+            const rideRoom = `ride:${updatedRide._id}`;
+            
+            for (const socketId of driverSocketIds) {
+              const socket = io.sockets.sockets.get(socketId);
+              if (socket) {
+                socket.join(rideRoom);
+                logger.info('✅ Auto-joined driver to ride room', {
+                  driverUserId,
+                  rideId: updatedRide._id,
+                  socketId,
+                });
+              }
+            }
+
+            // Emit confirmation that driver joined the room
+            if (driverSocketIds.length > 0) {
+              io.to(rideRoom).emit('ride:driver_join_ride', {
+                success: true,
+                objectType: 'driver-join-ride',
+                data: updatedRide,
+                message: 'Driver automatically joined ride room',
+              });
+            }
+          }
+        } catch (joinError) {
+          logger.error('Failed to auto-join driver to ride room', {
+            driverUserId,
+            rideId: updatedRide._id,
+            error: joinError.message,
+          });
+        }
+
         // Also notify via push notification
         await notifyUser({
           userId: driverUserId,
