@@ -2636,6 +2636,49 @@ export const initSocket = (server) => {
           });
         }
 
+        // Check if driver is within 100m of pickup location
+        const driverLocation = await findDriverLocation(driver._id);
+        if (!driverLocation || !driverLocation.location?.coordinates) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'NOT_FOUND',
+            message: 'Driver location not found. Please enable location services.',
+          });
+        }
+
+        const pickupCoords = ride.pickupLocation?.coordinates;
+        if (!pickupCoords || pickupCoords.length !== 2) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: 'Invalid pickup location',
+          });
+        }
+
+        // Calculate distance between driver and pickup location
+        const driverCoords = {
+          latitude: driverLocation.location.coordinates[1],
+          longitude: driverLocation.location.coordinates[0],
+        };
+        const pickupLocationCoords = {
+          latitude: pickupCoords[1],
+          longitude: pickupCoords[0],
+        };
+
+        const distanceToPickup = haversineDistance(driverCoords, pickupLocationCoords); // Distance in km
+        const MAX_DISTANCE_TO_START = 0.1; // 100 meters = 0.1 km
+
+        if (distanceToPickup > MAX_DISTANCE_TO_START) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'FORBIDDEN',
+            message: `You must be within 100m of pickup location to start the ride. Current distance: ${(distanceToPickup * 1000).toFixed(0)}m`,
+          });
+        }
+
         // Check if passenger is ready (optional - driver can start ride even if passenger hasn't marked ready)
         // But we'll notify driver if passenger hasn't marked ready yet
         const passengerReady = !!ride.passengerReadyAt;
@@ -2644,19 +2687,8 @@ export const initSocket = (server) => {
           ? Math.floor((Date.now() - driverArrivedAt.getTime()) / 1000) // seconds
           : 0;
         
-        // Allow driver to start ride if:
-        // 1. Passenger has marked ready, OR
-        // 2. Driver has been waiting for more than 30 seconds (passenger might be ready but didn't mark)
-        const canStartRide = passengerReady || timeSinceArrival >= 30;
-
-        if (!canStartRide) {
-          return socket.emit('error', {
-            success: false,
-            objectType,
-            code: 'FORBIDDEN',
-            message: 'Please wait for passenger to mark themselves as ready, or wait 30 seconds after arrival.',
-          });
-        }
+        // Driver can start ride once within 100m (no time restriction)
+        // Waiting charges will be calculated separately based on passenger ready status
 
         const updatedRide = await updateRideById(ride._id, {
           status: 'RIDE_STARTED',
@@ -2831,10 +2863,38 @@ export const initSocket = (server) => {
             ).toFixed(2),
           );
 
-          const waitingTime =
-            (new Date(ride.rideStartedAt).getTime() -
-              new Date(ride.driverArrivedAt).getTime()) /
-            1000;
+          // Calculate waiting time based on passenger ready status
+          // Waiting charges logic:
+          // 1. If passenger was ready BEFORE driver arrived → No waiting charges
+          // 2. If passenger marked ready AFTER driver arrived → Charge from arrival to ready time (after 2 min grace)
+          // 3. If passenger never marked ready → Charge from arrival to ride start, minus 2 minutes grace period
+          // Waiting charges are calculated per hour rate
+          const driverArrivedAtTime = ride.driverArrivedAt ? new Date(ride.driverArrivedAt).getTime() : 0;
+          const rideStartedAtTime = ride.rideStartedAt ? new Date(ride.rideStartedAt).getTime() : Date.now();
+          const passengerReadyAtTime = ride.passengerReadyAt ? new Date(ride.passengerReadyAt).getTime() : null;
+          
+          const GRACE_PERIOD_SECONDS = 120; // 2 minutes (120 seconds) grace period before waiting charges start
+          
+          let waitingTime = 0;
+          
+          if (driverArrivedAtTime > 0) {
+            if (passengerReadyAtTime) {
+              // Passenger marked ready
+              if (passengerReadyAtTime <= driverArrivedAtTime) {
+                // Passenger was ready before driver arrived → No waiting charges
+                waitingTime = 0;
+              } else {
+                // Passenger marked ready after driver arrived
+                const totalWaitTime = (passengerReadyAtTime - driverArrivedAtTime) / 1000; // Convert to seconds
+                // Charge only if waiting time exceeds 2 minutes grace period
+                waitingTime = Math.max(0, totalWaitTime - GRACE_PERIOD_SECONDS);
+              }
+            } else {
+              // Passenger never marked ready → Charge from arrival to ride start, minus 2 minutes grace period
+              const totalWaitTime = (rideStartedAtTime - driverArrivedAtTime) / 1000; // Convert to seconds
+              waitingTime = Math.max(0, totalWaitTime - GRACE_PERIOD_SECONDS);
+            }
+          }
 
           const carType = ride.driverId?.vehicle?.type;
 
