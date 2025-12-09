@@ -25,6 +25,7 @@ import { generateRideReceipt } from '../../../../utils/receiptGenerator.js';
 import { createAdminNotification } from '../../../../dal/notification.js';
 import { emitToRide, emitToUser } from '../../../../realtime/socket.js';
 import { updateDriverByUserId } from '../../../../dal/driver.js';
+import Zone from '../../../../models/Zone.js';
 import env from '../../../../config/envConfig.js';
 
 export const getAllBookings = async (user, { page, limit }, resp) => {
@@ -294,8 +295,43 @@ export const updateLocation = async (user, { coordinates, heading, speed, accura
     const wasInParkingLot = previousLocation?.parkingQueueId ? true : false;
 
     // Check airport status
-    const isRestricted = await isRideInRestrictedArea(coordinates);
-    const isParkingLot = await isDriverInParkingLot(coordinates);
+    let isRestricted = false;
+    let isParkingLot = false;
+    
+    try {
+      isRestricted = await isRideInRestrictedArea(coordinates);
+      console.log(`🔍 Airport Detection Result: isRestricted = ${isRestricted}`);
+    } catch (error) {
+      console.error(`❌ Error checking restricted area:`, error);
+    }
+    
+    try {
+      isParkingLot = await isDriverInParkingLot(coordinates);
+      console.log(`🔍 Parking Lot Detection Result: isParkingLot = ${isParkingLot ? 'Found' : 'Not Found'}`);
+      if (isParkingLot) {
+        console.log(`   Parking Lot ID: ${isParkingLot._id}`);
+        console.log(`   Parking Lot Name: ${isParkingLot.name || 'N/A'}`);
+      }
+    } catch (error) {
+      console.error(`❌ Error checking parking lot:`, error);
+    }
+    
+    // Debug: Check if any airport zones exist
+    const airportZones = await Zone.find({ type: 'airport', isActive: true }).lean();
+    console.log(`\n🔍 DEBUG: Found ${airportZones.length} active airport zone(s) in database`);
+    if (airportZones.length > 0) {
+      airportZones.forEach((zone, index) => {
+        console.log(`   Zone ${index + 1}: ${zone.name || 'N/A'} (ID: ${zone._id})`);
+        console.log(`   Has boundaries: ${zone.boundaries ? 'Yes' : 'No'}`);
+        if (zone.boundaries && zone.boundaries.coordinates) {
+          console.log(`   Boundaries type: ${zone.boundaries.type}`);
+          console.log(`   Coordinates count: ${zone.boundaries.coordinates[0]?.length || 0}`);
+        }
+      });
+    } else {
+      console.log(`   ⚠️ WARNING: No active airport zones found in database!`);
+      console.log(`   Please check if airport zone is properly configured in admin panel.`);
+    }
 
     // ========== CONSOLE LOGS FOR AIRPORT TRACKING ==========
     console.log('\n' + '='.repeat(80));
