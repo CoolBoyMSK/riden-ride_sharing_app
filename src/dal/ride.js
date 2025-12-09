@@ -792,6 +792,98 @@ export const findNearestParkingForPickup = async (userCoords) => {
     throw new Error('Invalid user coordinates.');
   }
 
+  const coordsArray = [userCoords.longitude, userCoords.latitude];
+
+  // First, find which airport the driver is in (if any)
+  let currentAirport = null;
+  
+  // Check Zone collection
+  currentAirport = await Zone.findOne({
+    boundaries: {
+      $geoIntersects: {
+        $geometry: {
+          type: 'Point',
+          coordinates: coordsArray,
+        },
+      },
+    },
+    isActive: true,
+    type: 'airport',
+  }).lean();
+
+  // If not found in Zone collection, check FareManagement
+  if (!currentAirport) {
+    const fareZone = await Fare.findOne({
+      'zone.boundaries': {
+        $geoIntersects: {
+          $geometry: {
+            type: 'Point',
+            coordinates: coordsArray,
+          },
+        },
+      },
+      'zone.isActive': true,
+      $or: [
+        { 'zone.name': { $regex: /airport/i } },
+      ],
+    }).lean();
+
+    if (fareZone && fareZone.zone) {
+      // Create a temporary airport object from fare zone
+      currentAirport = {
+        _id: fareZone.zone._id || fareZone._id,
+        name: fareZone.zone.name,
+        boundaries: fareZone.zone.boundaries,
+      };
+    }
+  }
+
+  // If driver is in an airport, find parking lot associated with that airport
+  if (currentAirport) {
+    console.log(`📍 Driver is in airport: ${currentAirport.name || 'N/A'}`);
+    
+    // Find parking queue for this airport
+    const parkingQueue = await ParkingQueue.findOne({
+      airportId: currentAirport._id,
+      isActive: true,
+    })
+      .populate('parkingLotId')
+      .lean();
+
+    if (parkingQueue && parkingQueue.parkingLotId) {
+      const parkingLotZone = parkingQueue.parkingLotId;
+      console.log(`✅ Found associated parking lot: ${parkingLotZone.name || 'N/A'}`);
+      
+      // Calculate center point
+      const centerPoint = calculatePolygonCentroid(
+        parkingLotZone.boundaries.coordinates,
+      );
+
+      return {
+        zoneId: parkingLotZone._id,
+        zoneName: parkingLotZone.name,
+        zoneType: parkingLotZone.type,
+        coordinates: {
+          latitude: centerPoint.latitude,
+          longitude: centerPoint.longitude,
+        },
+        distanceKm: 0, // Same airport, distance is 0
+        boundaries: parkingLotZone.boundaries,
+        metadata: parkingLotZone.metadata || {},
+        description: parkingLotZone.description,
+        minSearchRadius: parkingLotZone.minSearchRadius || 5,
+        maxSearchRadius: parkingLotZone.maxSearchRadius || 10,
+        isActive: parkingLotZone.isActive,
+        centerCalculation: 'centroid',
+        googleMapsUrl: `https://www.google.com/maps/dir/?api=1&origin=${userCoords.latitude},${userCoords.longitude}&destination=${centerPoint.latitude},${centerPoint.longitude}&travelmode=driving`,
+        appleMapsUrl: `http://maps.apple.com/?saddr=${userCoords.latitude},${userCoords.longitude}&daddr=${centerPoint.latitude},${centerPoint.longitude}`,
+      };
+    }
+  }
+
+  // If no associated parking lot found, find nearest parking lot
+  console.log(`📍 No associated parking lot found, searching for nearest parking lot...`);
+  
   // Use aggregation to get the distance calculated by MongoDB
   const result = await Zone.aggregate([
     {
