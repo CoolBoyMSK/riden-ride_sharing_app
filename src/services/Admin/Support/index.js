@@ -118,7 +118,7 @@ export const replyToComplain = async (user, { id }, { text }, files, resp) => {
       metadata: success,
       module: 'support_ticket',
       type: 'ALERT',
-      actionLink: `${env.FRONTEND_URL}/api/admin/support/get?id=${success._id}`,
+      actionLink: `${env.FRONTEND_URL}/complaints-tickets/complaint-reply/${success._id}`,
     });
     
     if (!notify || !notify.success) {

@@ -104,13 +104,17 @@ export const createComplainTicket = async (
     }
 
     // Send admin notification when complaint is created
+    // Determine tab based on user role (passenger or driver)
+    const userRole = user.roles[0] || 'passenger';
+    const tab = userRole === 'driver' ? 'driver' : 'passenger';
+    
     const notify = await createAdminNotification({
       title: 'New Support Ticket Submitted',
-      message: `A ${user.roles[0]} has submitted a support ticket.`,
+      message: `A ${userRole} has submitted a support ticket.`,
       metadata: success,
       module: 'support_ticket',
       type: 'ALERT',
-      actionLink: `${env.FRONTEND_URL}/api/admin/support/get?id=${success._id}`,
+      actionLink: `${env.FRONTEND_URL}/complaints-tickets?tab=${tab}`,
     });
     if (!notify) {
       console.error('Failed to send admin notification');
@@ -207,7 +211,7 @@ export const replySupportChat = async (user, { id }, { text }, files, resp) => {
       metadata: success,
       module: 'support_ticket',
       type: 'ALERT',
-      actionLink: `${env.FRONTEND_URL}/api/admin/support/get?id=${success._id}`,
+      actionLink: `${env.FRONTEND_URL}/complaints-tickets/complaint-reply/${success._id}`,
     });
     if (!notify) {
       console.error('Failed to send notification');
