@@ -141,7 +141,7 @@ export const initSocket = (server) => {
       console.log('🔌 [ACTIVE USER CONNECTED:', {
         userId,
         role: userRole,
-        token: token ? `${token.substring(0, 20)}...` : 'No token',
+        token: token || 'No token',
         socketId: socket.id,
         timestamp: new Date().toISOString(),
       });
@@ -7019,7 +7019,7 @@ export const initSocket = (server) => {
         console.log('🔌 [ACTIVE] DISCONNECTED:', {
           userId,
           role: userRole,
-          token: token ? `${token.substring(0, 20)}...` : 'No token',
+          token: token || 'No token',
           socketId: socket.id,
           reason,
           timestamp: new Date().toISOString(),

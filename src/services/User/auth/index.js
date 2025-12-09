@@ -356,8 +356,8 @@ export const loginUser = async (
           name: user.name,
           email: user.email,
           phoneNumber: user.phoneNumber,
-          accessToken: `${accessToken.substring(0, 20)}...`,
-          refreshToken: `${refreshToken.substring(0, 20)}...`,
+          accessToken: accessToken,
+          refreshToken: refreshToken,
           timestamp: new Date().toISOString(),
         });
         
@@ -750,8 +750,8 @@ export const otpVerification = async (
         name: user.name,
         email: user.email,
         phoneNumber: user.phoneNumber,
-        accessToken: `${accessToken.substring(0, 20)}...`,
-        refreshToken: `${refreshToken.substring(0, 20)}...`,
+        accessToken: accessToken,
+        refreshToken: refreshToken,
         timestamp: new Date().toISOString(),
       });
       

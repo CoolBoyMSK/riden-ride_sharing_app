@@ -463,8 +463,8 @@ export const socialLoginUser = async (
         name: user.name,
         email: user.email,
         phoneNumber: user.phoneNumber,
-        accessToken: `${accessToken.substring(0, 20)}...`,
-        refreshToken: `${refreshToken.substring(0, 20)}...`,
+        accessToken: accessToken,
+        refreshToken: refreshToken,
         timestamp: new Date().toISOString(),
       });
       
@@ -742,10 +742,25 @@ export const otpVerification = async (
       }
 
       const payload = { id: user._id, roles: user.roles };
+      const accessToken = generateAccessToken(payload);
+      const refreshToken = generateRefreshToken(payload);
+      
+      // Log active driver login with role and token
+      console.log('🔐 [ACTIVE] DRIVER LOGIN (Email OTP):', {
+        userId: user._id,
+        role: 'driver',
+        name: user.name,
+        email: user.email,
+        phoneNumber: user.phoneNumber,
+        accessToken: accessToken,
+        refreshToken: refreshToken,
+        timestamp: new Date().toISOString(),
+      });
+      
       resp.data = {
         user: user,
-        accessToken: generateAccessToken(payload),
-        refreshToken: generateRefreshToken(payload),
+        accessToken,
+        refreshToken,
       };
       return resp;
     } else if (phoneOtp) {
@@ -838,8 +853,8 @@ export const otpVerification = async (
         name: user.name,
         email: user.email,
         phoneNumber: user.phoneNumber,
-        accessToken: `${accessToken.substring(0, 20)}...`,
-        refreshToken: `${refreshToken.substring(0, 20)}...`,
+        accessToken: accessToken,
+        refreshToken: refreshToken,
         timestamp: new Date().toISOString(),
       });
       
