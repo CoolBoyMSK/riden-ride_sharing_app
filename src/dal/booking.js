@@ -81,6 +81,7 @@ export const findAllBookingsByDriverId = async (
 };
 
 // Scheduled bookings for a driver (rides assigned to this driver)
+// Shows ALL scheduled rides that were previously assigned to the driver, regardless of status
 export const findScheduledBookingsByDriverId = async (
   driverId,
   page = 1,
@@ -92,29 +93,14 @@ export const findScheduledBookingsByDriverId = async (
     Number.isInteger(Number(limit)) && Number(limit) > 0 ? Number(limit) : 10;
 
   const skip = (safePage - 1) * safeLimit;
-  const now = new Date();
 
+  // Show all scheduled rides assigned to this driver, regardless of status
+  // This includes: SCHEDULED, DRIVER_ASSIGNED, DRIVER_ARRIVING, DRIVER_ARRIVED,
+  // RIDE_STARTED, RIDE_IN_PROGRESS, RIDE_COMPLETED, CANCELLED_BY_PASSENGER,
+  // CANCELLED_BY_SYSTEM, CANCELLED_BY_DRIVER, etc.
   const query = {
     driverId,
     isScheduledRide: true,
-    $or: [
-      // Future scheduled rides assigned to this driver
-      {
-        status: { $in: ['SCHEDULED', 'REQUESTED', 'DRIVER_ASSIGNED'] },
-        scheduledTime: { $gte: now },
-      },
-      // Scheduled rides in progress
-      {
-        status: {
-          $in: [
-            'DRIVER_ARRIVING',
-            'DRIVER_ARRIVED',
-            'RIDE_STARTED',
-            'RIDE_IN_PROGRESS',
-          ],
-        },
-      },
-    ],
   };
 
   const bookings = await bookingModel

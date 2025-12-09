@@ -453,12 +453,27 @@ export const socialLoginUser = async (
       await createDeviceInfo(device);
 
       const payload = { id: user._id, roles: user.roles };
+      const accessToken = generateAccessToken(payload);
+      const refreshToken = generateRefreshToken(payload);
+      
+      // Log active driver login with role and token
+      console.log('🔐 [ACTIVE] DRIVER LOGIN (Social):', {
+        userId: user._id,
+        role: 'driver',
+        name: user.name,
+        email: user.email,
+        phoneNumber: user.phoneNumber,
+        accessToken: `${accessToken.substring(0, 20)}...`,
+        refreshToken: `${refreshToken.substring(0, 20)}...`,
+        timestamp: new Date().toISOString(),
+      });
+      
       resp.data = {
         success: true,
         message: 'Social login successful',
         user,
-        accessToken: generateAccessToken(payload),
-        refreshToken: generateRefreshToken(payload),
+        accessToken,
+        refreshToken,
       };
       return resp;
     } else {
@@ -813,10 +828,25 @@ export const otpVerification = async (
       }
 
       const payload = { id: user._id, roles: user.roles };
+      const accessToken = generateAccessToken(payload);
+      const refreshToken = generateRefreshToken(payload);
+      
+      // Log active driver login with role and token
+      console.log('🔐 [ACTIVE] DRIVER LOGIN (Phone OTP):', {
+        userId: user._id,
+        role: 'driver',
+        name: user.name,
+        email: user.email,
+        phoneNumber: user.phoneNumber,
+        accessToken: `${accessToken.substring(0, 20)}...`,
+        refreshToken: `${refreshToken.substring(0, 20)}...`,
+        timestamp: new Date().toISOString(),
+      });
+      
       resp.data = {
         user: user,
-        accessToken: generateAccessToken(payload),
-        refreshToken: generateRefreshToken(payload),
+        accessToken,
+        refreshToken,
       };
       return resp;
     } else if (verifyPhoneNumberOtp) {

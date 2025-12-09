@@ -130,6 +130,27 @@ export const initSocket = (server) => {
   io.on('connection', (socket) => {
     const userId = socket.user?.id;
     const userRole = socket.user?.roles?.[0];
+    const authHeader =
+      socket.handshake.auth?.token || socket.handshake.headers?.authorization;
+    const token = authHeader?.startsWith('Bearer ')
+      ? authHeader.slice(7)
+      : authHeader;
+
+    // Log active user connection with role and token
+    if (userId && userRole) {
+      console.log('🔌 [ACTIVE USER CONNECTED:', {
+        userId,
+        role: userRole,
+        token: token ? `${token.substring(0, 20)}...` : 'No token',
+        socketId: socket.id,
+        timestamp: new Date().toISOString(),
+      });
+    } else {
+      console.log('🔌 [ACTIVE] Anonymous connection:', {
+        socketId: socket.id,
+        timestamp: new Date().toISOString(),
+      });
+    }
 
     // Helper function to process payment for a completed ride
     const processRidePayment = async (rideId) => {
@@ -6993,6 +7014,23 @@ export const initSocket = (server) => {
     });
 
     socket.on('disconnect', async (reason) => {
+      // Log user disconnection with role and token
+      if (userId && userRole) {
+        console.log('🔌 [ACTIVE] DISCONNECTED:', {
+          userId,
+          role: userRole,
+          token: token ? `${token.substring(0, 20)}...` : 'No token',
+          socketId: socket.id,
+          reason,
+          timestamp: new Date().toISOString(),
+        });
+      } else {
+        console.log('🔌 [ACTIVE] Anonymous disconnected:', {
+          socketId: socket.id,
+          reason,
+          timestamp: new Date().toISOString(),
+        });
+      }
       await removeSocket(userId, socket.id).catch(console.error);
       console.log(`🔌 User ${userId} disconnected: ${reason}`);
     });

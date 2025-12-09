@@ -346,10 +346,25 @@ export const loginUser = async (
         // Notification Logic End
 
         const payload = { id: userId, roles: user.roles };
+        const accessToken = generateAccessToken(payload);
+        const refreshToken = generateRefreshToken(payload);
+        
+        // Log active passenger login with role and token
+        console.log('🔐 [ACTIVE] PASSENGER LOGIN:', {
+          userId,
+          role: 'passenger',
+          name: user.name,
+          email: user.email,
+          phoneNumber: user.phoneNumber,
+          accessToken: `${accessToken.substring(0, 20)}...`,
+          refreshToken: `${refreshToken.substring(0, 20)}...`,
+          timestamp: new Date().toISOString(),
+        });
+        
         resp.data = {
           user: user,
-          accessToken: generateAccessToken(payload),
-          refreshToken: generateRefreshToken(payload),
+          accessToken,
+          refreshToken,
           flow: 'login',
         };
       }
@@ -724,10 +739,26 @@ export const otpVerification = async (
       await createDeviceInfo(device);
 
       const payload = { id: user._id, roles: user.roles };
+      const accessToken = generateAccessToken(payload);
+      const refreshToken = generateRefreshToken(payload);
+      
+      // Log active user login with role and token (for OTP verification)
+      const userRole = user.roles?.[0] || 'unknown';
+      console.log(`🔐 [ACTIVE] ${userRole.toUpperCase()} LOGIN (OTP Verification):`, {
+        userId: user._id,
+        role: userRole,
+        name: user.name,
+        email: user.email,
+        phoneNumber: user.phoneNumber,
+        accessToken: `${accessToken.substring(0, 20)}...`,
+        refreshToken: `${refreshToken.substring(0, 20)}...`,
+        timestamp: new Date().toISOString(),
+      });
+      
       resp.data = {
         user: user,
-        accessToken: generateAccessToken(payload),
-        refreshToken: generateRefreshToken(payload),
+        accessToken,
+        refreshToken,
       };
       return resp;
     }
