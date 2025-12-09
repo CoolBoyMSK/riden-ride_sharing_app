@@ -4387,6 +4387,14 @@ export const transferTipToDriverExternalAccount = async (
           throw new Error('Payment method ID is required for card payments');
         }
 
+        // Validate that paymentMethodId is an actual Stripe payment method ID (starts with 'pm_')
+        // Not a payment method type string like 'CARD', 'GOOGLE_PAY', etc.
+        if (!paymentMethodId.startsWith('pm_')) {
+          throw new Error(
+            `Invalid payment method ID format. Expected Stripe payment method ID (pm_xxx), got: ${paymentMethodId}. Payment method type: ${paymentMethod}`,
+          );
+        }
+
         if (!passenger.stripeCustomerId) {
           throw new Error('Passenger has no Stripe customer ID');
         }

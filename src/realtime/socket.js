@@ -4632,15 +4632,18 @@ export const initSocket = (server) => {
             ride.paymentMethod === 'APPLE_PAY'
           ) {
             if (!finalPaymentMethodId) {
-              finalPaymentMethodId =
-                ride.cardId || passenger.defaultCardId || ride.paymentMethod;
+              // Try to get payment method ID from ride or passenger
+              // But NEVER use ride.paymentMethod as fallback (it's just a string like 'CARD')
+              finalPaymentMethodId = ride.cardId || passenger.defaultCardId || ride.paymentMethodId;
             }
-            if (!finalPaymentMethodId) {
+            
+            // Validate that we have an actual payment method ID (starts with 'pm_')
+            if (!finalPaymentMethodId || !finalPaymentMethodId.startsWith('pm_')) {
               return socket.emit('error', {
                 success: false,
                 objectType,
                 code: 'FORBIDDEN',
-                message: `Payment method ID is required for card payments`,
+                message: `Valid payment method ID is required for card payments. Payment method type: ${ride.paymentMethod}`,
               });
             }
           }
