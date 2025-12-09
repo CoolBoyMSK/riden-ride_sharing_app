@@ -38,6 +38,11 @@ export const findAdminNotifications = async (adminId, page = 1, limit = 10) => {
   // Calculate skip value for pagination
   const skip = (page - 1) * limit;
 
+  // Convert adminId to ObjectId for proper comparison
+  const adminObjectId = mongoose.Types.ObjectId.isValid(adminId)
+    ? new mongoose.Types.ObjectId(adminId)
+    : adminId;
+
   // Get total count for pagination info
   // Using aggregation to ensure all conditions match the same recipient
   const totalCountResult = await AdminNotification.aggregate([
@@ -51,8 +56,8 @@ export const findAdminNotifications = async (adminId, page = 1, limit = 10) => {
     },
     {
       $match: {
-        'recipients.adminId': new mongoose.Types.ObjectId(adminId),
-        'recipients.isDeleted': false,
+        'recipients.adminId': adminObjectId,
+        'recipients.isDeleted': { $ne: true }, // Explicitly check for not true (handles null/undefined)
       },
     },
     {
@@ -77,9 +82,9 @@ export const findAdminNotifications = async (adminId, page = 1, limit = 10) => {
     },
     {
       $match: {
-        'recipients.adminId': new mongoose.Types.ObjectId(adminId),
+        'recipients.adminId': adminObjectId,
         'recipients.isRead': false,
-        'recipients.isDeleted': false,
+        'recipients.isDeleted': { $ne: true }, // Explicitly check for not true (handles null/undefined)
       },
     },
     {
@@ -102,8 +107,8 @@ export const findAdminNotifications = async (adminId, page = 1, limit = 10) => {
     },
     {
       $match: {
-        'recipients.adminId': new mongoose.Types.ObjectId(adminId),
-        'recipients.isDeleted': false,
+        'recipients.adminId': adminObjectId,
+        'recipients.isDeleted': { $ne: true }, // Explicitly check for not true (handles null/undefined)
       },
     },
     {
@@ -124,8 +129,27 @@ export const findAdminNotifications = async (adminId, page = 1, limit = 10) => {
     .limit(limit)
     .lean();
 
+  // Filter recipients to only include the admin's non-deleted recipient
+  const filteredNotifications = notifications.map((notification) => {
+    const adminRecipient = notification.recipients.find(
+      (r) =>
+        r.adminId.toString() === adminId.toString() &&
+        r.isDeleted === false,
+    );
+    
+    // Only include notification if admin has a non-deleted recipient
+    if (!adminRecipient) {
+      return null;
+    }
+
+    return {
+      ...notification,
+      recipients: [adminRecipient], // Only return the admin's recipient
+    };
+  }).filter(Boolean); // Remove null entries
+
   return {
-    notifications,
+    notifications: filteredNotifications,
     unreadCount,
     pagination: {
       total: totalCount,
@@ -146,6 +170,11 @@ export const findUnreadNotificationsCount = async (adminId) => {
     return 0;
   }
 
+  // Convert adminId to ObjectId for proper comparison
+  const adminObjectId = mongoose.Types.ObjectId.isValid(adminId)
+    ? new mongoose.Types.ObjectId(adminId)
+    : adminId;
+
   // Count unread notifications filtered by admin's module access
   // Using aggregation to ensure all conditions match the same recipient
   const result = await AdminNotification.aggregate([
@@ -159,9 +188,9 @@ export const findUnreadNotificationsCount = async (adminId) => {
     },
     {
       $match: {
-        'recipients.adminId': new mongoose.Types.ObjectId(adminId),
+        'recipients.adminId': adminObjectId,
         'recipients.isRead': false,
-        'recipients.isDeleted': false,
+        'recipients.isDeleted': { $ne: true }, // Explicitly check for not true (handles null/undefined)
       },
     },
     {

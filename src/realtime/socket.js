@@ -237,6 +237,7 @@ export const initSocket = (server) => {
                 actionLink: `driver_get_paid`,
               });
 
+              // Emit to ride room (for all participants)
               io.to(`ride:${ride._id}`).emit('ride:pay_driver', {
                 success: true,
                 objectType,
@@ -246,6 +247,25 @@ export const initSocket = (server) => {
                 },
                 message: 'Fare successfully paid to driver',
               });
+
+              // Also emit directly to passenger's personal room to ensure they receive payment notification
+              // This is especially important for scheduled rides where passenger might not be actively in ride room
+              const passengerUserIdForPayment = ride.passengerId?.userId?._id?.toString() ||
+                ride.passengerId?.userId?.toString() ||
+                ride.passengerId?.userId;
+              
+              if (passengerUserIdForPayment) {
+                emitToUser(passengerUserIdForPayment, 'ride:pay_driver', {
+                  success: true,
+                  objectType,
+                  data: {
+                    ride,
+                    transaction: fare.transaction,
+                  },
+                  message: 'Payment completed successfully. Fare details available.',
+                });
+              }
+
               return { success: true };
             } else {
               return {
@@ -352,6 +372,7 @@ export const initSocket = (server) => {
                 actionLink: `driver_get_paid`,
               });
 
+              // Emit to ride room (for all participants)
               io.to(`ride:${ride._id}`).emit('ride:pay_driver', {
                 success: true,
                 objectType,
@@ -362,6 +383,26 @@ export const initSocket = (server) => {
                 },
                 message: 'Driver Paid Successfully',
               });
+
+              // Also emit directly to passenger's personal room to ensure they receive payment notification
+              // This is especially important for scheduled rides where passenger might not be actively in ride room
+              const passengerUserIdForPayment = ride.passengerId?.userId?._id?.toString() ||
+                ride.passengerId?.userId?.toString() ||
+                ride.passengerId?.userId;
+              
+              if (passengerUserIdForPayment) {
+                emitToUser(passengerUserIdForPayment, 'ride:pay_driver', {
+                  success: true,
+                  objectType,
+                  data: {
+                    ride,
+                    transaction: fare.transaction,
+                    paymentIntentId: ride.paymentIntentId || undefined,
+                  },
+                  message: 'Payment completed successfully. Fare details available.',
+                });
+              }
+
               return { success: true };
             }
           } else {
