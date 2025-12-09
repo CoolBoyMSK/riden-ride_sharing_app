@@ -481,16 +481,29 @@ export const updateLocation = async (user, { coordinates, heading, speed, accura
       if (driverLocation) {
         responseCode = 'RESTRICTED_AREA';
         responseMessage = 'You are inside the restricted area, and you are not allowed to pick ride in this area, reach to nearby parking lot to pick rides';
-        responseData = parkingLot || {};
-        
-        // Emit socket event to driver
-        emitToUser(user._id, 'ride:driver_update_location', {
-          success: true,
-          objectType: 'driver-update-location',
-          data: parkingLot,
-          code: 'RESTRICTED_AREA',
-          message: responseMessage,
-        });
+        responseData = {
+          ...(parkingLot || {}),
+          // Add flag to indicate if this is first entry or already in restricted area
+          isFirstEntry: !wasRestricted, // true if driver just entered, false if already in restricted area
+        };
+
+        // Emit socket event to driver ONLY if driver just entered restricted area (first time)
+        // Don't emit if driver is already in restricted area (wasRestricted = true)
+        if (!wasRestricted) {
+          console.log(`📢 Emitting RESTRICTED_AREA socket event (first entry)`);
+          emitToUser(user._id, 'ride:driver_update_location', {
+            success: true,
+            objectType: 'driver-update-location',
+            data: {
+              ...parkingLot,
+              isFirstEntry: true,
+            },
+            code: 'RESTRICTED_AREA',
+            message: responseMessage,
+          });
+        } else {
+          console.log(`🔇 Skipping socket event (driver already in restricted area)`);
+        }
       }
     }
     // Handle parking lot
