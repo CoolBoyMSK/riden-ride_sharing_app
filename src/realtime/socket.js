@@ -3376,12 +3376,71 @@ export const initSocket = (server) => {
           }
 
           if (driver.status === 'online') {
+            // Get previous location state to detect entry/exit
+            const previousLocation = await getDriverLocation(driver._id);
+            const wasRestricted = previousLocation ? driver.isRestricted : false;
+            const wasInParkingLot = previousLocation?.parkingQueueId ? true : false;
+
             const isRestricted = await isRideInRestrictedArea(
               location.coordinates,
             ); // returns boolean
             const isParkingLot = await isDriverInParkingLot(
               location.coordinates,
             );
+
+            // ========== CONSOLE LOGS FOR AIRPORT TRACKING ==========
+            console.log('\n' + '='.repeat(80));
+            console.log('📍 DRIVER LOCATION UPDATE');
+            console.log('='.repeat(80));
+            console.log(`👤 Driver ID: ${driver._id}`);
+            console.log(`👤 Driver Name: ${driver.userId?.name || 'N/A'}`);
+            console.log(`⏰ Timestamp: ${new Date().toISOString()}`);
+            console.log(`📍 Current Location:`);
+            console.log(`   Longitude: ${location.coordinates[0]}`);
+            console.log(`   Latitude: ${location.coordinates[1]}`);
+            console.log(`   Speed: ${speed || 0} km/h`);
+            console.log(`   Heading: ${heading || 0}°`);
+            console.log(`\n🏢 AIRPORT STATUS:`);
+            console.log(`   isRestricted: ${isRestricted}`);
+            console.log(`   isParkingLot: ${isParkingLot}`);
+            console.log(`   Previous Restricted: ${wasRestricted}`);
+            console.log(`   Previous In Parking: ${wasInParkingLot}`);
+            
+            // Detect airport entry/exit
+            if (!wasRestricted && isRestricted) {
+              console.log(`\n🚨 EVENT: DRIVER ENTERED AIRPORT RESTRICTED AREA`);
+              console.log(`   Entry Time: ${new Date().toISOString()}`);
+              console.log(`   Entry Location: [${location.coordinates[0]}, ${location.coordinates[1]}]`);
+            } else if (wasRestricted && !isRestricted) {
+              console.log(`\n✅ EVENT: DRIVER EXITED AIRPORT RESTRICTED AREA`);
+              console.log(`   Exit Time: ${new Date().toISOString()}`);
+              console.log(`   Exit Location: [${location.coordinates[0]}, ${location.coordinates[1]}]`);
+            }
+
+            // Detect parking lot entry/exit
+            if (!wasInParkingLot && isParkingLot) {
+              console.log(`\n🅿️ EVENT: DRIVER ENTERED PARKING LOT`);
+              console.log(`   Entry Time: ${new Date().toISOString()}`);
+              console.log(`   Entry Location: [${location.coordinates[0]}, ${location.coordinates[1]}]`);
+            } else if (wasInParkingLot && !isParkingLot) {
+              console.log(`\n🚗 EVENT: DRIVER EXITED PARKING LOT`);
+              console.log(`   Exit Time: ${new Date().toISOString()}`);
+              console.log(`   Exit Location: [${location.coordinates[0]}, ${location.coordinates[1]}]`);
+            }
+
+            // Current status summary
+            if (isRestricted && !isParkingLot) {
+              console.log(`\n⚠️ STATUS: Driver is in RESTRICTED AREA (Airport but not parking)`);
+              console.log(`   Action Required: Navigate to parking lot`);
+            } else if (isParkingLot) {
+              console.log(`\n✅ STATUS: Driver is in PARKING LOT`);
+              console.log(`   Action: Can receive airport rides`);
+            } else {
+              console.log(`\n🌍 STATUS: Driver is OUTSIDE airport area`);
+              console.log(`   Action: Normal ride operations`);
+            }
+            console.log('='.repeat(80) + '\n');
+            // ========== END CONSOLE LOGS ==========
 
             if (isRestricted) {
               await updateDriverByUserId(userId, { isRestricted });
@@ -3419,12 +3478,18 @@ export const initSocket = (server) => {
                 });
               }
             } else if (isParkingLot) {
+              console.log(`\n🅿️ PROCESSING: Adding driver to parking queue...`);
+              
               let queue;
               const parkingQueue = await findDriverParkingQueue(
                 isParkingLot._id,
               );
               if (parkingQueue) {
                 queue = await addDriverToQueue(isParkingLot._id, driver._id);
+                console.log(`✅ Driver added to queue. Queue Size: ${queue?.queueSize || 'N/A'}`);
+                console.log(`   Queue Position: ${queue?.position || 'N/A'}`);
+              } else {
+                console.log(`⚠️ Parking queue not found for parking lot: ${isParkingLot._id}`);
               }
 
               await updateDriverByUserId(userId, { isRestricted: false });
@@ -3459,6 +3524,21 @@ export const initSocket = (server) => {
                 });
               }
             } else {
+              // Driver is outside airport area
+              const currentLocation = await getDriverLocation(driver._id);
+              if (
+                currentLocation.parkingQueueId &&
+                currentLocation.parkingQueueId !== null
+              ) {
+                console.log(`\n🚗 PROCESSING: Removing driver from parking queue (exited parking lot)...`);
+                await removeDriverFromQueue(
+                  driver._id,
+                  currentLocation.parkingQueueId,
+                );
+                await updateDriverByUserId(userId, { isRestricted: false });
+                console.log(`✅ Driver removed from parking queue`);
+              }
+
               await saveDriverLocation(driver._id, {
                 lng: location.coordinates[0],
                 lat: location.coordinates[1],
@@ -3488,18 +3568,6 @@ export const initSocket = (server) => {
                     message: 'Location updated successfully',
                   },
                 );
-              }
-
-              const currentLocation = await getDriverLocation(driver._id);
-              if (
-                currentLocation.parkingQueueId &&
-                currentLocation.parkingQueueId !== null
-              ) {
-                await removeDriverFromQueue(
-                  driver._id,
-                  currentLocation.parkingQueueId,
-                );
-                await updateDriverByUserId(userId, { isRestricted: false });
               }
 
               socket.emit('ride:driver_update_location', {

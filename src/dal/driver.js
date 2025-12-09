@@ -2658,16 +2658,30 @@ const handleAirportRide = async (ride) => {
   session.startTransaction();
 
   try {
+    // ========== CONSOLE LOGS FOR AIRPORT RIDE PROCESSING ==========
+    console.log('\n' + '='.repeat(80));
+    console.log('✈️ AIRPORT RIDE PROCESSING');
+    console.log('='.repeat(80));
+    console.log(`🆔 Ride ID: ${ride._id}`);
+    console.log(`⏰ Timestamp: ${new Date().toISOString()}`);
+    console.log(`📍 Pickup Location: [${ride.pickupLocation.coordinates[0]}, ${ride.pickupLocation.coordinates[1]}]`);
+    console.log(`📍 Pickup Address: ${ride.pickupLocation.address || 'N/A'}`);
+    console.log(`🚗 Car Type: ${ride.carType}`);
+    console.log(`🏢 isAirport Flag: ${ride.isAirport}`);
+    // ========== END CONSOLE LOGS ==========
+
     // Find the nearest airport zone to the ride's pickup location
     const airportZone = ride.airport;
     if (!airportZone) {
       console.log(
-        `No airport found near ride ${ride._id}, falling back to regular search`,
+        `⚠️ No airport found near ride ${ride._id}, falling back to regular search`,
       );
       await session.abortTransaction();
       await handleRegularRide(ride);
       return;
     }
+
+    console.log(`✅ Airport Zone Found: ${airportZone.name || 'N/A'} (ID: ${airportZone._id || 'N/A'})`);
 
     // Find associated parking lot for this airport
     const parkingQueue = await ParkingQueue.findOne({
@@ -2677,7 +2691,7 @@ const handleAirportRide = async (ride) => {
 
     if (!parkingQueue) {
       console.log(
-        `No active parking queue found for airport ${airportZone.name}, falling back to regular search`,
+        `⚠️ No active parking queue found for airport ${airportZone.name}, falling back to regular search`,
       );
       await session.abortTransaction();
       await handleRegularRide(ride);
@@ -2685,8 +2699,12 @@ const handleAirportRide = async (ride) => {
     }
 
     console.log(
-      `Airport ride ${ride._id} assigned to parking lot ${parkingQueue.parkingLotId}`,
+      `✅ Airport ride ${ride._id} assigned to parking lot ${parkingQueue.parkingLotId}`,
     );
+    console.log(`📊 Parking Queue ID: ${parkingQueue._id}`);
+    console.log(`👥 Current Queue Size: ${parkingQueue.driverQueue?.length || 0} drivers`);
+    console.log(`📋 Active Offers: ${parkingQueue.activeOffers?.length || 0}`);
+    console.log('='.repeat(80) + '\n');
 
     // Add ride to active offers in parking queue
     const expiresAt = new Date(Date.now() + 300000); // 10 seconds from now

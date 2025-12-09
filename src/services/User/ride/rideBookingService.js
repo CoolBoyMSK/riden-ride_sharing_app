@@ -483,6 +483,38 @@ export const bookRide = async (userId, rideData) => {
       };
     }
 
+    // ========== CONSOLE LOGS FOR RIDE BOOKING ==========
+    console.log('\n' + '='.repeat(80));
+    console.log('🚕 RIDE BOOKING REQUEST');
+    console.log('='.repeat(80));
+    console.log(`👤 Passenger ID: ${passenger._id}`);
+    console.log(`👤 Passenger Name: ${passenger.name || 'N/A'}`);
+    console.log(`⏰ Timestamp: ${new Date().toISOString()}`);
+    console.log(`\n📍 Pickup Location:`);
+    console.log(`   Address: ${pickupLocation.address || 'N/A'}`);
+    console.log(`   Place Name: ${pickupLocation.placeName || 'N/A'}`);
+    console.log(`   Coordinates: [${pickupLocation.coordinates[0]}, ${pickupLocation.coordinates[1]}]`);
+    console.log(`\n📍 Dropoff Location:`);
+    console.log(`   Address: ${dropoffLocation.address || 'N/A'}`);
+    console.log(`   Place Name: ${dropoffLocation.placeName || 'N/A'}`);
+    console.log(`   Coordinates: [${dropoffLocation.coordinates[0]}, ${dropoffLocation.coordinates[1]}]`);
+    console.log(`\n🏢 AIRPORT DETECTION:`);
+    console.log(`   isAirport: ${airport ? true : false}`);
+    if (airport) {
+      console.log(`   Airport Name: ${airport.name || 'N/A'}`);
+      console.log(`   Airport ID: ${airport._id || 'N/A'}`);
+      console.log(`   ✅ This is an AIRPORT RIDE - Will be sent to parking queue`);
+    } else {
+      console.log(`   ✅ This is a REGULAR RIDE - Normal driver search`);
+    }
+    console.log(`\n🚗 Ride Details:`);
+    console.log(`   Car Type: ${carType}`);
+    console.log(`   Distance: ${distance} km`);
+    console.log(`   Duration: ${duration} minutes`);
+    console.log(`   Payment Method: ${paymentMethod}`);
+    console.log('='.repeat(80) + '\n');
+    // ========== END CONSOLE LOGS ==========
+
     // Create ride record
     ride = await createRideRecord({
       passenger,
