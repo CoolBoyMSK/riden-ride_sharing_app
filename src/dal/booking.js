@@ -103,9 +103,11 @@ export const findScheduledBookingsByDriverId = async (
     isScheduledRide: true,
   };
 
+  // Sort by updatedAt first (latest updated/completed rides first), then by createdAt
+  // This ensures recently completed rides appear at the top
   const bookings = await bookingModel
     .find(query)
-    .sort({ scheduledTime: 1, createdAt: -1 })
+    .sort({ updatedAt: -1, createdAt: -1 })
     .skip(skip)
     .limit(safeLimit)
     .lean();
@@ -249,6 +251,10 @@ export const findScheduledBookingsByPassengerId = async (
           ],
         },
       },
+      // Completed scheduled rides
+      {
+        status: 'RIDE_COMPLETED',
+      },
       // Cancelled scheduled rides (by passenger or system)
       {
         status: {
@@ -258,9 +264,11 @@ export const findScheduledBookingsByPassengerId = async (
     ],
   };
 
+  // Sort by updatedAt first (latest updated/completed rides first), then by createdAt
+  // This ensures recently completed rides appear at the top
   const bookings = await bookingModel
     .find(query)
-    .sort({ scheduledTime: 1, createdAt: -1 })
+    .sort({ updatedAt: -1, createdAt: -1 })
     .skip(skip)
     .limit(safeLimit)
     .lean();
