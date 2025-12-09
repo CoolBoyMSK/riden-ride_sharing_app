@@ -455,7 +455,10 @@ export const createAdminNotification = async ({
 
     // --- Emit socket event to all admins with notification ID included ---
     adminsWithAccess.forEach((a) => {
-      emitToUser(a.admin, 'admin:new_notification', {
+      // Convert admin ID to string to ensure proper socket room matching
+      const adminId = a.admin?.toString ? a.admin.toString() : String(a.admin);
+      
+      emitToUser(adminId, 'admin:new_notification', {
         _id: notification._id,
         title,
         message,
@@ -465,6 +468,15 @@ export const createAdminNotification = async ({
         actionLink,
         createdAt: notification.createdAt,
         updatedAt: notification.updatedAt,
+      });
+      
+      // Log for debugging
+      console.log('📬 [ADMIN NOTIFICATION] Emitting socket event to admin', {
+        adminId,
+        adminIdType: typeof adminId,
+        notificationId: notification._id,
+        module,
+        event: 'admin:new_notification',
       });
     });
 
