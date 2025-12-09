@@ -3596,6 +3596,37 @@ export const findAllDrivers = async () =>
     .populate({ path: 'userId', select: 'name email profileImg phoneNumber' })
     .lean();
 
+export const deleteAlertById = async (alertId, adminId) => {
+  if (!alertId || !adminId) {
+    return {
+      success: false,
+      message: 'Alert ID and Admin ID are required.',
+    };
+  }
+
+  // Check if alert exists and was created by this admin
+  const alert = await Alert.findOne({
+    _id: alertId,
+    createdBy: adminId,
+  });
+
+  if (!alert) {
+    return {
+      success: false,
+      message: 'Alert not found or you do not have permission to delete it.',
+    };
+  }
+
+  // Delete the alert
+  const result = await Alert.findByIdAndDelete(alertId);
+
+  return {
+    success: true,
+    message: 'Alert deleted successfully',
+    data: result,
+  };
+};
+
 export const findAllAlerts = async ({
   page = 1,
   limit = 10,

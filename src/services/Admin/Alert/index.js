@@ -3,6 +3,7 @@ import {
   findAllPassengers,
   findAllDrivers,
   findAllAlerts,
+  deleteAlertById,
 } from '../../../dal/admin/index.js';
 import { alertQueue } from '../../../queues/alertQueue.js';
 import env from '../../../config/envConfig.js';
@@ -100,6 +101,25 @@ export const getAllAlerts = async (
     }
 
     resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'something went wrong';
+    return resp;
+  }
+};
+
+export const deleteAlert = async (user, { id }, resp) => {
+  try {
+    const result = await deleteAlertById(id, user._id);
+    if (!result.success) {
+      resp.error = true;
+      resp.error_message = result.message || 'Failed to delete alert';
+      return resp;
+    }
+
+    resp.data = result.data;
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);

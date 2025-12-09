@@ -5,6 +5,7 @@ import {
   getAllPassengersController,
   getAllDriversController,
   getAllAlertsController,
+  deleteAlertController,
 } from '../../../controllers/Admin/Alert/index.js';
 
 const router = express.Router();
@@ -39,6 +40,14 @@ registerRoute({
   admin_auth_enable: true,
   get_permission: 'advertising_management',
   get_method: getAllAlertsController,
+});
+
+registerRoute({
+  router,
+  route: '/:id',
+  admin_auth_enable: true,
+  delete_permission: 'advertising_management',
+  delete_method: deleteAlertController,
 });
 
 export default router;

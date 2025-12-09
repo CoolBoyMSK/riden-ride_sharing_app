@@ -4,6 +4,7 @@ import {
   getAllPassengers,
   getAllDrivers,
   getAllAlerts,
+  deleteAlert,
 } from '../../../services/Admin/Alert/index.js';
 
 export const sendAlertController = (req, res) =>
@@ -49,6 +50,18 @@ export const getAllAlertsController = (req, res) =>
       validationFn: null,
       handlerParams: [req.query],
       successMessage: 'Alerts fetched successfully',
+    },
+    req,
+    res,
+  );
+
+export const deleteAlertController = (req, res) =>
+  handleResponse(
+    {
+      handler: deleteAlert,
+      validationFn: null,
+      handlerParams: [req.user, req.params],
+      successMessage: 'Alert deleted successfully',
     },
     req,
     res,
