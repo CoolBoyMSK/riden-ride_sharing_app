@@ -442,18 +442,7 @@ export const createAdminNotification = async ({
       isDeleted: false,
     }));
 
-    adminsWithAccess.forEach((a) => {
-      emitToUser(a.admin, 'admin:new_notification', {
-        title,
-        message,
-        metadata,
-        module,
-        type,
-        actionLink,
-      });
-    });
-
-    // --- Create notification ---
+    // --- Create notification first to get notification ID ---
     const notification = await AdminNotification.create({
       title,
       message,
@@ -462,6 +451,21 @@ export const createAdminNotification = async ({
       metadata,
       actionLink,
       recipients,
+    });
+
+    // --- Emit socket event to all admins with notification ID included ---
+    adminsWithAccess.forEach((a) => {
+      emitToUser(a.admin, 'admin:new_notification', {
+        _id: notification._id,
+        title,
+        message,
+        metadata,
+        module,
+        type,
+        actionLink,
+        createdAt: notification.createdAt,
+        updatedAt: notification.updatedAt,
+      });
     });
 
     return {
