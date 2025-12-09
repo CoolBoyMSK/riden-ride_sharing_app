@@ -59,7 +59,11 @@ export const getPassengerById = async ({ passengerId }, resp) => {
       return resp;
     }
 
-    const paymentMethods = await getPassengerCards(passenger);
+    // Get payment methods only if passenger has a Stripe customer ID
+    let paymentMethods = { success: false, cards: [], error: null };
+    if (passenger.stripeCustomerId) {
+      paymentMethods = await getPassengerCards(passenger.stripeCustomerId);
+    }
 
     resp.data = {
       ...(passenger.toObject?.() || passenger),
