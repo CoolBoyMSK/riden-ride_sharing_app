@@ -841,6 +841,7 @@ export const findNearestParkingForPickup = async (userCoords) => {
   // If driver is in an airport, find parking lot associated with that airport
   if (currentAirport) {
     console.log(`📍 Driver is in airport: ${currentAirport.name || 'N/A'}`);
+    console.log(`📍 Airport ID: ${currentAirport._id}`);
     
     // Find parking queue for this airport
     const parkingQueue = await ParkingQueue.findOne({
@@ -849,6 +850,30 @@ export const findNearestParkingForPickup = async (userCoords) => {
     })
       .populate('parkingLotId')
       .lean();
+
+    console.log(`🔍 Parking Queue Search Result:`);
+    console.log(`   Found Queue: ${parkingQueue ? 'Yes' : 'No'}`);
+    if (parkingQueue) {
+      console.log(`   Queue ID: ${parkingQueue._id}`);
+      console.log(`   Airport ID in Queue: ${parkingQueue.airportId}`);
+      console.log(`   Parking Lot ID: ${parkingQueue.parkingLotId?._id || 'N/A'}`);
+      console.log(`   Parking Lot Name: ${parkingQueue.parkingLotId?.name || 'N/A'}`);
+    } else {
+      // Debug: Check all parking queues
+      const allQueues = await ParkingQueue.find({ isActive: true })
+        .populate('airportId')
+        .populate('parkingLotId')
+        .lean();
+      console.log(`\n🔍 DEBUG: Found ${allQueues.length} active parking queue(s) in database:`);
+      allQueues.forEach((q, index) => {
+        console.log(`   Queue ${index + 1}:`);
+        console.log(`     Queue ID: ${q._id}`);
+        console.log(`     Airport ID: ${q.airportId?._id || 'N/A'}`);
+        console.log(`     Airport Name: ${q.airportId?.name || 'N/A'}`);
+        console.log(`     Parking Lot ID: ${q.parkingLotId?._id || 'N/A'}`);
+        console.log(`     Parking Lot Name: ${q.parkingLotId?.name || 'N/A'}`);
+      });
+    }
 
     if (parkingQueue && parkingQueue.parkingLotId) {
       const parkingLotZone = parkingQueue.parkingLotId;
@@ -878,6 +903,9 @@ export const findNearestParkingForPickup = async (userCoords) => {
         googleMapsUrl: `https://www.google.com/maps/dir/?api=1&origin=${userCoords.latitude},${userCoords.longitude}&destination=${centerPoint.latitude},${centerPoint.longitude}&travelmode=driving`,
         appleMapsUrl: `http://maps.apple.com/?saddr=${userCoords.latitude},${userCoords.longitude}&daddr=${centerPoint.latitude},${centerPoint.longitude}`,
       };
+    } else {
+      console.log(`⚠️ WARNING: No parking queue found for airport ${currentAirport.name || 'N/A'}`);
+      console.log(`   Please create parking lot zone and link it to this airport in admin panel.`);
     }
   }
 

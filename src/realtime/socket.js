@@ -3442,8 +3442,8 @@ export const initSocket = (server) => {
             console.log('='.repeat(80) + '\n');
             // ========== END CONSOLE LOGS ==========
 
-            if (isRestricted) {
-              await updateDriverByUserId(userId, { isRestricted });
+            if (isRestricted && !isParkingLot) {
+              await updateDriverByUserId(userId, { isRestricted: true });
               const parkingLot = await findNearestParkingForPickup(
                 location.coordinates,
               );
@@ -3467,15 +3467,23 @@ export const initSocket = (server) => {
                 ),
               );
 
-              if (driverLocation) {
+              // Emit socket event ONLY if driver just entered restricted area (first time)
+              // Don't emit if driver is already in restricted area (wasRestricted = true)
+              if (!wasRestricted && driverLocation) {
+                console.log(`📢 Emitting RESTRICTED_AREA socket event (first entry)`);
                 socket.emit('ride:driver_update_location', {
                   success: true,
                   objectType,
-                  data: parkingLot,
+                  data: {
+                    ...parkingLot,
+                    isFirstEntry: true,
+                  },
                   code: 'RESTRICTED_AREA',
                   message:
                     'You are inside the restricted area, and you are not allowed to pick ride in this area, reach to nearby parking lot to pick rides',
                 });
+              } else if (wasRestricted) {
+                console.log(`🔇 Skipping socket event (driver already in restricted area)`);
               }
             } else if (isParkingLot) {
               console.log(`\n🅿️ PROCESSING: Adding driver to parking queue...`);
