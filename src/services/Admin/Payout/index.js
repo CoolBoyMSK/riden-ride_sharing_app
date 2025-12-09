@@ -339,6 +339,98 @@ export const refundPassenger = async (user, { id, reason }, resp) => {
 
     // Process refund based on payment method (for COMPLETED or PROCESSING with transactions)
     if (ride.paymentMethod === 'CARD' || ride.paymentMethod === 'GOOGLE_PAY' || ride.paymentMethod === 'APPLE_PAY') {
+      // Check if transaction exists before attempting refund
+      const existingTransaction = await TransactionModel.findOne({
+        rideId: id,
+        type: 'DEBIT',
+        for: 'passenger',
+      });
+
+      // If no transaction exists but paymentIntentId exists, handle refund through Stripe directly
+      if (!existingTransaction && ride.paymentIntentId) {
+        const Stripe = (await import('stripe')).default;
+        const env = (await import('../../../config/envConfig.js')).default;
+        const stripe = new Stripe(env.STRIPE_SECRET_KEY);
+        
+        try {
+          // Check payment intent status in Stripe
+          const paymentIntent = await stripe.paymentIntents.retrieve(ride.paymentIntentId);
+          
+          if (paymentIntent.status === 'succeeded') {
+            // Payment was successful, create refund through Stripe
+            const refundAmount = ride.actualFare || ride.fareBreakdown?.finalAmount || 0;
+            const refundAmountInCents = Math.round(refundAmount * 100);
+            
+            // Check if refund already exists
+            const existingRefunds = await stripe.refunds.list({
+              payment_intent: ride.paymentIntentId,
+            });
+            
+            if (existingRefunds.data.length > 0) {
+              resp.error = true;
+              resp.error_message = `Payment has already been refunded in Stripe. Refund ID: ${existingRefunds.data[0].id}`;
+              return resp;
+            }
+            
+            // Create refund in Stripe
+            const stripeRefund = await stripe.refunds.create({
+              payment_intent: ride.paymentIntentId,
+              amount: refundAmountInCents,
+              reason: reason || 'requested_by_customer',
+            });
+            
+            // Get passenger and driver IDs
+            const passengerId = ride.passengerId?._id || ride.passengerId;
+            const driverId = ride.driverId?._id || ride.driverId;
+            
+            if (!passengerId || !driverId) {
+              resp.error = true;
+              resp.error_message = 'Passenger or driver information not found';
+              return resp;
+            }
+            
+            // Update ride payment status
+            await updateRideById(id, {
+              paymentStatus: 'REFUNDED',
+            });
+            
+            // Create refund transaction record
+            await RefundTransaction.create({
+              rideId: id,
+              passengerId: passengerId,
+              driverId: driverId,
+              refundAmount: refundAmount,
+              refundReason: reason || 'Refund processed via Stripe (no transaction record found)',
+              resolvedBy: 'admin',
+              metadata: {
+                stripeRefundId: stripeRefund.id,
+                paymentIntentId: ride.paymentIntentId,
+                refundedViaStripe: true,
+              },
+            });
+            
+            resp.data = {
+              success: true,
+              refundType: 'STRIPE_DIRECT_REFUND',
+              message: 'Refund processed successfully through Stripe',
+              stripeRefundId: stripeRefund.id,
+              paymentIntentId: ride.paymentIntentId,
+              refundAmount: refundAmount,
+            };
+            return resp;
+          } else {
+            resp.error = true;
+            resp.error_message = `Payment intent status is '${paymentIntent.status}', not 'succeeded'. Cannot process refund.`;
+            return resp;
+          }
+        } catch (stripeError) {
+          resp.error = true;
+          resp.error_message = `Failed to process refund through Stripe: ${stripeError.message}`;
+          return resp;
+        }
+      }
+      
+      // Normal refund flow with transaction
       const success = await refundCardPaymentToPassenger(ride._id, reason);
       if (!success || !success.success) {
         resp.error = true;

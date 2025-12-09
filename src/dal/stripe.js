@@ -3915,6 +3915,33 @@ export const refundCardPaymentToPassenger = async (
   const session = await mongoose.startSession();
 
   try {
+    // Pre-check: Verify transaction exists before starting transaction
+    const existingPassengerDebitTx = await TransactionModel.findOne({
+      rideId,
+      type: 'DEBIT',
+      for: 'passenger',
+    });
+
+    if (!existingPassengerDebitTx) {
+      throw new Error(
+        `No passenger debit transaction found for ride ${rideId}. Payment may not have been processed yet.`,
+      );
+    }
+
+    // Check if already refunded
+    if (existingPassengerDebitTx.isRefunded) {
+      throw new Error(
+        `Transaction ${existingPassengerDebitTx._id} for ride ${rideId} has already been refunded.`,
+      );
+    }
+
+    // Check status - provide helpful error if status is not 'succeeded'
+    if (existingPassengerDebitTx.status !== 'succeeded') {
+      throw new Error(
+        `Transaction ${existingPassengerDebitTx._id} for ride ${rideId} has status '${existingPassengerDebitTx.status || 'null'}' instead of 'succeeded'. Cannot process refund.`,
+      );
+    }
+
     let stripeErrorOccurred = false;
     let refund;
 
