@@ -551,9 +551,17 @@ export const findUserNotifications = async (
     'recipient.isDeleted': false,
   });
 
+  // Count unread notifications
+  const unreadCount = await Notification.countDocuments({
+    'recipient.userId': userObjectId,
+    'recipient.isDeleted': false,
+    'recipient.isRead': false,
+  });
+
   return {
     notifications,
     total: total,
+    unreadCount: unreadCount,
     page: parseInt(page),
     limit: parseInt(limit),
     totalPages: Math.ceil(total / limit),
@@ -619,11 +627,16 @@ export const markAllUserNotificationsAsRead = async (userId) => {
     throw new Error('Invalid user ID.');
   }
 
+  // Convert userId to ObjectId for proper comparison
+  const userObjectId = mongoose.Types.ObjectId.isValid(userId)
+    ? new mongoose.Types.ObjectId(userId)
+    : userId;
+
   const readTimestamp = new Date();
 
   const result = await Notification.updateMany(
     {
-      'recipient.userId': userId,
+      'recipient.userId': userObjectId,
       'recipient.isDeleted': false,
       'recipient.isRead': false, // Only update unread notifications
     },
@@ -634,6 +647,8 @@ export const markAllUserNotificationsAsRead = async (userId) => {
       },
     },
   );
+
+  console.log(`📝 [MARK ALL READ] User ${userId}: Updated ${result.modifiedCount} notifications`);
 
   return {
     acknowledged: result.acknowledged,
