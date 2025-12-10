@@ -96,11 +96,13 @@ export const getDestinationRide = async (user, resp) => {
       return resp;
     }
 
+    // Check if driver can accept destination rides (based on daily limit)
+    // Driver can accept if they have completed less than 2 destination rides today
+    const canAccept = await checkDestinationRides(driver._id);
+
     resp.data = {
       destinationRide: driver.destinationRide || null,
-      canAcceptDestinationRide: driver.destinationRide?.isActive
-        ? await checkDestinationRides(driver._id)
-        : false,
+      canAcceptDestinationRide: canAccept,
     };
     return resp;
   } catch (error) {

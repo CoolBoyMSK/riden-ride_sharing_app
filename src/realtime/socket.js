@@ -853,6 +853,29 @@ export const initSocket = (server) => {
       }
     });
 
+    // Helper function to check if driver is in restricted area using real-time location
+    const checkDriverRestrictedStatus = async (driver) => {
+      const driverLocation = await findDriverLocation(driver._id);
+      if (driverLocation?.location?.coordinates) {
+        const currentCoords = driverLocation.location.coordinates;
+        const isRestricted = await isRideInRestrictedArea(currentCoords);
+        const isParkingLot = await isDriverInParkingLot(currentCoords);
+        
+        // Update driver flag to match current location
+        if (isRestricted && !isParkingLot) {
+          await updateDriverByUserId(driver.userId || driver._id, { isRestricted: true });
+          return true; // Driver is in restricted area
+        } else if (!isRestricted && driver.isRestricted) {
+          // Driver exited restricted area, update flag
+          await updateDriverByUserId(driver.userId || driver._id, { isRestricted: false });
+          return false; // Driver is not in restricted area
+        }
+        return isRestricted && !isParkingLot;
+      }
+      // Fallback: if location not available, use cached flag
+      return driver.isRestricted;
+    };
+
     // Driver Events
     socket.on('ride:find', async () => {
       const objectType = 'find-ride';
@@ -881,14 +904,20 @@ export const initSocket = (server) => {
             code: 'FORBIDDEN',
             message: 'Driver is not active',
           });
-        } else if (driver.isRestricted) {
+        }
+        
+        // Real-time check for restricted area
+        const isCurrentlyRestricted = await checkDriverRestrictedStatus(driver);
+        if (isCurrentlyRestricted) {
           return socket.emit('error', {
             success: false,
             objectType,
             code: 'FORBIDDEN',
             message: 'Driver in restricted area',
           });
-        } else if (driver.isBlocked) {
+        }
+        
+        if (driver.isBlocked) {
           return socket.emit('error', {
             success: false,
             objectType,
@@ -986,14 +1015,20 @@ export const initSocket = (server) => {
             code: 'FORBIDDEN',
             message: 'Driver is not active',
           });
-        } else if (driver.isRestricted) {
+        }
+        
+        // Real-time check for restricted area
+        const isCurrentlyRestricted = await checkDriverRestrictedStatus(driver);
+        if (isCurrentlyRestricted) {
           return socket.emit('error', {
             success: false,
             objectType,
             code: 'FORBIDDEN',
             message: 'Driver in restricted area',
           });
-        } else if (driver.isBlocked) {
+        }
+        
+        if (driver.isBlocked) {
           return socket.emit('error', {
             success: false,
             objectType,
@@ -1117,14 +1152,20 @@ export const initSocket = (server) => {
             code: 'FORBIDDEN',
             message: 'Driver is not active',
           });
-        } else if (driver.isRestricted) {
+        }
+        
+        // Real-time check for restricted area
+        const isCurrentlyRestricted = await checkDriverRestrictedStatus(driver);
+        if (isCurrentlyRestricted) {
           return socket.emit('error', {
             success: false,
             objectType,
             code: 'FORBIDDEN',
             message: 'Driver in restricted area',
           });
-        } else if (driver.isBlocked) {
+        }
+        
+        if (driver.isBlocked) {
           return socket.emit('error', {
             success: false,
             objectType,
@@ -1221,9 +1262,19 @@ export const initSocket = (server) => {
 
       try {
         const driver = await findDriverByUserId(userId);
+        if (!driver) {
+          return socket.emit('error', {
+            success: false,
+            objectType,
+            code: 'NOT_FOUND',
+            message: 'Driver not found',
+          });
+        }
+        
+        // Real-time check for restricted area
+        const isCurrentlyRestricted = await checkDriverRestrictedStatus(driver);
         if (
-          !driver ||
-          driver.isRestricted ||
+          isCurrentlyRestricted ||
           driver.isBlocked ||
           driver.isSuspended ||
           driver.backgroundCheckStatus !== 'approved' ||
@@ -1276,14 +1327,20 @@ export const initSocket = (server) => {
             code: 'NOT_FOUND',
             message: 'Driver not found',
           });
-        } else if (driver.isRestricted) {
+        }
+        
+        // Real-time check for restricted area
+        const isCurrentlyRestricted = await checkDriverRestrictedStatus(driver);
+        if (isCurrentlyRestricted) {
           return socket.emit('error', {
             success: false,
             objectType,
             code: 'FORBIDDEN',
             message: 'Driver is restricted',
           });
-        } else if (driver.isBlocked) {
+        }
+        
+        if (driver.isBlocked) {
           return socket.emit('error', {
             success: false,
             objectType,
@@ -1408,14 +1465,20 @@ export const initSocket = (server) => {
             code: 'FORBIDDEN',
             message: 'Driver is not active',
           });
-        } else if (driver.isRestricted) {
+        }
+        
+        // Real-time check for restricted area using current driver location
+        const isCurrentlyRestricted = await checkDriverRestrictedStatus(driver);
+        if (isCurrentlyRestricted) {
           return socket.emit('error', {
             success: false,
             objectType,
             code: 'FORBIDDEN',
             message: 'Driver in restricted area',
           });
-        } else if (driver.isBlocked || driver.status === 'blocked') {
+        }
+        
+        if (driver.isBlocked || driver.status === 'blocked') {
           return socket.emit('error', {
             success: false,
             objectType,
@@ -3696,14 +3759,20 @@ export const initSocket = (server) => {
             code: 'NOT_FOUND',
             message: 'Driver not found',
           });
-        } else if (driver.isRestricted) {
+        }
+        
+        // Real-time check for restricted area
+        const isCurrentlyRestricted = await checkDriverRestrictedStatus(driver);
+        if (isCurrentlyRestricted) {
           return socket.emit('error', {
             success: false,
             objectType,
             code: 'FORBIDDEN',
             message: 'Driver in restricted area',
           });
-        } else if (driver.isBlocked) {
+        }
+        
+        if (driver.isBlocked) {
           return socket.emit('error', {
             success: false,
             objectType,

@@ -12,6 +12,8 @@ import {
   approveRequestedDriver,
   uploadWayBillDocument,
   getWayBillDocument,
+  resetDriverDestinationRideLimit,
+  getDriverDestinationRideStatus,
 } from '../../../services/Admin/Drivers/index.js';
 import { handleResponse } from '../../../utils/handleRespone.js';
 import {
@@ -170,6 +172,28 @@ export const getWayBillDocumentController = (req, res) =>
       handler: getWayBillDocument,
       handlerParams: [req.query],
       successMessage: 'Way Bill fetched successfully',
+    },
+    req,
+    res,
+  );
+
+export const resetDriverDestinationRideLimitController = (req, res) =>
+  handleResponse(
+    {
+      handler: resetDriverDestinationRideLimit,
+      handlerParams: [req.params],
+      successMessage: 'Destination ride limit reset successfully',
+    },
+    req,
+    res,
+  );
+
+export const getDriverDestinationRideStatusController = (req, res) =>
+  handleResponse(
+    {
+      handler: getDriverDestinationRideStatus,
+      handlerParams: [req.params],
+      successMessage: 'Destination ride status fetched successfully',
     },
     req,
     res,

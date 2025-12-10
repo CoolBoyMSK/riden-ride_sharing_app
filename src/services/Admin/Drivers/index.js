@@ -16,6 +16,7 @@ import {
   updateDriverByUserId,
   findDriverByDriverId,
 } from '../../../dal/driver.js';
+import { resetDestinationRideLimit, getDestinationRideCount } from '../../../dal/ride.js';
 import { getAllExternalAccounts } from '../../../dal/stripe.js';
 import { findUserById } from '../../../dal/user/index.js';
 import { uploadDriverDocumentToS3 } from '../../../utils/s3Uploader.js';
@@ -564,6 +565,69 @@ export const getWayBillDocument = async ({ id, docType }, resp) => {
     }
 
     resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
+    return resp;
+  }
+};
+
+export const resetDriverDestinationRideLimit = async ({ driverId }, resp) => {
+  try {
+    // Verify driver exists
+    const driver = await findDriverByDriverId(driverId);
+    if (!driver) {
+      resp.error = true;
+      resp.error_message = 'Driver not found';
+      return resp;
+    }
+
+    // Reset the destination ride limit
+    const result = await resetDestinationRideLimit(driverId);
+
+    resp.data = {
+      message: 'Destination ride limit reset successfully',
+      ridesUpdated: result.modifiedCount,
+      ridesFound: result.matchedCount,
+      previousCount: result.previousCount,
+      currentCount: result.currentCount,
+      note: result.matchedCount === 0 
+        ? 'No destination rides found for today. Driver may not have completed any destination rides today, or rides may not be marked as destination rides.'
+        : 'Limit reset successfully',
+    };
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
+    return resp;
+  }
+};
+
+export const getDriverDestinationRideStatus = async ({ driverId }, resp) => {
+  try {
+    // Verify driver exists
+    const driver = await findDriverByDriverId(driverId);
+    if (!driver) {
+      resp.error = true;
+      resp.error_message = 'Driver not found';
+      return resp;
+    }
+
+    // Get destination ride count and status
+    const status = await getDestinationRideCount(driverId);
+
+    resp.data = {
+      driverId: driverId,
+      currentCount: status.count,
+      limit: status.limit,
+      canAcceptMore: status.canAcceptMore,
+      remainingSlots: Math.max(0, status.limit - status.count),
+      dateRange: status.dateRange,
+      rides: status.rides,
+    };
     return resp;
   } catch (error) {
     console.error(`API ERROR: ${error}`);

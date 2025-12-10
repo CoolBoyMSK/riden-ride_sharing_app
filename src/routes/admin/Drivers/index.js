@@ -14,6 +14,8 @@ import {
   approveRequestedDriverController,
   uploadWayBillDocumentController,
   getWayBillDocumentController,
+  resetDriverDestinationRideLimitController,
+  getDriverDestinationRideStatusController,
 } from '../../../controllers/Admin/Drivers/index.js';
 import { uploadSingle } from '../../../middlewares/upload.js';
 
@@ -110,6 +112,22 @@ registerRoute({
   put_method: uploadWayBillDocumentController,
   get_permission: 'driver_management',
   get_method: getWayBillDocumentController,
+});
+
+registerRoute({
+  router,
+  route: '/:driverId/destination-ride-status',
+  admin_auth_enable: true,
+  get_permission: 'driver_management',
+  get_method: getDriverDestinationRideStatusController,
+});
+
+registerRoute({
+  router,
+  route: '/:driverId/reset-destination-ride-limit',
+  admin_auth_enable: true,
+  post_permission: 'driver_management',
+  post_method: resetDriverDestinationRideLimitController,
 });
 
 export default router;

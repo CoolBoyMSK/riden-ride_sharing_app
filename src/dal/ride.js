@@ -115,6 +115,94 @@ export const checkDestinationRides = async (driverId) => {
   return completedDestinationRidesCount < 2;
 };
 
+export const getDestinationRideCount = async (driverId) => {
+  // Get start of today in UTC
+  const startOfToday = new Date();
+  startOfToday.setUTCHours(0, 0, 0, 0);
+
+  // Get end of today in UTC
+  const endOfToday = new Date();
+  endOfToday.setUTCHours(23, 59, 59, 999);
+
+  // Count completed destination rides today
+  const completedDestinationRidesCount = await RideModel.countDocuments({
+    driverId,
+    status: 'RIDE_COMPLETED',
+    isDestinationRide: true,
+    rideCompletedAt: {
+      $gte: startOfToday,
+      $lte: endOfToday,
+    },
+  });
+
+  // Get the actual rides for debugging
+  const rides = await RideModel.find({
+    driverId,
+    status: 'RIDE_COMPLETED',
+    isDestinationRide: true,
+    rideCompletedAt: {
+      $gte: startOfToday,
+      $lte: endOfToday,
+    },
+  })
+    .select('rideId rideCompletedAt isDestinationRide status')
+    .lean();
+
+  return {
+    count: completedDestinationRidesCount,
+    limit: 2,
+    canAcceptMore: completedDestinationRidesCount < 2,
+    rides: rides,
+    dateRange: {
+      startOfToday: startOfToday.toISOString(),
+      endOfToday: endOfToday.toISOString(),
+    },
+  };
+};
+
+export const resetDestinationRideLimit = async (driverId) => {
+  // Get start of today in UTC
+  const startOfToday = new Date();
+  startOfToday.setUTCHours(0, 0, 0, 0);
+
+  // Get end of today in UTC
+  const endOfToday = new Date();
+  endOfToday.setUTCHours(23, 59, 59, 999);
+
+  // Get start of yesterday in UTC
+  const startOfYesterday = new Date(startOfToday);
+  startOfYesterday.setUTCDate(startOfYesterday.getUTCDate() - 1);
+
+  // Get current count before reset
+  const currentCount = await getDestinationRideCount(driverId);
+
+  // Update all completed destination rides from today to yesterday
+  // This effectively resets the limit by moving them out of today's count
+  const result = await RideModel.updateMany(
+    {
+      driverId,
+      status: 'RIDE_COMPLETED',
+      isDestinationRide: true,
+      rideCompletedAt: {
+        $gte: startOfToday,
+        $lte: endOfToday,
+      },
+    },
+    {
+      $set: {
+        rideCompletedAt: startOfYesterday,
+      },
+    },
+  );
+
+  return {
+    matchedCount: result.matchedCount,
+    modifiedCount: result.modifiedCount,
+    previousCount: currentCount.count,
+    currentCount: currentCount.count - result.modifiedCount,
+  };
+};
+
 export const createFeedback = async (payload) => Feedback.create(payload);
 
 export const updateRideByRideId = async (rideId, updateData) => {
