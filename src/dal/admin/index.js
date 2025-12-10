@@ -3511,8 +3511,14 @@ export const sendAlert = async (alertId) => {
 
     // Create in-app notifications for ALL users (in batches)
     console.log(`📝 Starting in-app notification creation for ${allUsers.length} users`);
+    console.log(`📝 Alert blocks:`, JSON.stringify(primaryBlock));
     let notificationCount = 0;
     let notificationErrors = 0;
+
+    // Ensure we have users to create notifications for
+    if (allUsers.length === 0) {
+      console.warn(`⚠️ No users found for in-app notifications. Audience: ${alert.audience}, Recipients: ${alert.recipients?.length || 0}`);
+    }
 
     for (let i = 0; i < allUsers.length; i += BATCH_SIZE) {
       const batch = allUsers.slice(i, i + BATCH_SIZE);
