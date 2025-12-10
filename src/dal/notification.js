@@ -528,11 +528,16 @@ export const findUserNotifications = async (
     throw new Error('User ID is required to fetch notifications.');
   }
 
+  // Convert userId to ObjectId for proper comparison
+  const userObjectId = mongoose.Types.ObjectId.isValid(userId)
+    ? new mongoose.Types.ObjectId(userId)
+    : userId;
+
   const skip = (page - 1) * limit;
 
   // Fetch notifications with pagination
   const notifications = await Notification.find({
-    'recipient.userId': userId,
+    'recipient.userId': userObjectId,
     'recipient.isDeleted': false,
   })
     .sort({ createdAt: -1 })
@@ -542,7 +547,7 @@ export const findUserNotifications = async (
 
   // Count total notifications for pagination info
   const total = await Notification.countDocuments({
-    'recipient.userId': userId,
+    'recipient.userId': userObjectId,
     'recipient.isDeleted': false,
   });
 

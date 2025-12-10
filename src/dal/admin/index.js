@@ -3493,7 +3493,7 @@ export const sendAlert = async (alertId) => {
       // Create in-app notifications for ALL users in batch (whether they have device tokens or not)
       for (const user of batch) {
         try {
-          await createUserNotification({
+          const notificationResult = await createUserNotification({
             title: primaryBlock.title || 'Alert',
             message: primaryBlock.body || '',
             module: notificationModule,
@@ -3505,9 +3505,15 @@ export const sendAlert = async (alertId) => {
             type: 'ALERT',
             actionLink: primaryBlock.data?.actionLink || null,
           });
+          
+          if (!notificationResult || !notificationResult.success) {
+            console.error(`Failed to create in-app notification for user ${user._id}:`, notificationResult?.message || 'Unknown error');
+          } else {
+            console.log(`✅ Created in-app notification for user ${user._id}`);
+          }
         } catch (notifError) {
           // Log error but don't fail the alert sending process
-          console.error(`Failed to create in-app notification for user ${user._id}:`, notifError);
+          console.error(`Failed to create in-app notification for user ${user._id}:`, notifError.message || notifError);
         }
       }
 
