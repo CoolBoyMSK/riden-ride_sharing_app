@@ -632,6 +632,20 @@ export const markAllUserNotificationsAsRead = async (userId) => {
     ? new mongoose.Types.ObjectId(userId)
     : userId;
 
+  // First, check how many unread notifications exist
+  const unreadCountBefore = await Notification.countDocuments({
+    'recipient.userId': userObjectId,
+    'recipient.isDeleted': false,
+    'recipient.isRead': false,
+  });
+
+  const totalNotifications = await Notification.countDocuments({
+    'recipient.userId': userObjectId,
+    'recipient.isDeleted': false,
+  });
+
+  console.log(`📝 [MARK ALL READ] User ${userId}: Found ${unreadCountBefore} unread out of ${totalNotifications} total notifications`);
+
   const readTimestamp = new Date();
 
   const result = await Notification.updateMany(
@@ -648,11 +662,21 @@ export const markAllUserNotificationsAsRead = async (userId) => {
     },
   );
 
-  console.log(`📝 [MARK ALL READ] User ${userId}: Updated ${result.modifiedCount} notifications`);
+  // Verify after update
+  const unreadCountAfter = await Notification.countDocuments({
+    'recipient.userId': userObjectId,
+    'recipient.isDeleted': false,
+    'recipient.isRead': false,
+  });
+
+  console.log(`📝 [MARK ALL READ] User ${userId}: Updated ${result.modifiedCount} notifications. Unread count: ${unreadCountBefore} → ${unreadCountAfter}`);
 
   return {
     acknowledged: result.acknowledged,
     modifiedCount: result.modifiedCount,
+    unreadCountBefore,
+    unreadCountAfter,
+    totalNotifications,
     message: result.modifiedCount
       ? `${result.modifiedCount} notifications marked as read for user ${userId}.`
       : 'No unread notifications available',
