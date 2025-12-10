@@ -3442,24 +3442,43 @@ export const sendAlert = async (alertId) => {
     await alert.save({ session });
 
     // Build user query based on audience
-    let userQuery = { userDeviceToken: { $exists: true, $ne: null, $ne: '' } };
+    // Separate query for push notifications (requires device token)
+    let pushNotificationQuery = { userDeviceToken: { $exists: true, $ne: null, $ne: '' } };
+    
+    // Query for all users (for in-app notifications - doesn't require device token)
+    let allUsersQuery = {};
 
     // If recipients are provided, use them (even if audience is not explicitly 'custom')
     if (alert.recipients && alert.recipients.length > 0) {
-      userQuery._id = { $in: alert.recipients };
+      pushNotificationQuery._id = { $in: alert.recipients };
+      allUsersQuery._id = { $in: alert.recipients };
     } else if (alert.audience === 'custom') {
-      userQuery._id = { $in: alert.recipients || [] };
+      pushNotificationQuery._id = { $in: alert.recipients || [] };
+      allUsersQuery._id = { $in: alert.recipients || [] };
     } else if (alert.audience === 'drivers') {
-      userQuery.roles = { $in: ['driver'] };
+      pushNotificationQuery.roles = { $in: ['driver'] };
+      allUsersQuery.roles = { $in: ['driver'] };
     } else if (alert.audience === 'passengers') {
-      userQuery.roles = { $in: ['passenger'] };
+      pushNotificationQuery.roles = { $in: ['passenger'] };
+      allUsersQuery.roles = { $in: ['passenger'] };
+    } else if (alert.audience === 'all') {
+      // For 'all' audience, get all users
+      allUsersQuery = {};
     }
 
-    // Use aggregation for better performance with large datasets
-    const users = await User.aggregate([
-      { $match: userQuery },
+    // Get users for push notifications (requires device token)
+    const usersForPush = await User.aggregate([
+      { $match: pushNotificationQuery },
       { $project: { _id: 1, userDeviceToken: 1 } },
     ]);
+
+    // Get ALL users for in-app notifications (doesn't require device token)
+    const allUsers = await User.aggregate([
+      { $match: allUsersQuery },
+      { $project: { _id: 1, userDeviceToken: 1 } },
+    ]);
+
+    console.log(`📊 Alert ${alertId}: Found ${usersForPush.length} users with device tokens, ${allUsers.length} total users for notifications`);
 
     let stats = { totalTargets: 0, sent: 0, failed: 0, invalidTokens: 0 };
     const primaryBlock = (alert.blocks && alert.blocks[0]) || {
@@ -3479,16 +3498,24 @@ export const sendAlert = async (alertId) => {
       notificationModule = 'ride'; // All users receive ride-related alerts
     }
 
-    // Process in batches
-    for (let i = 0; i < users.length; i += BATCH_SIZE) {
-      const batch = users.slice(i, i + BATCH_SIZE);
+    // Send push notifications in batches (only to users with device tokens)
+    for (let i = 0; i < usersForPush.length; i += BATCH_SIZE) {
+      const batch = usersForPush.slice(i, i + BATCH_SIZE);
       const validUsers = batch.filter((user) => user.userDeviceToken);
 
-      // Send push notifications to users with device tokens
       if (validUsers.length > 0) {
         const batchResult = await _sendBatch(validUsers, primaryBlock);
         stats = _sumStats(stats, batchResult);
       }
+    }
+
+    // Create in-app notifications for ALL users (in batches)
+    console.log(`📝 Starting in-app notification creation for ${allUsers.length} users`);
+    let notificationCount = 0;
+    let notificationErrors = 0;
+
+    for (let i = 0; i < allUsers.length; i += BATCH_SIZE) {
+      const batch = allUsers.slice(i, i + BATCH_SIZE);
 
       // Create in-app notifications for ALL users in batch (whether they have device tokens or not)
       for (const user of batch) {
@@ -3517,21 +3544,28 @@ export const sendAlert = async (alertId) => {
           });
           
           if (!notificationResult || !notificationResult.success) {
+            notificationErrors++;
             console.error(`❌ Failed to create in-app notification for user ${user._id}:`, notificationResult?.message || 'Unknown error');
           } else {
-            console.log(`✅ Created in-app notification for user ${user._id} - Title: "${notificationTitle}"`);
+            notificationCount++;
+            if (notificationCount % 10 === 0) {
+              console.log(`✅ Created ${notificationCount} in-app notifications so far...`);
+            }
           }
         } catch (notifError) {
+          notificationErrors++;
           // Log error but don't fail the alert sending process
           console.error(`❌ Exception creating in-app notification for user ${user._id}:`, notifError.message || notifError);
         }
       }
 
-      // Small delay to prevent overwhelming FCM and database
-      if (i + BATCH_SIZE < users.length) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
+      // Small delay to prevent overwhelming database
+      if (i + BATCH_SIZE < allUsers.length) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
       }
     }
+
+    console.log(`📊 Notification creation completed: ${notificationCount} created, ${notificationErrors} failed`);
 
     // Update alert with final stats
     alert.stats = {
