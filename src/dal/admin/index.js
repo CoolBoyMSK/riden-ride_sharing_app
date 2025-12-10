@@ -3493,9 +3493,19 @@ export const sendAlert = async (alertId) => {
       // Create in-app notifications for ALL users in batch (whether they have device tokens or not)
       for (const user of batch) {
         try {
+          // Ensure title and message are not empty
+          const notificationTitle = (primaryBlock.title && primaryBlock.title.trim()) || 'Alert';
+          const notificationMessage = (primaryBlock.body && primaryBlock.body.trim()) || 'You have a new notification';
+          
+          // Skip if both title and message are empty (shouldn't happen but safety check)
+          if (!notificationTitle || !notificationMessage) {
+            console.warn(`Skipping notification creation for user ${user._id} - empty title/message`);
+            continue;
+          }
+
           const notificationResult = await createUserNotification({
-            title: primaryBlock.title || 'Alert',
-            message: primaryBlock.body || '',
+            title: notificationTitle,
+            message: notificationMessage,
             module: notificationModule,
             userId: user._id.toString(),
             metadata: {
@@ -3507,13 +3517,13 @@ export const sendAlert = async (alertId) => {
           });
           
           if (!notificationResult || !notificationResult.success) {
-            console.error(`Failed to create in-app notification for user ${user._id}:`, notificationResult?.message || 'Unknown error');
+            console.error(`❌ Failed to create in-app notification for user ${user._id}:`, notificationResult?.message || 'Unknown error');
           } else {
-            console.log(`✅ Created in-app notification for user ${user._id}`);
+            console.log(`✅ Created in-app notification for user ${user._id} - Title: "${notificationTitle}"`);
           }
         } catch (notifError) {
           // Log error but don't fail the alert sending process
-          console.error(`Failed to create in-app notification for user ${user._id}:`, notifError.message || notifError);
+          console.error(`❌ Exception creating in-app notification for user ${user._id}:`, notifError.message || notifError);
         }
       }
 
