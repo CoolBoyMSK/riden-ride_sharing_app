@@ -70,8 +70,9 @@ import {
 } from '../dal/stripe.js';
 import { createCallLog, findCallById, updateCallLogById } from '../dal/call.js';
 import { findDrivingHours } from '../dal/stats.js';
-import { findDashboardData } from '../dal/admin/index.js';
+import { findDashboardData, findAdminById } from '../dal/admin/index.js';
 import { findUserById } from '../dal/user/index.js';
+import AdminModel from '../models/Admin.js';
 import {
   notifyUser,
   findAdminNotifications,
@@ -423,10 +424,36 @@ export const initSocket = (server) => {
     };
 
     if (userId) {
-      console.log(`🔌 User ${userId} connected to socket`);
+      // Check if user is an admin (non-blocking)
+      findAdminById(userId)
+        .then((admin) => {
+          if (admin) {
+            // Admin user connection
+            console.log(`🔌 [ADMIN] Admin ${userId} (${admin.email}) connected to socket`);
+            socket.user.isAdmin = true;
+            socket.user.adminType = admin.type;
+            
+            // Join admin's personal room for direct notifications
+            socket.join(`user:${userId}`);
+            
+            // Also join admin-specific room for broadcast notifications
+            socket.join(`admin:${userId}`);
+            
+            console.log(`📬 [ADMIN] Admin ${userId} joined notification rooms: user:${userId}, admin:${userId}`);
+          } else {
+            // Regular user connection
+            console.log(`🔌 User ${userId} connected to socket`);
+          }
+        })
+        .catch(() => {
+          // If admin check fails, treat as regular user
+          console.log(`🔌 User ${userId} connected to socket`);
+        });
+      
       // add to online registry
       addSocket(userId, socket.id).catch(console.error);
-      // Join user's personal room for direct notifications
+      // Join user's personal room for direct notifications (for all users)
+      // This ensures notifications work immediately even if admin check is still pending
       socket.join(`user:${userId}`);
     } else {
       console.log(`🔌 Anonymous user connected to socket`);
