@@ -18,7 +18,7 @@ import User from '../../models/User.js';
 import { alertQueue } from '../../queues/alertQueue.js';
 import firebaseAdmin from '../../config/firebaseAdmin.js';
 import env from '../../config/envConfig.js';
-import { notifyUser } from '../notification.js';
+import { notifyUser, createUserNotification } from '../notification.js';
 import { getDriverLocation } from '../ride.js';
 import { emitToUser } from '../../realtime/socket.js';
 
@@ -3468,17 +3468,50 @@ export const sendAlert = async (alertId) => {
       data: {},
     };
 
+    // Determine module based on audience for in-app notifications
+    // Use 'ride' module as it's in ALLOWED_USER_SETTINGS and is appropriate for alerts
+    let notificationModule = 'ride'; // Default module
+    if (alert.audience === 'drivers') {
+      notificationModule = 'ride'; // Drivers receive ride-related alerts
+    } else if (alert.audience === 'passengers') {
+      notificationModule = 'ride'; // Passengers receive ride-related alerts
+    } else {
+      notificationModule = 'ride'; // All users receive ride-related alerts
+    }
+
     // Process in batches
     for (let i = 0; i < users.length; i += BATCH_SIZE) {
       const batch = users.slice(i, i + BATCH_SIZE);
       const validUsers = batch.filter((user) => user.userDeviceToken);
 
+      // Send push notifications to users with device tokens
       if (validUsers.length > 0) {
         const batchResult = await _sendBatch(validUsers, primaryBlock);
         stats = _sumStats(stats, batchResult);
       }
 
-      // Small delay to prevent overwhelming FCM
+      // Create in-app notifications for ALL users in batch (whether they have device tokens or not)
+      for (const user of batch) {
+        try {
+          await createUserNotification({
+            title: primaryBlock.title || 'Alert',
+            message: primaryBlock.body || '',
+            module: notificationModule,
+            userId: user._id.toString(),
+            metadata: {
+              alertId: alertId.toString(),
+              ...(primaryBlock.data || {}),
+            },
+            type: 'ALERT',
+            actionLink: primaryBlock.data?.actionLink || null,
+          });
+        } catch (notifError) {
+          // Log error but don't fail the alert sending process
+          console.error(`Failed to create in-app notification for user ${user._id}:`, notifError);
+        }
+      }
+
+      // Small delay to prevent overwhelming FCM and database
       if (i + BATCH_SIZE < users.length) {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
