@@ -609,6 +609,36 @@ export const deleteUserNotificationById = async (userId, notificationId) => {
   return notification;
 };
 
+export const markAllUserNotificationsAsRead = async (userId) => {
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    throw new Error('Invalid user ID.');
+  }
+
+  const readTimestamp = new Date();
+
+  const result = await Notification.updateMany(
+    {
+      'recipient.userId': userId,
+      'recipient.isDeleted': false,
+      'recipient.isRead': false, // Only update unread notifications
+    },
+    {
+      $set: {
+        'recipient.isRead': true,
+        'recipient.readAt': readTimestamp,
+      },
+    },
+  );
+
+  return {
+    acknowledged: result.acknowledged,
+    modifiedCount: result.modifiedCount,
+    message: result.modifiedCount
+      ? `${result.modifiedCount} notifications marked as read for user ${userId}.`
+      : 'No unread notifications available',
+  };
+};
+
 export const deleteAllNotificationsForUser = async (userId) => {
   if (!mongoose.Types.ObjectId.isValid(userId)) {
     throw new Error('Invalid user ID.');

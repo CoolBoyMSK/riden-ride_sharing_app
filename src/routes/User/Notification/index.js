@@ -7,6 +7,7 @@ import {
   toggleNotificationStatusController,
   deleteNotificationByIdController,
   deleteNotificationsController,
+  markAllNotificationsAsReadController,
 } from '../../../controllers/User/Notification/index.js';
 import { anyUserAuth } from '../../../middlewares/anyUserAuth.js';
 
@@ -33,6 +34,14 @@ registerRoute({
   route: '/toggle/:id',
   put_middlewares: [anyUserAuth],
   put_method: toggleNotificationStatusController,
+});
+
+registerRoute({
+  router,
+  route: '/mark-all-read',
+  passenger_auth_enable: true,
+  driver_auth_enable: true,
+  put_method: markAllNotificationsAsReadController,
 });
 
 registerRoute({

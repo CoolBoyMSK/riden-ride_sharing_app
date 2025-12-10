@@ -5,6 +5,7 @@ import {
   toggleUserNotificationReadStatus,
   deleteUserNotificationById,
   deleteAllNotificationsForUser,
+  markAllUserNotificationsAsRead,
 } from '../../../dal/notification.js';
 import { findUserById } from '../../../dal/user/index.js';
 
@@ -118,6 +119,25 @@ export const deleteNotificationById = async (user, { id }, resp) => {
     if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to delete notification';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
+    return resp;
+  }
+};
+
+export const markAllNotificationsAsRead = async (user, resp) => {
+  try {
+    const success = await markAllUserNotificationsAsRead(user.id);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to mark all notifications as read';
       return resp;
     }
 
