@@ -6,6 +6,7 @@ import {
   toggleNotificationStatus,
   deleteNotificationById,
   deleteNotifications,
+  markAllNotificationsAsRead,
 } from '../../../services/User/Notification/index.js';
 import {
   validateNotificationSettingName,
@@ -67,6 +68,18 @@ export const deleteNotificationByIdController = (req, res) =>
       validationFn: () => validateObjectId(req.params),
       handlerParams: [req.user, req.params],
       successMessage: 'Notification deleted successfully',
+    },
+    req,
+    res,
+  );
+
+export const markAllNotificationsAsReadController = (req, res) =>
+  handleResponse(
+    {
+      handler: markAllNotificationsAsRead,
+      validationFn: null,
+      handlerParams: [req.user],
+      successMessage: 'All notifications marked as read successfully',
     },
     req,
     res,
