@@ -234,6 +234,17 @@ export const requestPhoneOtp = async (
   );
   await redisConfig.setex(phoneCooldownKey(currentPhone), 60, 'true');
 
+  console.log(`\n📱 ========================================`);
+  console.log(`📱 PHONE OTP GENERATED`);
+  console.log(`📱 ========================================`);
+  console.log(`📱 Phone Number: ${currentPhone}`);
+  console.log(`📱 OTP Code: ${otp}`);
+  console.log(`📱 Username: ${username || 'N/A'}`);
+  console.log(`📱 Type: ${type || 'N/A'}`);
+  console.log(`📱 Role: ${role || 'N/A'}`);
+  console.log(`📱 Context:`, JSON.stringify(context, null, 2));
+  console.log(`📱 ========================================\n`);
+
   await smsQueue.add(
     'sendPhoneOtp',
     {
@@ -251,6 +262,8 @@ export const requestPhoneOtp = async (
       },
     },
   );
+
+  console.log(`✅ Phone OTP job queued successfully for ${currentPhone}\n`);
 
   return { ok: true, message: `OTP sent to ${currentPhone}` };
 };
