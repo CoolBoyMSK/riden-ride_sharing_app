@@ -3691,16 +3691,24 @@ export const initSocket = (server) => {
             if (isParkingLot) {
               console.log(`\n🅿️ PROCESSING: Adding driver to parking queue...`);
               
-              let queue;
-              const parkingQueue = await findDriverParkingQueue(
-                isParkingLot._id,
-              );
-              if (parkingQueue) {
-                queue = await addDriverToQueue(isParkingLot._id, driver._id);
-                console.log(`✅ Driver added to queue. Queue Size: ${queue?.queueSize || 'N/A'}`);
-                console.log(`   Queue Position: ${queue?.position || 'N/A'}`);
-              } else {
-                console.log(`⚠️ Parking queue not found for parking lot: ${isParkingLot._id}`);
+              let parkingQueue = null;
+              try {
+                let queue;
+                parkingQueue = await findDriverParkingQueue(
+                  isParkingLot._id,
+                );
+                if (parkingQueue) {
+                  queue = await addDriverToQueue(isParkingLot._id, driver._id);
+                  console.log(`✅ Driver added to queue. Queue Size: ${queue?.queueSize || 'N/A'}`);
+                  console.log(`   Queue Position: ${queue?.position || 'N/A'}`);
+                } else {
+                  console.log(`⚠️ Parking queue not found for parking lot: ${isParkingLot._id}`);
+                  console.log(`   Driver will remain in parking lot but won't be added to queue`);
+                }
+              } catch (error) {
+                console.error(`❌ Error adding driver to parking queue:`, error);
+                console.log(`   Driver location will still be updated, but queue addition failed`);
+                parkingQueue = null; // Ensure it's null on error
               }
 
               await updateDriverByUserId(userId, { isRestricted: false });

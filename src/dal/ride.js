@@ -1112,15 +1112,21 @@ export const findNearestParkingForPickup = async (userCoords) => {
 };
 
 export const findDriverParkingQueue = async (parkingLotId) => {
-  const queue = await ParkingQueue.findOne({
-    parkingLotId,
-    isActive: true,
-  });
+  try {
+    const queue = await ParkingQueue.findOne({
+      parkingLotId,
+      isActive: true,
+    });
 
-  if (!queue) {
-    throw new Error('Airport parking queue not found');
-  } else {
+    if (!queue) {
+      console.warn(`⚠️ Parking queue not found for parking lot: ${parkingLotId}`);
+      return null;
+    }
+    
     return queue;
+  } catch (error) {
+    console.error(`❌ Error finding parking queue for parking lot ${parkingLotId}:`, error);
+    return null;
   }
 };
 

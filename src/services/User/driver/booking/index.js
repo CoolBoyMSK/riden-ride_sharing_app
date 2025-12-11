@@ -528,11 +528,19 @@ export const updateLocation = async (user, { coordinates, heading, speed, accura
     // Handle parking lot
     if (isParkingLot) {
       let queue;
-      const parkingQueue = await findDriverParkingQueue(isParkingLot._id);
-      if (parkingQueue) {
-        queue = await addDriverToQueue(isParkingLot._id, driver._id);
-        console.log(`✅ Driver added to queue. Queue Size: ${queue?.queueSize || 'N/A'}`);
-        console.log(`   Queue Position: ${queue?.position || 'N/A'}`);
+      let parkingQueue = null;
+      try {
+        parkingQueue = await findDriverParkingQueue(isParkingLot._id);
+        if (parkingQueue) {
+          queue = await addDriverToQueue(isParkingLot._id, driver._id);
+          console.log(`✅ Driver added to queue. Queue Size: ${queue?.queueSize || 'N/A'}`);
+          console.log(`   Queue Position: ${queue?.position || 'N/A'}`);
+        } else {
+          console.log(`⚠️ Parking queue not found for parking lot: ${isParkingLot._id}`);
+        }
+      } catch (error) {
+        console.error(`❌ Error adding driver to parking queue:`, error);
+        parkingQueue = null; // Ensure it's null on error
       }
 
       await updateDriverByUserId(user._id, { isRestricted: false });
