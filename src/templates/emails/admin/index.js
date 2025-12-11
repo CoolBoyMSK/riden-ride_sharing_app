@@ -48,7 +48,7 @@ export const sendAdminInvitationEmail = async (toEmail, password, adminName) => 
   const html = invitationTpl({ email: toEmail, password, loginLink, adminName });
   await sendEmail({
     to: toEmail,
-    subject: 'You're Invited as a Riden Admin',
+    subject: "You're Invited as a Riden Admin",
     html,
   });
 };

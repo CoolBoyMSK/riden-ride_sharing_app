@@ -316,7 +316,7 @@ export const socialLoginUser = async (
     let user = await findUserByEmail(email?.trim());
 
     if (!user) {
-      const isVerified = await verifyGoogleToken(userSocialToken, user.email);
+      const isVerified = await verifyGoogleToken(userSocialToken, email);
       if (!isVerified) {
         resp.error = true;
         resp.error_message = 'Invalid social token';

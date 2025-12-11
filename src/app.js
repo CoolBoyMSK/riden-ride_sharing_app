@@ -12,6 +12,9 @@ const app = express();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Trust proxy for rate limiting behind reverse proxy/load balancer
+app.set('trust proxy', true);
+
 app.use(cors);
 app.use(helmet());
 app.use(globalRateLimiter);

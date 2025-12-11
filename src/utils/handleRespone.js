@@ -34,6 +34,14 @@ export const handleResponse = async (options, req, res) => {
     const RESP = createResponseObject();
     const resp = await handler(...handlerParams, RESP);
 
+    if (!resp) {
+      console.error('Handler returned undefined response');
+      return res.status(500).json({
+        code: 500,
+        message: 'Internal server error: Handler did not return a response',
+      });
+    }
+
     if (resp.error) {
       return res.status(400).json({ code: 400, message: resp.error_message });
     }

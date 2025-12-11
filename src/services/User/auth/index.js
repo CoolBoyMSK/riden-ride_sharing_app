@@ -1426,6 +1426,10 @@ export const resendOtp = async (
         phoneNumber: user.phoneNumber,
       };
       return resp;
+    } else {
+      resp.error = true;
+      resp.error_message = 'Either emailOtp or phoneOtp must be provided';
+      return resp;
     }
   } catch (error) {
     console.error(`API ERROR: ${error}`);
