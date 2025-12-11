@@ -601,13 +601,17 @@ export const updateLocation = async (user, { coordinates, heading, speed, accura
         });
       }
 
-      // Emit socket event to driver
-      emitToUser(user._id, 'ride:driver_update_location', {
-        success: true,
-        objectType: 'driver-update-location',
-        data: driverLocation.location,
-        message: 'Location updated successfully',
-      });
+      // Don't emit normal location update event if driver is in restricted area
+      // This prevents popup from disappearing automatically
+      // Only emit if driver is truly outside restricted area
+      if (!isRestricted) {
+        emitToUser(user._id, 'ride:driver_update_location', {
+          success: true,
+          objectType: 'driver-update-location',
+          data: driverLocation.location,
+          message: 'Location updated successfully',
+        });
+      }
 
       responseData = driverLocation;
     }

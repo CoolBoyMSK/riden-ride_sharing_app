@@ -3688,12 +3688,17 @@ export const initSocket = (server) => {
                 );
               }
 
-              socket.emit('ride:driver_update_location', {
-                success: true,
-                objectType,
-                data: driverLocation.location,
-                message: 'Location updated successfully',
-              });
+              // Don't emit normal location update event if driver is in restricted area
+              // This prevents popup from disappearing automatically
+              // Only emit if driver is truly outside restricted area
+              if (!isRestricted) {
+                socket.emit('ride:driver_update_location', {
+                  success: true,
+                  objectType,
+                  data: driverLocation.location,
+                  message: 'Location updated successfully',
+                });
+              }
             }
           } else {
             const currentLocation = await getDriverLocation(driver._id);
