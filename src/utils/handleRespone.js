@@ -32,10 +32,24 @@ export const handleResponse = async (options, req, res) => {
     }
 
     const RESP = createResponseObject();
-    const resp = await handler(...handlerParams, RESP);
+    let resp;
+    try {
+      resp = await handler(...handlerParams, RESP);
+    } catch (handlerError) {
+      console.error('Handler threw an error:', handlerError);
+      // If handler throws, try to use the response object if it was modified
+      // Otherwise create a new error response
+      if (RESP && typeof RESP === 'object') {
+        RESP.error = true;
+        RESP.error_message = handlerError.message || 'Handler execution failed';
+        resp = RESP;
+      } else {
+        throw handlerError; // Re-throw to be caught by outer catch
+      }
+    }
 
     if (!resp) {
-      console.error('Handler returned undefined response');
+      console.error('Handler returned undefined response. Handler:', handler?.name || 'unknown');
       return res.status(500).json({
         code: 500,
         message: 'Internal server error: Handler did not return a response',

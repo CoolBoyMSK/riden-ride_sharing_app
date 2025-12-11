@@ -1376,10 +1376,17 @@ export const resetUserPassword = async (
 };
 
 export const resendOtp = async (
-  { emailOtp, phoneOtp, email, phoneNumber },
+  { emailOtp, phoneOtp, signupOtp, email, phoneNumber } = {},
   resp,
 ) => {
   try {
+    // Handle signupOtp - treat it as emailOtp or phoneOtp for signup flow
+    if (signupOtp && email) {
+      emailOtp = true;
+    } else if (signupOtp && phoneNumber) {
+      phoneOtp = true;
+    }
+
     if (emailOtp) {
       let user = await findUserByEmail(email);
       if (!user) {
@@ -1428,7 +1435,7 @@ export const resendOtp = async (
       return resp;
     } else {
       resp.error = true;
-      resp.error_message = 'Either emailOtp or phoneOtp must be provided';
+      resp.error_message = 'Either emailOtp, phoneOtp, or signupOtp (with email or phoneNumber) must be provided';
       return resp;
     }
   } catch (error) {

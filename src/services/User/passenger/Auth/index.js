@@ -1262,52 +1262,79 @@ export const sendPassengerPhoneOtp = async (
   resp,
 ) => {
   try {
+    console.log('📱 [SEND PHONE OTP] Request received:', {
+      verifyPhone,
+      email,
+      phoneNumber: phoneNumber ? `${phoneNumber.slice(0, 3)}***${phoneNumber.slice(-4)}` : undefined,
+    });
+
     if (verifyPhone) {
       if (!phoneNumber || !email) {
+        console.log('❌ [SEND PHONE OTP] Missing required fields - phoneNumber or email');
         resp.error = true;
         resp.error_message = 'Phone number and email is required';
         return resp;
       }
 
+      console.log('📱 [SEND PHONE OTP] Looking up user by email:', email);
       const user = await findUserByEmail(email);
       if (!user || !user.roles.includes('passenger')) {
+        console.log('❌ [SEND PHONE OTP] User not found or not a passenger');
         resp.error = true;
         resp.error_message = 'User not found';
         return resp;
-      } else if (user.phoneNumber && user.isPhoneVerified) {
+      }
+      console.log('✅ [SEND PHONE OTP] User found:', user._id, user.name);
+
+      if (user.phoneNumber && user.isPhoneVerified) {
+        console.log('❌ [SEND PHONE OTP] Phone number already verified for user');
         resp.error = true;
         resp.error_message = 'Phone Number is already verified';
         return resp;
       }
 
+      console.log('📱 [SEND PHONE OTP] Checking if phone number already exists:', phoneNumber);
       const exists = await findUserByPhone(phoneNumber);
       if (exists && exists.phoneNumber && exists.isPhoneVerified) {
+        console.log('❌ [SEND PHONE OTP] Phone number already exists and verified');
         resp.error = true;
         resp.error_message = 'Phone Number already exists';
         return resp;
       }
+      console.log('✅ [SEND PHONE OTP] Phone number is available');
 
+      console.log('📱 [SEND PHONE OTP] Requesting phone OTP to:', phoneNumber);
       const result = await requestPhoneOtp(phoneNumber, user.name, {
         email: user.email,
         phoneNumber,
       });
       if (!result.ok) {
+        console.log('❌ [SEND PHONE OTP] Failed to request OTP:', result);
         resp.error = true;
         resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
         return resp;
-      } else {
-        await sendPhoneOtpEmail(user.email, user.name, phoneNumber.slice(-4));
       }
+      console.log('✅ [SEND PHONE OTP] Phone OTP requested successfully');
+
+      console.log('📧 [SEND PHONE OTP] Sending notification email to:', user.email);
+      await sendPhoneOtpEmail(user.email, user.name, phoneNumber.slice(-4));
+      console.log('✅ [SEND PHONE OTP] Notification email sent successfully');
 
       resp.data = {
         verifyPhoneNumberOtp: true,
         message: `Phone Number verification OTP has been sent to ${phoneNumber}`,
         phoneNumber: phoneNumber,
       };
+      console.log('✅ [SEND PHONE OTP] Response sent successfully');
+      return resp;
+    } else {
+      console.log('❌ [SEND PHONE OTP] verifyPhone flag not set');
+      resp.error = true;
+      resp.error_message = 'verifyPhone flag is required';
       return resp;
     }
   } catch (error) {
-    console.error(`API ERROR: ${error}`);
+    console.error(`❌ [SEND PHONE OTP] API ERROR:`, error);
     resp.error = true;
     resp.error_message = error.message || 'Something went wrong';
     return resp;
@@ -1573,10 +1600,32 @@ export const resetUserPassword = async (
 };
 
 export const resendOtp = async (
-  { emailOtp, phoneOtp, email, phoneNumber },
+  { emailOtp, phoneOtp, signupOtp, email, phoneNumber } = {},
   resp,
 ) => {
   try {
+    console.log('🔄 [RESEND OTP] Request received:', {
+      emailOtp,
+      phoneOtp,
+      signupOtp,
+      email,
+      phoneNumber: phoneNumber ? `${phoneNumber.slice(0, 3)}***${phoneNumber.slice(-4)}` : undefined,
+    });
+
+    if (!resp) {
+      console.error('❌ [RESEND OTP] resp parameter is undefined');
+      return { error: true, error_message: 'Internal server error', auth: false, data: {} };
+    }
+
+    // Handle signupOtp - treat it as emailOtp or phoneOtp for signup flow
+    if (signupOtp && email) {
+      console.log('📧 [RESEND OTP] signupOtp detected with email:', email);
+      emailOtp = true;
+    } else if (signupOtp && phoneNumber) {
+      console.log('📱 [RESEND OTP] signupOtp detected with phoneNumber:', phoneNumber);
+      phoneOtp = true;
+    }
+
     if (emailOtp) {
       // 1) Try existing user (login / post-signup flows)
       let user = await findUserByEmail(email);
@@ -1650,37 +1699,89 @@ export const resendOtp = async (
       };
       return resp;
     } else if (phoneOtp) {
+      console.log('📱 [RESEND OTP] Processing phoneOtp resend for:', phoneNumber);
+      // 1) Try existing user (login / post-signup flows)
       let user = await findUserByPhone(phoneNumber);
-      if (!user) {
-        resp.error = true;
-        resp.error_message = `User not found`;
-        return resp;
-      } else if (!user.roles.includes('passenger')) {
-        resp.error = true;
-        resp.error_message = 'No passenger found with this phone number';
-        return resp;
-      } else if (!user.isPhoneVerified) {
-        resp.error = true;
-        resp.error_message = 'Phone number is not verified';
+      console.log('📱 [RESEND OTP] User lookup result:', user ? `Found user ${user._id}` : 'User not found');
+
+      if (user) {
+        console.log('📱 [RESEND OTP] User exists, checking role and verification status');
+        if (!user.roles.includes('passenger')) {
+          console.log('❌ [RESEND OTP] User is not a passenger');
+          resp.error = true;
+          resp.error_message = 'No passenger found with this phone number';
+          return resp;
+        } else if (!user.isPhoneVerified) {
+          console.log('❌ [RESEND OTP] User phone number is not verified');
+          resp.error = true;
+          resp.error_message = 'Phone number is not verified';
+          return resp;
+        }
+
+        console.log('📱 [RESEND OTP] Resending OTP to existing user');
+        const result = await resendPhoneOtp(user.phoneNumber, user.name);
+        if (!result.ok) {
+          console.log('❌ [RESEND OTP] Failed to resend OTP:', result);
+          resp.error = true;
+          resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
+          return resp;
+        }
+
+        console.log('✅ [RESEND OTP] OTP resent successfully to existing user');
+        resp.data = {
+          phoneOtp: true,
+          message: `OTP has been sent to ${user.phoneNumber}`,
+          phoneNumber: user.phoneNumber,
+        };
         return resp;
       }
 
-      const result = await resendPhoneOtp(user.phoneNumber, user.name);
+      // 2) If user not found, check pending signup context in Redis (phone signup OTP resend)
+      console.log('📱 [RESEND OTP] User not found, checking Redis for pending signup');
+      const pendingKey = phonePendingKey(phoneNumber);
+      console.log('📱 [RESEND OTP] Redis key:', pendingKey);
+      const pendingRaw = await redisConfig.get(pendingKey);
+      
+      if (!pendingRaw) {
+        console.log('❌ [RESEND OTP] No pending signup found in Redis');
+        resp.error = true;
+        resp.error_message =
+          'User not found and no pending signup exists for this phone number';
+        return resp;
+      }
+
+      console.log('✅ [RESEND OTP] Pending signup found in Redis');
+      const pending = JSON.parse(pendingRaw);
+      console.log('📱 [RESEND OTP] Pending data:', JSON.stringify(pending, null, 2));
+      const username = pending.name || 'User';
+
+      console.log('📱 [RESEND OTP] Requesting new OTP for signup');
+      const result = await requestPhoneOtp(
+        phoneNumber,
+        username,
+        pending,
+        'signup',
+        'passenger',
+      );
       if (!result.ok) {
+        console.log('❌ [RESEND OTP] Failed to request OTP:', result);
         resp.error = true;
-        resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
+        resp.error_message = `Failed to send OTP. Please wait ${
+          result.waitSeconds || 60
+        }s`;
         return resp;
       }
 
+      console.log('✅ [RESEND OTP] Signup OTP resent successfully to:', phoneNumber);
       resp.data = {
         phoneOtp: true,
-        message: `OTP has been sent to ${user.phoneNumber}`,
-        phoneNumber: user.phoneNumber,
+        message: `Signup OTP has been resent to ${phoneNumber}`,
+        phoneNumber,
       };
       return resp;
     } else {
       resp.error = true;
-      resp.error_message = 'Either emailOtp or phoneOtp must be provided';
+      resp.error_message = 'Either emailOtp, phoneOtp, or signupOtp (with email or phoneNumber) must be provided';
       return resp;
     }
   } catch (error) {
