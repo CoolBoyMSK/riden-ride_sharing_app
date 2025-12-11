@@ -3692,8 +3692,8 @@ export const initSocket = (server) => {
               console.log(`\n🅿️ PROCESSING: Adding driver to parking queue...`);
               
               let parkingQueue = null;
+              let queue = null;
               try {
-                let queue;
                 parkingQueue = await findDriverParkingQueue(
                   isParkingLot._id,
                 );
@@ -3709,6 +3709,7 @@ export const initSocket = (server) => {
                 console.error(`❌ Error adding driver to parking queue:`, error);
                 console.log(`   Driver location will still be updated, but queue addition failed`);
                 parkingQueue = null; // Ensure it's null on error
+                queue = null; // Ensure it's null on error
               }
 
               await updateDriverByUserId(userId, { isRestricted: false });
@@ -3736,10 +3737,18 @@ export const initSocket = (server) => {
                 socket.emit('ride:driver_update_location', {
                   success: true,
                   objectType,
-                  data: queue,
+                  data: queue || {
+                    parkingLotId: isParkingLot._id,
+                    parkingLotName: isParkingLot.name,
+                    inQueue: queue !== null,
+                    message: queue 
+                      ? 'You are in parking lot queue and can receive rides'
+                      : 'You are in parking lot but queue is not available',
+                  },
                   code: 'PARKING_LOT',
-                  message:
-                    'You are within the premises of airport parking lot, You can pick rides now',
+                  message: queue
+                    ? 'You are within the premises of airport parking lot, You can pick rides now'
+                    : 'You are in parking lot but queue is not available. Please contact support.',
                 });
               }
             } else {
