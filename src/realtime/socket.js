@@ -67,6 +67,8 @@ import {
   processDriverPayoutAfterCapture,
   transferTipToDriverExternalAccount,
   captureFullPaymentOnCancellation,
+  getAllExternalAccounts,
+  setDefaultExternalAccount,
 } from '../dal/stripe.js';
 import { createCallLog, findCallById, updateCallLogById } from '../dal/call.js';
 import { findDrivingHours } from '../dal/stats.js';
@@ -557,13 +559,102 @@ export const initSocket = (server) => {
             !driver.defaultAccountId ||
             driver.defaultAccountId.trim() === ''
           ) {
-            return socket.emit('error', {
-              success: false,
-              objectType,
-              code: 'FORBIDDEN',
-              message: 'Default payout method not found',
-              isPayment: false,
-            });
+            // Auto-set default account if payout methods exist but no default is set
+            console.log('\n' + '='.repeat(80));
+            console.log('🔧 DRIVER UPDATE STATUS - AUTO SET DEFAULT ACCOUNT');
+            console.log('='.repeat(80));
+            console.log(`👤 Driver ID: ${driver._id}`);
+            console.log(`👤 Driver User ID: ${userId}`);
+            console.log(`📋 Payout Methods: ${driver.payoutMethodIds?.length || 0}`);
+            console.log(`⚠️  Default Account ID: ${driver.defaultAccountId || 'NOT SET'}`);
+            console.log(`💳 Stripe Account ID: ${driver.stripeAccountId || 'NOT SET'}`);
+
+            try {
+              // Get all external accounts from Stripe
+              const externalAccountsResult = await getAllExternalAccounts(
+                driver.stripeAccountId,
+              );
+
+              if (
+                externalAccountsResult.success &&
+                externalAccountsResult.accounts &&
+                externalAccountsResult.accounts.length > 0
+              ) {
+                // Find the first account that's in payoutMethodIds or the first account
+                const firstAccount =
+                  externalAccountsResult.accounts.find(
+                    (acc) =>
+                      driver.payoutMethodIds?.includes(acc.id) ||
+                      acc.default_for_currency === true,
+                  ) || externalAccountsResult.accounts[0];
+
+                if (firstAccount) {
+                  console.log(`\n🔄 Setting default account: ${firstAccount.id}`);
+                  
+                  // Set as default in Stripe
+                  const setDefaultResult = await setDefaultExternalAccount(
+                    driver.stripeAccountId,
+                    firstAccount.id,
+                  );
+
+                  if (setDefaultResult.success) {
+                    // Update driver's defaultAccountId in database
+                    await updateDriverByUserId(userId, {
+                      defaultAccountId: firstAccount.id,
+                    });
+
+                    console.log(`✅ Default account set successfully: ${firstAccount.id}`);
+                    console.log('='.repeat(80) + '\n');
+
+                    // Refresh driver data after update
+                    const updatedDriverData = await findDriverByUserId(userId);
+                    if (updatedDriverData) {
+                      driver.defaultAccountId = firstAccount.id;
+                    }
+                  } else {
+                    console.log(`❌ Failed to set default account: ${setDefaultResult.error}`);
+                    console.log('='.repeat(80) + '\n');
+                    return socket.emit('error', {
+                      success: false,
+                      objectType,
+                      code: 'FORBIDDEN',
+                      message: 'Failed to set default payout method',
+                      isPayment: false,
+                    });
+                  }
+                } else {
+                  console.log(`❌ No valid account found to set as default`);
+                  console.log('='.repeat(80) + '\n');
+                  return socket.emit('error', {
+                    success: false,
+                    objectType,
+                    code: 'FORBIDDEN',
+                    message: 'Default payout method not found',
+                    isPayment: false,
+                  });
+                }
+              } else {
+                console.log(`❌ No external accounts found in Stripe`);
+                console.log('='.repeat(80) + '\n');
+                return socket.emit('error', {
+                  success: false,
+                  objectType,
+                  code: 'FORBIDDEN',
+                  message: 'Default payout method not found',
+                  isPayment: false,
+                });
+              }
+            } catch (error) {
+              console.error(`❌ Error auto-setting default account:`, error);
+              console.log('='.repeat(80) + '\n');
+              return socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'FORBIDDEN',
+                message: 'Failed to set default payout method',
+                isPayment: false,
+              });
+            }
           }
 
           const vehicle = driver.vehicle;
@@ -3291,26 +3382,28 @@ export const initSocket = (server) => {
             findUserById(ride.passengerId?.userId),
           ]);
 
-          const notifyDriver = await notifyUser({
-            userId: newDriver.userId?._id,
-            title: 'Passenger Rated',
-            message: `You successfully rated the ride with ${newDriver.userId?.name}.`,
-            module: 'ride',
-            metadata: updatedRide,
-            actionLink: 'ride:driver_rate_passenger',
-            storeInDB: false,
-          });
+          // Get driver's first name only
+          const getFirstName = (fullName) => {
+            if (!fullName) return 'Driver';
+            const nameParts = fullName.trim().split(/\s+/);
+            return nameParts[0] || 'Driver';
+          };
+
+          const driverFirstName = getFirstName(newDriver.userId?.name);
+
+          // Don't send notification to driver when they rate passenger
+          // Only notify passenger
           const notifyPassenger = await notifyUser({
             userId: newPassenger.userId?._id,
             title: 'Rating Received',
-            message: `You received a rating from ${newDriver.userId?.name}.`,
+            message: `You received a rating from ${driverFirstName}.`,
             module: 'ride',
             metadata: updatedRide,
             actionLink: 'ride:driver_rate_passenger',
             storeInDB: false,
           });
-          if (!notifyDriver || !notifyPassenger) {
-            console.log('Failed to send notification');
+          if (!notifyPassenger) {
+            console.log('Failed to send notification to passenger');
           }
           // Notification Logic End
 
@@ -3645,6 +3738,7 @@ export const initSocket = (server) => {
               // Driver is outside airport area
               const currentLocation = await getDriverLocation(driver._id);
               if (
+                currentLocation &&
                 currentLocation.parkingQueueId &&
                 currentLocation.parkingQueueId !== null
               ) {

@@ -568,6 +568,7 @@ export const updateLocation = async (user, { coordinates, heading, speed, accura
     else {
       const currentLocation = await getDriverLocation(driver._id);
       if (
+        currentLocation &&
         currentLocation.parkingQueueId &&
         currentLocation.parkingQueueId !== null
       ) {
