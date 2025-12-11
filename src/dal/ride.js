@@ -816,6 +816,51 @@ export const filterRidesForDriver = (
   });
 };
 
+// Simple polygon center calculation (fallback)
+const calculatePolygonCenter = (coordinates) => {
+  try {
+    const polygonRing = coordinates[0]; // Outer ring
+    if (!polygonRing || polygonRing.length === 0) {
+      throw new Error('Invalid polygon - no points');
+    }
+
+    let sumLng = 0;
+    let sumLat = 0;
+    let count = 0;
+
+    // Calculate simple average of all points
+    for (const coord of polygonRing) {
+      if (Array.isArray(coord) && coord.length >= 2) {
+        const [lng, lat] = coord;
+        if (typeof lng === 'number' && typeof lat === 'number') {
+          sumLng += lng;
+          sumLat += lat;
+          count++;
+        }
+      }
+    }
+
+    if (count === 0) {
+      throw new Error('No valid coordinates found');
+    }
+
+    return {
+      latitude: sumLat / count,
+      longitude: sumLng / count,
+    };
+  } catch (error) {
+    console.error('Error calculating polygon center:', error);
+    // Last resort: return first valid coordinate
+    if (coordinates && coordinates[0] && coordinates[0][0]) {
+      return {
+        latitude: coordinates[0][0][1],
+        longitude: coordinates[0][0][0],
+      };
+    }
+    throw error;
+  }
+};
+
 const calculatePolygonCentroid = (coordinates) => {
   try {
     const polygonRing = coordinates[0]; // Outer ring
