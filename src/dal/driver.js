@@ -2357,6 +2357,7 @@ export const findDestinationRideDrivers = async (
   try {
 
     // Find drivers with active destination rides
+    // Exclude drivers in restricted areas - they should not receive rides
     const drivers = await DriverModel.find({
       'destinationRide.isActive': true,
       'destinationRide.endLocation.coordinates': { $exists: true, $ne: null },
@@ -2366,6 +2367,7 @@ export const findDestinationRideDrivers = async (
       isActive: true,
       backgroundCheckStatus: 'approved',
       status: 'online',
+      isRestricted: false, // Exclude drivers in restricted areas
       ...(excludeDriverIds.length > 0 && {
         userId: { $nin: excludeDriverIds },
       }),
@@ -2381,6 +2383,11 @@ export const findDestinationRideDrivers = async (
     const matchingDrivers = [];
     for (const driver of drivers) {
       if (!driver.userId) continue;
+
+      // Skip drivers in restricted areas - they should not receive rides
+      if (driver.isRestricted) {
+        continue;
+      }
 
       // Check if driver location exists and is available
       const driverLocation = await DriverLocation.findOne({
@@ -2457,6 +2464,7 @@ export const findNearbyDriverUserIds = async (
       // Stage 4: Unwind driver array
       { $unwind: '$driver' },
       // Stage 5: Match driver criteria
+      // Exclude drivers in restricted areas - they should not receive rides
       {
         $match: {
           'driver.vehicle.type': carType,
@@ -2465,6 +2473,7 @@ export const findNearbyDriverUserIds = async (
           'driver.isActive': true,
           'driver.backgroundCheckStatus': 'approved',
           'driver.status': 'online',
+          'driver.isRestricted': false, // Exclude drivers in restricted areas
           ...(excludeDriverIds.length > 0 && {
             'driver.userId': { $nin: excludeDriverIds },
           }),

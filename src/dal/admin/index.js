@@ -729,6 +729,7 @@ export const findNearestDriversForScheduledRide = async ({
     // Stage 3: Unwind driver array
     { $unwind: '$driver' },
     // Stage 4: Match driver criteria
+    // Exclude drivers in restricted areas - they should not receive rides
     {
       $match: {
         'driver.vehicle.type': ride.carType,
@@ -737,6 +738,7 @@ export const findNearestDriversForScheduledRide = async ({
         'driver.isActive': true,
         'driver.backgroundCheckStatus': 'approved',
         'driver.status': 'online',
+        'driver.isRestricted': false, // Exclude drivers in restricted areas
       },
     },
     // Stage 5: Lookup user details
@@ -889,6 +891,8 @@ export const assignDriverToScheduledRide = async ({ rideId, driverId }) => {
     throw new Error('Driver is suspended and cannot be assigned to rides');
   } else if (!driver.isActive) {
     throw new Error('Driver is not active and cannot be assigned to rides');
+  } else if (driver.isRestricted) {
+    throw new Error('Driver is in restricted area and cannot be assigned to rides');
   } else if (driver.backgroundCheckStatus !== 'approved') {
     throw new Error(
       `Driver background check status is ${driver.backgroundCheckStatus}. Only approved drivers can be assigned`,
