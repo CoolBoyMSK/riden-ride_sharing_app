@@ -396,8 +396,34 @@ export const approveRequestedDriver = async ({ id }, resp) => {
       return resp;
     }
 
-    const isPaymentMethodAdded =
+    // Check if payment methods exist in database
+    let isPaymentMethodAdded =
       driver.payoutMethodIds && driver.payoutMethodIds.length > 0;
+
+    // If not in database, check Stripe directly (for existing payment methods)
+    if (!isPaymentMethodAdded && driver.stripeAccountId) {
+      try {
+        const stripePaymentMethods = await getAllExternalAccounts(
+          driver.stripeAccountId,
+        );
+        isPaymentMethodAdded =
+          stripePaymentMethods.success &&
+          stripePaymentMethods.accounts &&
+          stripePaymentMethods.accounts.length > 0;
+
+        // If found in Stripe, sync to database
+        if (isPaymentMethodAdded) {
+          const accountIds = stripePaymentMethods.accounts.map((acc) => acc.id);
+          await updateDriverById(
+            id,
+            { $set: { payoutMethodIds: accountIds } },
+            { session },
+          );
+        }
+      } catch (error) {
+        console.error('Error checking Stripe payment methods:', error);
+      }
+    }
 
     if (!isPaymentMethodAdded) {
       await session.abortTransaction();

@@ -18,6 +18,7 @@ import { notifyUser } from '../dal/notification.js';
 import { sendDriverPaymentProcessedEmail } from '../templates/emails/user/index.js';
 import { createAdminNotification } from './notification.js';
 import { CARD_TYPES, PAYMENT_METHODS } from '../enums/paymentEnums.js';
+import { updateDriverById } from './driver.js';
 
 const stripe = new Stripe(env.STRIPE_SECRET_KEY);
 
@@ -3254,6 +3255,14 @@ export const addDriverExternalAccount = async (driver, bankAccountData) => {
         bankAccount.id,
         { default_for_currency: true },
       );
+    }
+
+    // Update driver's payoutMethodIds array in database
+    const currentPayoutMethodIds = driver.payoutMethodIds || [];
+    if (!currentPayoutMethodIds.includes(bankAccount.id)) {
+      await updateDriverById(driver._id, {
+        $addToSet: { payoutMethodIds: bankAccount.id },
+      });
     }
 
     return {
