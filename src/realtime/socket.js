@@ -3579,8 +3579,10 @@ export const initSocket = (server) => {
             const isRestricted = await isRideInRestrictedArea(
               location.coordinates,
             ); // returns boolean
+            // Check if driver is in parking lot (within boundaries or within 100m radius)
             const isParkingLot = await isDriverInParkingLot(
               location.coordinates,
+              100, // 100 meters radius - if driver is within 100m of parking lot, add to queue
             );
 
             // ========== CONSOLE LOGS FOR AIRPORT TRACKING ==========
@@ -3617,6 +3619,12 @@ export const initSocket = (server) => {
               console.log(`\n🅿️ EVENT: DRIVER ENTERED PARKING LOT`);
               console.log(`   Entry Time: ${new Date().toISOString()}`);
               console.log(`   Entry Location: [${location.coordinates[0]}, ${location.coordinates[1]}]`);
+              if (isParkingLot.withinRadius) {
+                console.log(`   ⚠️ Within 100m radius (not inside boundaries)`);
+                console.log(`   Distance: ${isParkingLot.distance?.toFixed(2) || 'N/A'} meters`);
+              } else {
+                console.log(`   ✅ Inside parking lot boundaries`);
+              }
             } else if (wasInParkingLot && !isParkingLot) {
               console.log(`\n🚗 EVENT: DRIVER EXITED PARKING LOT`);
               console.log(`   Exit Time: ${new Date().toISOString()}`);
@@ -3628,8 +3636,14 @@ export const initSocket = (server) => {
               console.log(`\n⚠️ STATUS: Driver is in RESTRICTED AREA (Airport but not parking)`);
               console.log(`   Action Required: Navigate to parking lot`);
             } else if (isParkingLot) {
-              console.log(`\n✅ STATUS: Driver is in PARKING LOT`);
-              console.log(`   Action: Can receive airport rides`);
+              if (isParkingLot.withinRadius) {
+                console.log(`\n✅ STATUS: Driver is within 100m of PARKING LOT`);
+                console.log(`   Distance: ${isParkingLot.distance?.toFixed(2) || 'N/A'} meters`);
+                console.log(`   Action: Will be added to queue automatically`);
+              } else {
+                console.log(`\n✅ STATUS: Driver is in PARKING LOT`);
+                console.log(`   Action: Can receive airport rides`);
+              }
             } else {
               console.log(`\n🌍 STATUS: Driver is OUTSIDE airport area`);
               console.log(`   Action: Normal ride operations`);
@@ -3734,21 +3748,67 @@ export const initSocket = (server) => {
               );
 
               if (driverLocation) {
+                // If queue not found, prepare parking lot navigation info
+                let parkingLotData = queue;
+                if (!queue && isParkingLot) {
+                  // Calculate parking lot center for navigation
+                  const calculatePolygonCenter = (coordinates) => {
+                    try {
+                      const polygonRing = coordinates[0];
+                      if (!polygonRing || polygonRing.length === 0) {
+                        return null;
+                      }
+                      let sumLng = 0, sumLat = 0, count = 0;
+                      for (const coord of polygonRing) {
+                        if (Array.isArray(coord) && coord.length >= 2) {
+                          const [lng, lat] = coord;
+                          if (typeof lng === 'number' && typeof lat === 'number') {
+                            sumLng += lng;
+                            sumLat += lat;
+                            count++;
+                          }
+                        }
+                      }
+                      if (count === 0) return null;
+                      return { latitude: sumLat / count, longitude: sumLng / count };
+                    } catch (error) {
+                      return null;
+                    }
+                  };
+
+                  const parkingLotCenter = isParkingLot.boundaries?.coordinates
+                    ? calculatePolygonCenter(isParkingLot.boundaries.coordinates)
+                    : null;
+
+                  const driverLat = location.coordinates[1];
+                  const driverLng = location.coordinates[0];
+
+                  parkingLotData = {
+                    parkingLotId: isParkingLot._id,
+                    parkingLotName: isParkingLot.name,
+                    inQueue: false,
+                    coordinates: parkingLotCenter || {
+                      latitude: driverLat,
+                      longitude: driverLng,
+                    },
+                    googleMapsUrl: parkingLotCenter
+                      ? `https://www.google.com/maps/dir/?api=1&origin=${driverLat},${driverLng}&destination=${parkingLotCenter.latitude},${parkingLotCenter.longitude}&travelmode=driving`
+                      : null,
+                    appleMapsUrl: parkingLotCenter
+                      ? `http://maps.apple.com/?saddr=${driverLat},${driverLng}&daddr=${parkingLotCenter.latitude},${parkingLotCenter.longitude}`
+                      : null,
+                    message: 'Parking queue is not available. You are in the parking lot area.',
+                  };
+                }
+
                 socket.emit('ride:driver_update_location', {
                   success: true,
                   objectType,
-                  data: queue || {
-                    parkingLotId: isParkingLot._id,
-                    parkingLotName: isParkingLot.name,
-                    inQueue: queue !== null,
-                    message: queue 
-                      ? 'You are in parking lot queue and can receive rides'
-                      : 'You are in parking lot but queue is not available',
-                  },
+                  data: parkingLotData,
                   code: 'PARKING_LOT',
                   message: queue
                     ? 'You are within the premises of airport parking lot, You can pick rides now'
-                    : 'You are in parking lot but queue is not available. Please contact support.',
+                    : 'You are in parking lot area. Navigate to the parking lot location to receive rides.',
                 });
               }
             } else {

@@ -706,7 +706,7 @@ export const haversineDistance = (coord1, coord2) => {
   return R * c;
 };
 
-export const isDriverInParkingLot = async (coords) => {
+export const isDriverInParkingLot = async (coords, radiusMeters = 0) => {
   if (
     !Array.isArray(coords) ||
     coords.length !== 2 ||
@@ -716,6 +716,7 @@ export const isDriverInParkingLot = async (coords) => {
     throw new Error(`Invalid coordinates provided: ${JSON.stringify(coords)}`);
   }
 
+  // First check if driver is within parking lot boundaries
   const zone = await Zone.findOne({
     boundaries: {
       $geoIntersects: {
@@ -731,9 +732,53 @@ export const isDriverInParkingLot = async (coords) => {
 
   if (zone) {
     return zone;
-  } else {
-    return false;
   }
+
+  // If not inside boundaries and radius is specified, check if within radius
+  if (radiusMeters > 0) {
+    const radiusKm = radiusMeters / 1000; // Convert meters to km
+    
+    // Find nearest parking lot within radius
+    const nearestParkingLot = await Zone.aggregate([
+      {
+        $geoNear: {
+          near: {
+            type: 'Point',
+            coordinates: coords,
+          },
+          distanceField: 'distance',
+          maxDistance: radiusMeters, // in meters
+          spherical: true,
+          key: 'boundaries',
+        },
+      },
+      {
+        $match: {
+          isActive: true,
+          type: 'airport-parking',
+        },
+      },
+      {
+        $limit: 1,
+      },
+    ]);
+
+    if (nearestParkingLot && nearestParkingLot.length > 0) {
+      const parkingLot = nearestParkingLot[0];
+      // Convert to same format as geoIntersects result
+      return {
+        _id: parkingLot._id,
+        name: parkingLot.name,
+        boundaries: parkingLot.boundaries,
+        type: parkingLot.type,
+        isActive: parkingLot.isActive,
+        distance: parkingLot.distance, // Distance in meters
+        withinRadius: true, // Flag to indicate it's within radius, not inside boundaries
+      };
+    }
+  }
+
+  return false;
 };
 
 export const isRideInRestrictedArea = async (coords) => {

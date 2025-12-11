@@ -318,7 +318,8 @@ export const updateLocation = async (user, { coordinates, heading, speed, accura
     }
     
     try {
-      isParkingLot = await isDriverInParkingLot(coordinates);
+      // Check if driver is in parking lot (within boundaries or within 100m radius)
+      isParkingLot = await isDriverInParkingLot(coordinates, 100); // 100 meters radius
       console.log(`🔍 Parking Lot Detection Result: isParkingLot = ${isParkingLot ? 'Found' : 'Not Found'}`);
       if (isParkingLot) {
         console.log(`   Parking Lot ID: ${isParkingLot._id}`);
