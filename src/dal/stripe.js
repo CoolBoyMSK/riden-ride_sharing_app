@@ -3440,21 +3440,9 @@ export const setDefaultExternalAccount = async (
       throw new Error('External account not found');
     }
 
-    // Find current default account
-    const currentDefault = allAccounts.data.find(
-      (account) => account.default_for_currency === true,
-    );
-
-    // If there's a different default account, unset it first
-    if (currentDefault && currentDefault.id !== externalAccountId) {
-      await stripe.accounts.updateExternalAccount(
-        stripeAccountId,
-        currentDefault.id,
-        { default_for_currency: false },
-      );
-    }
-
     // Set the new account as default
+    // Note: Stripe automatically unsets the previous default account when setting a new one
+    // We don't need to manually set the old account to false
     const updatedAccount = await stripe.accounts.updateExternalAccount(
       stripeAccountId,
       externalAccountId,
