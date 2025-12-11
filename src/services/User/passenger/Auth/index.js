@@ -1617,18 +1617,100 @@ export const resendOtp = async (
       return { error: true, error_message: 'Internal server error', auth: false, data: {} };
     }
 
-    // Handle signupOtp - treat it as emailOtp or phoneOtp for signup flow
+    // Handle signupOtp - directly check Redis for pending signup (user doesn't exist yet)
     if (signupOtp && email) {
       console.log('📧 [RESEND OTP] signupOtp detected with email:', email);
-      emailOtp = true;
+      console.log('📧 [RESEND OTP] Checking Redis for pending signup data');
+      
+      // For signup flow, directly check Redis (user doesn't exist in DB yet)
+      const pendingRaw = await redisConfig.get(emailPendingKey(email));
+      if (!pendingRaw) {
+        console.log('❌ [RESEND OTP] No pending signup found in Redis for email:', email);
+        resp.error = true;
+        resp.error_message =
+          'No pending signup exists for this email. Please start the signup process again.';
+        return resp;
+      }
+
+      console.log('✅ [RESEND OTP] Pending signup data found in Redis');
+      const pending = JSON.parse(pendingRaw);
+      console.log('📧 [RESEND OTP] Pending data:', JSON.stringify(pending, null, 2));
+      const username = pending.name || 'User';
+
+      console.log('📧 [RESEND OTP] Requesting new OTP for signup');
+      const result = await requestEmailOtp(
+        email,
+        username,
+        pending,
+        'signup',
+        'passenger',
+      );
+      if (!result.ok) {
+        console.log('❌ [RESEND OTP] Failed to request OTP:', result);
+        resp.error = true;
+        resp.error_message = `Failed to send OTP. Please wait ${
+          result.waitSeconds || 60
+        }s`;
+        return resp;
+      }
+
+      console.log('✅ [RESEND OTP] Signup OTP resent successfully to:', email);
+      resp.data = {
+        signupOtp: true,
+        message: `Signup OTP has been resent to ${email}`,
+        email,
+      };
+      return resp;
     } else if (signupOtp && phoneNumber) {
       console.log('📱 [RESEND OTP] signupOtp detected with phoneNumber:', phoneNumber);
-      phoneOtp = true;
+      console.log('📱 [RESEND OTP] Checking Redis for pending signup data');
+      
+      // For signup flow, directly check Redis (user doesn't exist in DB yet)
+      const pendingRaw = await redisConfig.get(phonePendingKey(phoneNumber));
+      if (!pendingRaw) {
+        console.log('❌ [RESEND OTP] No pending signup found in Redis for phone:', phoneNumber);
+        resp.error = true;
+        resp.error_message =
+          'No pending signup exists for this phone number. Please start the signup process again.';
+        return resp;
+      }
+
+      console.log('✅ [RESEND OTP] Pending signup data found in Redis');
+      const pending = JSON.parse(pendingRaw);
+      console.log('📱 [RESEND OTP] Pending data:', JSON.stringify(pending, null, 2));
+      const username = pending.name || 'User';
+
+      console.log('📱 [RESEND OTP] Requesting new OTP for signup');
+      const result = await requestPhoneOtp(
+        phoneNumber,
+        username,
+        pending,
+        'signup',
+        'passenger',
+      );
+      if (!result.ok) {
+        console.log('❌ [RESEND OTP] Failed to request OTP:', result);
+        resp.error = true;
+        resp.error_message = `Failed to send OTP. Please wait ${
+          result.waitSeconds || 60
+        }s`;
+        return resp;
+      }
+
+      console.log('✅ [RESEND OTP] Signup OTP resent successfully to:', phoneNumber);
+      resp.data = {
+        signupOtp: true,
+        message: `Signup OTP has been resent to ${phoneNumber}`,
+        phoneNumber,
+      };
+      return resp;
     }
 
     if (emailOtp) {
       // 1) Try existing user (login / post-signup flows)
+      console.log('📧 [RESEND OTP] Processing emailOtp (verification flow)');
       let user = await findUserByEmail(email);
+      console.log('📧 [RESEND OTP] User lookup result:', user ? `Found user ${user._id}` : 'User not found');
 
       if (user) {
         if (!user.roles.includes('passenger')) {
@@ -1665,14 +1747,17 @@ export const resendOtp = async (
       }
 
       // 2) If user not found, check pending signup context in Redis (email signup OTP resend)
+      console.log('📧 [RESEND OTP] User not found, checking Redis for pending data');
       const pendingRaw = await redisConfig.get(emailPendingKey(email));
       if (!pendingRaw) {
+        console.log('❌ [RESEND OTP] No pending data found in Redis');
         resp.error = true;
         resp.error_message =
           'User not found and no pending signup exists for this email';
         return resp;
       }
 
+      console.log('✅ [RESEND OTP] Pending data found in Redis');
       const pending = JSON.parse(pendingRaw);
       const username = pending.name || 'User';
 
@@ -1695,7 +1780,6 @@ export const resendOtp = async (
         emailOtp: true,
         message: `Signup OTP has been resent to ${email}`,
         email,
-        otp: result.otp,
       };
       return resp;
     } else if (phoneOtp) {

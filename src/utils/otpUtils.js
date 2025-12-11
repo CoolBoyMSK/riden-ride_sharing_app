@@ -85,11 +85,22 @@ export const requestEmailOtp = async (
     await setWithTTL(emailCooldownKey(email), env.OTP_COOLDOWN_SECONDS, '1');
 
     if (Object.keys(context || {}).length > 0) {
+      const pendingKey = emailPendingKey(email);
+      const contextString = JSON.stringify(context);
+      console.log('💾 [REQUEST EMAIL OTP] Storing context in Redis:', {
+        key: pendingKey,
+        contextKeys: Object.keys(context),
+        contextSize: contextString.length,
+        ttl: env.OTP_TTL_SECONDS,
+      });
       await setWithTTL(
-        emailPendingKey(email),
+        pendingKey,
         env.OTP_TTL_SECONDS,
-        JSON.stringify(context),
+        contextString,
       );
+      console.log('✅ [REQUEST EMAIL OTP] Context stored successfully in Redis');
+    } else {
+      console.warn('⚠️ [REQUEST EMAIL OTP] No context provided, not storing in Redis');
     }
 
     await emailQueue.add('sendEmailOtp', { email, otp, username, type, role });
@@ -138,8 +149,15 @@ export const verifyEmailOtp = async (email, otpRaw, expectedPurpose = null) => {
   }
 
   // 5. Read pending payload
-  const pending = await redisConfig.get(emailPendingKey(email));
+  const pendingKey = emailPendingKey(email);
+  console.log('🔍 [VERIFY EMAIL OTP] Reading pending data from Redis:', { key: pendingKey });
+  const pending = await redisConfig.get(pendingKey);
   let pendingData = pending ? JSON.parse(pending) : null;
+  console.log('🔍 [VERIFY EMAIL OTP] Pending data retrieved:', {
+    found: !!pending,
+    hasData: !!pendingData,
+    dataKeys: pendingData ? Object.keys(pendingData) : [],
+  });
 
   // 6. Purpose validation — only when needed
   if (expectedPurpose) {

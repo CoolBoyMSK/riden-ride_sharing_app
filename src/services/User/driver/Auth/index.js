@@ -80,19 +80,56 @@ export const signUpDriverWithEmail = async (
 
     let user = await findUserByEmail(email);
     if (user) {
-      resp.error = true;
-      resp.error_message = 'Email already in use';
-      return resp;
+      // If user exists but email not verified, allow resending OTP
+      if (user.isEmailVerified) {
+        resp.error = true;
+        resp.error_message = 'Email already in use';
+        return resp;
+      }
+      // User exists but not verified - update and resend OTP
+      console.log('📝 [DRIVER SIGNUP] User exists but not verified, updating...');
+      user = await updateUserById(user._id, {
+        name,
+        email,
+        gender,
+        password: hashed,
+        roles: ['driver'],
+        isEmailVerified: false,
+      });
+    } else {
+      // Create new user in DB (email not verified yet)
+      console.log('💾 [DRIVER SIGNUP] Creating user in database (email not verified)...');
+      user = await createUser({
+        name,
+        email,
+        gender,
+        roles: ['driver'],
+        password: hashed,
+        isEmailVerified: false,
+      });
+      
+      if (!user) {
+        console.error('❌ [DRIVER SIGNUP] Failed to create user in database');
+        resp.error = true;
+        resp.error_message = 'Failed to create user account';
+        return resp;
+      }
+      
+      console.log('✅ [DRIVER SIGNUP] User created in database:', {
+        userId: user._id,
+        email: user.email,
+        name: user.name,
+        isEmailVerified: user.isEmailVerified,
+      });
     }
 
+    // Store minimal context in Redis for OTP verification (just for reference)
     const userData = {
-      name,
-      email,
-      gender,
-      roles: ['driver'],
-      password: hashed,
+      userId: user._id.toString(),
+      email: user.email,
     };
 
+    console.log('📝 [DRIVER SIGNUP] Requesting OTP for user:', user._id);
     const result = await requestEmailOtp(
       email,
       name,
@@ -100,6 +137,8 @@ export const signUpDriverWithEmail = async (
       'signup',
       'driver',
     );
+    
+    console.log('📝 [DRIVER SIGNUP] OTP request result:', result);
     if (!result.ok) {
       resp.error = true;
       resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
@@ -514,7 +553,14 @@ export const otpVerification = async (
     let user;
     if (signupOtp) {
       if (email && otp) {
+        console.log('✅ [DRIVER OTP VERIFY] Verifying email OTP for signup:', email);
         const result = await verifyEmailOtp(email, otp);
+        console.log('✅ [DRIVER OTP VERIFY] OTP verification result:', {
+          ok: result.ok,
+          reason: result.reason,
+          hasPending: !!result.pending,
+        });
+        
         if (!result.ok) {
           resp.error = true;
           resp.error_message =
@@ -524,15 +570,42 @@ export const otpVerification = async (
           return resp;
         }
 
-        user = await createUser({
-          ...result.pending,
-          isEmailVerified: true,
-        });
+        // Find existing user (created during signup)
+        console.log('🔍 [DRIVER OTP VERIFY] Finding user in database...');
+        user = await findUserByEmail(email);
+        
         if (!user) {
+          console.error('❌ [DRIVER OTP VERIFY] User not found in database!');
           resp.error = true;
-          resp.error_message = 'Failed to register driver';
+          resp.error_message = 'User not found. Please try signing up again.';
           return resp;
         }
+
+        if (user.isEmailVerified) {
+          console.log('⚠️ [DRIVER OTP VERIFY] User email already verified');
+          resp.error = true;
+          resp.error_message = 'Email is already verified';
+          return resp;
+        }
+
+        // Update user to mark email as verified
+        console.log('💾 [DRIVER OTP VERIFY] Updating user email verification status...');
+        user = await updateUserById(user._id, {
+          isEmailVerified: true,
+        });
+        
+        if (!user) {
+          console.error('❌ [DRIVER OTP VERIFY] Failed to update user');
+          resp.error = true;
+          resp.error_message = 'Failed to verify email';
+          return resp;
+        }
+        
+        console.log('✅ [DRIVER OTP VERIFY] User email verified successfully:', {
+          userId: user._id,
+          email: user.email,
+          name: user.name,
+        });
 
         const uniqueId = generateUniqueId(user.roles[0], user._id);
         const driver = await createDriverProfile(user._id, uniqueId);
@@ -1542,11 +1615,104 @@ export const resendOtp = async (
   resp,
 ) => {
   try {
-    // Handle signupOtp - treat it as emailOtp or phoneOtp for signup flow
+    console.log('🔄 [DRIVER RESEND OTP] Request received:', {
+      emailOtp,
+      phoneOtp,
+      signupOtp,
+      email,
+      phoneNumber: phoneNumber ? `${phoneNumber.slice(0, 3)}***${phoneNumber.slice(-4)}` : undefined,
+    });
+
+    // Handle signupOtp - directly check for existing user (not verified)
     if (signupOtp && email) {
-      emailOtp = true;
+      console.log('📧 [DRIVER RESEND OTP] signupOtp detected with email:', email);
+      console.log('🔍 [DRIVER RESEND OTP] Finding user in database...');
+      
+      let user = await findUserByEmail(email);
+      if (!user) {
+        console.log('❌ [DRIVER RESEND OTP] User not found in database');
+        resp.error = true;
+        resp.error_message = 'User not found. Please start the signup process again.';
+        return resp;
+      }
+
+      if (!user.roles.includes('driver')) {
+        console.log('❌ [DRIVER RESEND OTP] User is not a driver');
+        resp.error = true;
+        resp.error_message = 'No driver found with this email';
+        return resp;
+      }
+
+      if (user.isEmailVerified) {
+        console.log('⚠️ [DRIVER RESEND OTP] User email already verified');
+        resp.error = true;
+        resp.error_message = 'Email is already verified';
+        return resp;
+      }
+
+      console.log('✅ [DRIVER RESEND OTP] User found, resending signup OTP');
+      const userData = {
+        userId: user._id.toString(),
+        email: user.email,
+      };
+      
+      const result = await requestEmailOtp(
+        email,
+        user.name,
+        userData,
+        'signup',
+        'driver',
+      );
+      if (!result.ok) {
+        console.log('❌ [DRIVER RESEND OTP] Failed to request OTP:', result);
+        resp.error = true;
+        resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
+        return resp;
+      }
+
+      console.log('✅ [DRIVER RESEND OTP] Signup OTP resent successfully');
+      resp.data = {
+        signupOtp: true,
+        message: `Signup OTP has been resent to ${email}`,
+        email,
+      };
+      return resp;
     } else if (signupOtp && phoneNumber) {
-      phoneOtp = true;
+      console.log('📱 [DRIVER RESEND OTP] signupOtp detected with phoneNumber:', phoneNumber);
+      // Similar logic for phone signup
+      let user = await findUserByPhone(phoneNumber);
+      if (!user || !user.roles.includes('driver') || user.isPhoneVerified) {
+        resp.error = true;
+        resp.error_message = user?.isPhoneVerified 
+          ? 'Phone number is already verified'
+          : 'User not found. Please start the signup process again.';
+        return resp;
+      }
+
+      const userData = {
+        userId: user._id.toString(),
+        phoneNumber: user.phoneNumber,
+      };
+      
+      const result = await requestPhoneOtp(
+        phoneNumber,
+        user.name,
+        userData,
+        'signup',
+        'driver',
+      );
+      if (!result.ok) {
+        resp.error = true;
+        resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
+        return resp;
+      }
+
+      resp.data = {
+        signupOtp: true,
+        message: `Signup OTP has been resent to ${phoneNumber}`,
+        phoneNumber,
+      };
+      return resp;
     }
 
     if (emailOtp) {
@@ -1559,60 +1725,170 @@ export const resendOtp = async (
         resp.error = true;
         resp.error_message = 'No driver found with this email';
         return resp;
-      } else if (!user.isEmailVerified) {
-        resp.error = true;
-        resp.error_message = 'Email is not verified';
+      } else if (user.isEmailVerified) {
+        // User is verified - this is for login/verification flow
+        const result = await resendEmailOtp(
+          user.email,
+          user.name,
+          {},
+          null,
+          user.roles[0],
+        );
+        if (!result.ok) {
+          resp.error = true;
+          resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
+          return resp;
+        }
+
+        resp.data = {
+          emailOtp: true,
+          message: `OTP has been sent to ${user.email}`,
+          email: user.email,
+        };
+        return resp;
+      } else {
+        // User exists but email not verified - this is signup resend flow
+        console.log('📧 [DRIVER RESEND OTP] User exists but email not verified, resending signup OTP');
+        const userData = {
+          userId: user._id.toString(),
+          email: user.email,
+        };
+        
+        const result = await requestEmailOtp(
+          email,
+          user.name,
+          userData,
+          'signup',
+          'driver',
+        );
+        if (!result.ok) {
+          resp.error = true;
+          resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
+          return resp;
+        }
+
+        resp.data = {
+          signupOtp: true,
+          message: `Signup OTP has been resent to ${email}`,
+          email,
+        };
         return resp;
       }
-
-      const result = await resendEmailOtp(
-        user.email,
-        user.name,
-        {},
-        null,
-        user.roles[0],
-      );
-      if (!result.ok) {
-        resp.error = true;
-        resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
-        return resp;
-      }
-
-      resp.data = {
-        emailOtp: true,
-        message: `OTP has been sent to ${user.email}`,
-        email: user.email,
-      };
-      return resp;
     } else if (phoneOtp) {
+      console.log('📱 [DRIVER RESEND OTP] Processing phoneOtp resend for:', phoneNumber);
       let user = await findUserByPhone(phoneNumber);
+      console.log('📱 [DRIVER RESEND OTP] User lookup by phone result:', user ? `Found user ${user._id}` : 'User not found');
+      
       if (!user) {
+        // User not found by phone - check Redis for pending phone verification OTP
+        console.log('📱 [DRIVER RESEND OTP] User not found by phone, checking Redis for pending phone verification');
+        const pendingKey = phonePendingKey(phoneNumber);
+        console.log('📱 [DRIVER RESEND OTP] Redis key:', pendingKey);
+        const pendingRaw = await redisConfig.get(pendingKey);
+        
+        if (pendingRaw) {
+          console.log('✅ [DRIVER RESEND OTP] Pending phone verification found in Redis');
+          const pending = JSON.parse(pendingRaw);
+          console.log('📱 [DRIVER RESEND OTP] Pending data:', JSON.stringify(pending, null, 2));
+          
+          // Find user by email from pending data
+          if (pending.email) {
+            user = await findUserByEmail(pending.email);
+            if (user && user.roles.includes('driver')) {
+              console.log('✅ [DRIVER RESEND OTP] Found user by email from pending data:', user._id);
+              
+              // Resend phone verification OTP
+              const result = await requestPhoneOtp(
+                phoneNumber,
+                user.name,
+                {
+                  email: user.email,
+                  phoneNumber,
+                },
+                'update',
+                'driver',
+              );
+              if (!result.ok) {
+                console.log('❌ [DRIVER RESEND OTP] Failed to request OTP:', result);
+                resp.error = true;
+                resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
+                return resp;
+              }
+
+              console.log('✅ [DRIVER RESEND OTP] Phone verification OTP resent successfully');
+              resp.data = {
+                phoneOtp: true,
+                message: `Phone verification OTP has been resent to ${phoneNumber}`,
+                phoneNumber,
+              };
+              return resp;
+            }
+          }
+        }
+        
+        console.log('❌ [DRIVER RESEND OTP] User not found and no pending phone verification in Redis');
         resp.error = true;
-        resp.error_message = `User not found`;
+        resp.error_message = `User not found. Please start the phone verification process again.`;
         return resp;
       } else if (!user.roles.includes('driver')) {
+        console.log('❌ [DRIVER RESEND OTP] User is not a driver');
         resp.error = true;
         resp.error_message = 'No driver found with this phone number';
         return resp;
       } else if (!user.isPhoneVerified) {
-        resp.error = true;
-        resp.error_message = 'Phone number is not verified';
+        // Phone not verified - this is phone verification flow, resend verification OTP
+        console.log('📱 [DRIVER RESEND OTP] User phone not verified, resending verification OTP');
+        console.log('📱 [DRIVER RESEND OTP] User email:', user.email);
+        
+        if (!user.email) {
+          resp.error = true;
+          resp.error_message = 'Email is required for phone verification';
+          return resp;
+        }
+        
+        const result = await requestPhoneOtp(
+          phoneNumber,
+          user.name,
+          {
+            email: user.email,
+            phoneNumber,
+          },
+          'update', // or 'otp' for verification
+          'driver',
+        );
+        if (!result.ok) {
+          console.log('❌ [DRIVER RESEND OTP] Failed to request OTP:', result);
+          resp.error = true;
+          resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
+          return resp;
+        }
+
+        console.log('✅ [DRIVER RESEND OTP] Phone verification OTP resent successfully');
+        resp.data = {
+          phoneOtp: true,
+          message: `Phone verification OTP has been resent to ${phoneNumber}`,
+          phoneNumber: phoneNumber,
+        };
+        return resp;
+      } else {
+        // Phone is verified - this is for login/other purposes
+        console.log('📱 [DRIVER RESEND OTP] User phone verified, resending OTP for login/verification');
+        const result = await resendPhoneOtp(user.phoneNumber, user.name);
+        if (!result.ok) {
+          console.log('❌ [DRIVER RESEND OTP] Failed to resend OTP:', result);
+          resp.error = true;
+          resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
+          return resp;
+        }
+
+        console.log('✅ [DRIVER RESEND OTP] OTP resent successfully');
+        resp.data = {
+          phoneOtp: true,
+          message: `OTP has been sent to ${user.phoneNumber}`,
+          phoneNumber: user.phoneNumber,
+        };
         return resp;
       }
-
-      const result = await resendPhoneOtp(user.phoneNumber, user.name);
-      if (!result.ok) {
-        resp.error = true;
-        resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
-        return resp;
-      }
-
-      resp.data = {
-        phoneOtp: true,
-        message: `OTP has been sent to ${user.phoneNumber}`,
-        phoneNumber: user.phoneNumber,
-      };
-      return resp;
     } else {
       resp.error = true;
       resp.error_message = 'Either emailOtp, phoneOtp, or signupOtp (with email or phoneNumber) must be provided';
