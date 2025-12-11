@@ -524,8 +524,9 @@ export const updateLocation = async (user, { coordinates, heading, speed, accura
       // Driver is not in restricted area → set isRestricted = false
       await updateDriverByUserId(user._id, { isRestricted: false });
     }
+
     // Handle parking lot
-    else if (isParkingLot) {
+    if (isParkingLot) {
       let queue;
       const parkingQueue = await findDriverParkingQueue(isParkingLot._id);
       if (parkingQueue) {
