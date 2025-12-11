@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import Zone from '../models/Zone.js';
 import ParkingQueue from '../models/ParkingQueue.js';
+import Fare from '../models/fareManagement.js';
 import { ZONE_TYPES } from '../enums/zoneEnums.js';
 
 export const createZone = async (payload) => {
@@ -412,4 +413,85 @@ const getZoneCenter = (coordinates) => {
   const center = [sumLng / count, sumLat / count];
   console.log(`📍 Calculated zone center: [${center[0]}, ${center[1]}]`);
   return center;
+};
+
+// Update parking queue airport link
+export const updateParkingQueueAirport = async (parkingQueueId, airportId) => {
+  if (!mongoose.Types.ObjectId.isValid(parkingQueueId)) {
+    throw new Error('Invalid parking queue ID');
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(airportId)) {
+    throw new Error('Invalid airport ID');
+  }
+
+  // Check if parking queue exists
+  const parkingQueue = await ParkingQueue.findById(parkingQueueId)
+    .populate('airportId')
+    .populate('parkingLotId');
+  
+  if (!parkingQueue) {
+    throw new Error('Parking queue not found');
+  }
+
+  // Check if airport exists
+  const airport = await Zone.findById(airportId);
+  if (!airport) {
+    // Try to find in FareManagement
+    const fareZone = await Fare.findOne({
+      $or: [
+        { _id: airportId },
+        { 'zone._id': airportId },
+      ],
+    });
+
+    if (!fareZone || !fareZone.zone) {
+      throw new Error('Airport not found');
+    }
+  }
+
+  // Update parking queue
+  const updatedQueue = await ParkingQueue.findByIdAndUpdate(
+    parkingQueueId,
+    { airportId: airportId },
+    { new: true }
+  )
+    .populate('airportId')
+    .populate('parkingLotId');
+
+  return updatedQueue;
+};
+
+// Get all parking queues with airport info
+export const getAllParkingQueues = async (filters = {}, pagination = {}) => {
+  const { page = 1, limit = 10 } = pagination;
+  const skip = (page - 1) * limit;
+
+  const query = {};
+
+  if (filters.isActive !== undefined) {
+    query.isActive = filters.isActive;
+  }
+
+  // Get total count
+  const totalCount = await ParkingQueue.countDocuments(query);
+
+  // Get paginated results
+  const queues = await ParkingQueue.find(query)
+    .populate('airportId')
+    .populate('parkingLotId')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+
+  const totalPages = Math.ceil(totalCount / limit);
+
+  return {
+    data: queues,
+    total: totalCount,
+    page: parseInt(page),
+    limit: parseInt(limit),
+    totalPages,
+  };
 };

@@ -6,6 +6,8 @@ import {
   editZone,
   removeZone,
   fetchZoneTypes,
+  updateParkingQueueAirport,
+  fetchAllParkingQueues,
 } from '../../../services/Admin/Zones/index.js';
 
 export const addZoneController = (req, res) =>
@@ -68,6 +70,28 @@ export const fetchZoneTypesController = (req, res) =>
     {
       handler: fetchZoneTypes,
       successMessage: 'Zone types fetched successfully',
+    },
+    req,
+    res,
+  );
+
+export const updateParkingQueueAirportController = (req, res) =>
+  handleResponse(
+    {
+      handler: updateParkingQueueAirport,
+      handlerParams: [req.body],
+      successMessage: 'Parking queue airport link updated successfully',
+    },
+    req,
+    res,
+  );
+
+export const fetchAllParkingQueuesController = (req, res) =>
+  handleResponse(
+    {
+      handler: fetchAllParkingQueues,
+      handlerParams: [req.query],
+      successMessage: 'All parking queues fetched successfully',
     },
     req,
     res,

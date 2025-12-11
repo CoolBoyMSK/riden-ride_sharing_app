@@ -291,7 +291,19 @@ export const updateLocation = async (user, { coordinates, heading, speed, accura
 
     // Get previous location state to detect entry/exit
     const previousLocation = await getDriverLocation(driver._id);
-    const wasRestricted = previousLocation ? driver.isRestricted : false;
+    // Check if driver was in restricted area in previous location
+    let wasRestricted = false;
+    if (previousLocation) {
+      try {
+        const wasInRestrictedArea = await isRideInRestrictedArea([
+          previousLocation.coordinates[0],
+          previousLocation.coordinates[1],
+        ]);
+        wasRestricted = wasInRestrictedArea;
+      } catch (error) {
+        wasRestricted = driver.isRestricted;
+      }
+    }
     const wasInParkingLot = previousLocation?.parkingQueueId ? true : false;
 
     // Check airport status
@@ -461,8 +473,11 @@ export const updateLocation = async (user, { coordinates, heading, speed, accura
     let responseCode = null;
     let responseMessage = 'Location updated successfully';
 
-    // Handle restricted area
+    // Update isRestricted based on current location
+    // If driver is in restricted area → isRestricted = true
+    // If driver is not in restricted area → isRestricted = false
     if (isRestricted && !isParkingLot) {
+      // Driver is in restricted area (but not in parking lot)
       await updateDriverByUserId(user._id, { isRestricted: true });
       const parkingLot = await findNearestParkingForPickup(coordinates);
 
@@ -483,14 +498,14 @@ export const updateLocation = async (user, { coordinates, heading, speed, accura
         responseMessage = 'You are inside the restricted area, and you are not allowed to pick ride in this area, reach to nearby parking lot to pick rides';
         responseData = {
           ...(parkingLot || {}),
-          // Add flag to indicate if this is first entry or already in restricted area
           isFirstEntry: !wasRestricted, // true if driver just entered, false if already in restricted area
         };
 
-        // Emit socket event to driver ONLY if driver just entered restricted area (first time)
+        // Emit popup ONLY if driver just entered restricted area (first time)
         // Don't emit if driver is already in restricted area (wasRestricted = true)
+        // This means: emit only on transition from non-restricted to restricted
         if (!wasRestricted) {
-          console.log(`📢 Emitting RESTRICTED_AREA socket event (first entry)`);
+          console.log(`📢 Emitting RESTRICTED_AREA socket event (driver entered restricted area)`);
           emitToUser(user._id, 'ride:driver_update_location', {
             success: true,
             objectType: 'driver-update-location',
@@ -502,9 +517,12 @@ export const updateLocation = async (user, { coordinates, heading, speed, accura
             message: responseMessage,
           });
         } else {
-          console.log(`🔇 Skipping socket event (driver already in restricted area)`);
+          console.log(`🔇 Skipping socket event (driver already in restricted area - popup already shown)`);
         }
       }
+    } else {
+      // Driver is not in restricted area → set isRestricted = false
+      await updateDriverByUserId(user._id, { isRestricted: false });
     }
     // Handle parking lot
     else if (isParkingLot) {

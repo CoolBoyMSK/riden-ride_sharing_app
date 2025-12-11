@@ -7,6 +7,8 @@ import {
   editZoneController,
   removeZoneController,
   fetchZoneTypesController,
+  updateParkingQueueAirportController,
+  fetchAllParkingQueuesController,
 } from '../../../controllers/Admin/Zones/index.js';
 
 const router = express.Router();
@@ -51,6 +53,20 @@ registerRoute({
   route: '/types',
   admin_auth_enable: true,
   get_method: fetchZoneTypesController,
+});
+
+registerRoute({
+  router,
+  route: '/parking-queue/update-airport',
+  admin_auth_enable: true,
+  put_method: updateParkingQueueAirportController,
+});
+
+registerRoute({
+  router,
+  route: '/parking-queue',
+  admin_auth_enable: true,
+  get_method: fetchAllParkingQueuesController,
 });
 
 export default router;
