@@ -180,6 +180,43 @@ export const getAllZones = async (filters = {}, pagination = {}) => {
   };
 };
 
+// Get all airports (type = "airport")
+export const getAllAirports = async (filters = {}, pagination = {}) => {
+  const { page = 1, limit = 100 } = pagination; // Default limit 100 for airports list
+  const skip = (page - 1) * limit;
+
+  const query = {
+    type: 'airport',
+  };
+
+  if (filters.isActive !== undefined) {
+    query.isActive = filters.isActive;
+  } else {
+    query.isActive = true; // Default to active airports only
+  }
+
+  // Get total count
+  const totalCount = await Zone.countDocuments(query);
+
+  // Get paginated results
+  const airports = await Zone.find(query)
+    .select('_id name type boundaries isActive description createdAt')
+    .sort({ name: 1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+
+  const totalPages = Math.ceil(totalCount / limit);
+
+  return {
+    data: airports,
+    total: totalCount,
+    page: parseInt(page),
+    limit: parseInt(limit),
+    totalPages,
+  };
+};
+
 export const getZoneById = async (zoneId) => {
   if (!mongoose.Types.ObjectId.isValid(zoneId)) {
     throw new Error('Invalid zone ID');
@@ -493,5 +530,152 @@ export const getAllParkingQueues = async (filters = {}, pagination = {}) => {
     page: parseInt(page),
     limit: parseInt(limit),
     totalPages,
+  };
+};
+
+// Create airport parking zone with 4 coordinates
+export const createAirportParking = async (payload) => {
+  const { airportId, name, coordinates, description, isActive } = payload;
+
+  // Validate airport ID
+  if (!mongoose.Types.ObjectId.isValid(airportId)) {
+    throw new Error('Invalid airport ID');
+  }
+
+  // Check if airport exists
+  const airport = await Zone.findById(airportId);
+  if (!airport) {
+    throw new Error('Airport not found');
+  }
+
+  if (airport.type !== 'airport') {
+    throw new Error('Zone is not an airport');
+  }
+
+  // Validate coordinates - should be exactly 4 points
+  if (!Array.isArray(coordinates) || coordinates.length !== 4) {
+    throw new Error('Exactly 4 coordinates are required for parking area');
+  }
+
+  // Validate each coordinate
+  for (let i = 0; i < coordinates.length; i++) {
+    const coord = coordinates[i];
+    if (!Array.isArray(coord) || coord.length !== 2) {
+      throw new Error(`Coordinate ${i + 1} must be an array of [longitude, latitude]`);
+    }
+
+    const [lng, lat] = coord;
+    if (typeof lng !== 'number' || typeof lat !== 'number') {
+      throw new Error(`Coordinate ${i + 1} must contain numeric values`);
+    }
+
+    if (lng < -180 || lng > 180 || lat < -90 || lat > 90) {
+      throw new Error(
+        `Invalid coordinate ${i + 1} [${lng}, ${lat}]. Longitude must be between -180 and 180, latitude between -90 and 90.`,
+      );
+    }
+  }
+
+  // Convert 4 coordinates to closed polygon (rectangle)
+  // Format: [[[lng1, lat1], [lng2, lat2], [lng3, lat3], [lng4, lat4], [lng1, lat1]]]
+  const polygonCoordinates = [
+    [
+      [coordinates[0][0], coordinates[0][1]], // First point
+      [coordinates[1][0], coordinates[1][1]], // Second point
+      [coordinates[2][0], coordinates[2][1]], // Third point
+      [coordinates[3][0], coordinates[3][1]], // Fourth point
+      [coordinates[0][0], coordinates[0][1]], // Close polygon (same as first point)
+    ],
+  ];
+
+  // Check if parking zone name already exists
+  const existingZone = await Zone.findOne({
+    name: { $regex: new RegExp(`^${name}$`, 'i') },
+    type: 'airport-parking',
+  });
+
+  // If parking zone already exists, update its boundaries & basic fields instead of throwing error
+  if (existingZone) {
+    existingZone.boundaries = {
+      type: 'Polygon',
+      coordinates: polygonCoordinates,
+    };
+    existingZone.isActive =
+      isActive !== undefined ? isActive : existingZone.isActive;
+    if (description !== undefined) {
+      existingZone.description = description;
+    }
+    // Ensure metadata has correct airportId
+    existingZone.metadata = {
+      ...(existingZone.metadata || {}),
+      airportId,
+      updatedVia: 'airport-parking-api',
+    };
+
+    const updatedZone = await existingZone.save();
+
+    // Ensure parking queue exists and is linked to this airport
+    let parkingQueue = await ParkingQueue.findOne({
+      parkingLotId: updatedZone._id,
+    });
+
+    if (!parkingQueue) {
+      parkingQueue = await ParkingQueue.create({
+        parkingLotId: updatedZone._id,
+        airportId,
+      });
+    } else if (
+      parkingQueue.airportId?.toString() !== airportId.toString()
+    ) {
+      parkingQueue.airportId = airportId;
+      await parkingQueue.save();
+    }
+
+    return {
+      zone: updatedZone,
+      parkingQueue,
+    };
+  }
+
+  // Create the parking zone
+  const parkingZone = await Zone.create({
+    name: name || `${airport.name} Parking`,
+    type: 'airport-parking',
+    boundaries: {
+      type: 'Polygon',
+      coordinates: polygonCoordinates,
+    },
+    minSearchRadius: 5,
+    maxSearchRadius: 10,
+    minRadiusSearchTime: 2,
+    maxRadiusSearchTime: 1,
+    isActive: isActive !== undefined ? isActive : true,
+    description: description || `Parking area for ${airport.name}`,
+    metadata: {
+      airportId: airportId,
+      createdVia: 'airport-parking-api',
+    },
+  });
+
+  // Create parking queue entry linked to airport
+  let parkingQueue;
+  try {
+    parkingQueue = await ParkingQueue.create({
+      parkingLotId: parkingZone._id,
+      airportId: airportId,
+    });
+
+    console.log(
+      `Created parking queue for airport-parking zone ${parkingZone.name} linked to airport ${airport.name}`,
+    );
+  } catch (error) {
+    // If parking queue creation fails, delete the zone
+    await Zone.findByIdAndDelete(parkingZone._id);
+    throw new Error(`Failed to create parking queue: ${error.message}`);
+  }
+
+  return {
+    zone: parkingZone,
+    parkingQueue: parkingQueue,
   };
 };

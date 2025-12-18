@@ -7,6 +7,8 @@ import {
   getZoneTypes,
   updateParkingQueueAirport as updateParkingQueueAirportDAL,
   getAllParkingQueues,
+  createAirportParking,
+  getAllAirports,
 } from '../../../dal/zone.js';
 
 export const addZone = async (body, resp) => {
@@ -154,6 +156,47 @@ export const fetchAllParkingQueues = async (
     if (!success) {
       resp.error = true;
       resp.error_message = 'Failed to fetch parking queues';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
+    return resp;
+  }
+};
+
+export const createAirportParkingService = async (body, resp) => {
+  try {
+    const success = await createAirportParking(body);
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to create airport parking';
+      return resp;
+    }
+
+    resp.data = success;
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
+    return resp;
+  }
+};
+
+export const fetchAllAirports = async (
+  { isActive, page = 1, limit = 100 },
+  resp,
+) => {
+  try {
+    const success = await getAllAirports({ isActive }, { page, limit });
+    if (!success) {
+      resp.error = true;
+      resp.error_message = 'Failed to fetch airports';
       return resp;
     }
 

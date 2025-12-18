@@ -8,7 +8,10 @@ import {
   fetchZoneTypes,
   updateParkingQueueAirport,
   fetchAllParkingQueues,
+  createAirportParkingService,
+  fetchAllAirports,
 } from '../../../services/Admin/Zones/index.js';
+import { validateCreateAirportParking } from '../../../validations/admin/zoneValidations.js';
 
 export const addZoneController = (req, res) =>
   handleResponse(
@@ -92,6 +95,29 @@ export const fetchAllParkingQueuesController = (req, res) =>
       handler: fetchAllParkingQueues,
       handlerParams: [req.query],
       successMessage: 'All parking queues fetched successfully',
+    },
+    req,
+    res,
+  );
+
+export const createAirportParkingController = (req, res) =>
+  handleResponse(
+    {
+      handler: createAirportParkingService,
+      handlerParams: [req.body],
+      validationFn: validateCreateAirportParking,
+      successMessage: 'Airport parking created successfully',
+    },
+    req,
+    res,
+  );
+
+export const fetchAllAirportsController = (req, res) =>
+  handleResponse(
+    {
+      handler: fetchAllAirports,
+      handlerParams: [req.query],
+      successMessage: 'All airports fetched successfully',
     },
     req,
     res,
