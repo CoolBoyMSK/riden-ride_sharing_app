@@ -120,19 +120,36 @@ export const updateDestinationRide = async (
 ) => {
   const session = await mongoose.startSession();
   session.startTransaction();
+
+  // Helper function to safely cleanup session
+  const cleanupSession = async () => {
+    try {
+      if (session.inTransaction()) {
+        await session.abortTransaction();
+      }
+    } catch (abortError) {
+      console.error('[updateDestinationRide] Error aborting transaction:', abortError.message);
+    }
+    try {
+      if (!session.hasEnded) {
+        session.endSession();
+      }
+    } catch (endError) {
+      console.error('[updateDestinationRide] Error ending session:', endError.message);
+    }
+  };
+
   try {
     const driver = await findDriverByUserId(user._id, { session });
     if (!driver) {
-      await session.abortTransaction();
-      session.endSession();
+      await cleanupSession();
       resp.error = true;
       resp.error_message = 'Driver not found';
       return resp;
     }
 
     if (!driver.destinationRide?.isActive) {
-      await session.abortTransaction();
-      session.endSession();
+      await cleanupSession();
       resp.error = true;
       resp.error_message = 'No active destination ride to update';
       return resp;
@@ -142,8 +159,7 @@ export const updateDestinationRide = async (
 
     if (startLocation) {
       if (!startLocation.coordinates || !Array.isArray(startLocation.coordinates) || startLocation.coordinates.length !== 2) {
-        await session.abortTransaction();
-        session.endSession();
+        await cleanupSession();
         resp.error = true;
         resp.error_message = 'Invalid start location coordinates';
         return resp;
@@ -157,8 +173,7 @@ export const updateDestinationRide = async (
 
     if (endLocation) {
       if (!endLocation.coordinates || !Array.isArray(endLocation.coordinates) || endLocation.coordinates.length !== 2) {
-        await session.abortTransaction();
-        session.endSession();
+        await cleanupSession();
         resp.error = true;
         resp.error_message = 'Invalid end location coordinates';
         return resp;
@@ -173,15 +188,29 @@ export const updateDestinationRide = async (
     const updated = await updateDriverByUserId(user._id, updateData, { session });
 
     if (!updated) {
-      await session.abortTransaction();
-      session.endSession();
+      await cleanupSession();
       resp.error = true;
       resp.error_message = 'Failed to update destination ride';
       return resp;
     }
 
-    await session.commitTransaction();
-    session.endSession();
+    try {
+      await session.commitTransaction();
+    } catch (commitError) {
+      console.error('[updateDestinationRide] Error committing transaction:', commitError.message);
+      await cleanupSession();
+      resp.error = true;
+      resp.error_message = 'Failed to commit destination ride update';
+      return resp;
+    }
+
+    try {
+      if (!session.hasEnded) {
+        session.endSession();
+      }
+    } catch (endError) {
+      console.error('[updateDestinationRide] Error ending session after commit:', endError.message);
+    }
 
     resp.data = {
       destinationRide: updated.destinationRide,
@@ -189,9 +218,9 @@ export const updateDestinationRide = async (
     };
     return resp;
   } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-    console.error(`API ERROR: ${error}`);
+    await cleanupSession();
+    console.error('[updateDestinationRide] API ERROR:', error.message);
+    console.error('[updateDestinationRide] Error Stack:', error.stack);
     resp.error = true;
     resp.error_message = error.message || 'Something went wrong';
     return resp;

@@ -63,7 +63,11 @@ export const updateDriverByUserId = async (id, update, options = {}) => {
   console.log('[updateDriverByUserId] Starting update');
   console.log('[updateDriverByUserId] User ID:', id);
   console.log('[updateDriverByUserId] Update object:', JSON.stringify(update, null, 2));
-  console.log('[updateDriverByUserId] Options:', options);
+  console.log('[updateDriverByUserId] Options:', {
+    hasSession: !!options.session,
+    sessionActive: options.session?.inTransaction() || false,
+    otherOptions: Object.keys(options).filter(key => key !== 'session'),
+  });
 
   const objectId = mongoose.Types.ObjectId.isValid(id)
     ? new mongoose.Types.ObjectId(id)
