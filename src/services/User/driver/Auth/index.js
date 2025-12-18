@@ -58,6 +58,19 @@ export const signUpDriverWithEmail = async (
   resp,
 ) => {
   try {
+    console.log('\n📝 [DRIVER EMAIL SIGNUP] Request received:', {
+      name,
+      email,
+      gender,
+      passwordLength: password ? password.length : 0,
+      confirmPasswordLength: confirmPassword ? confirmPassword.length : 0,
+      passwordsMatch:
+        typeof password === 'string' &&
+        typeof confirmPassword === 'string' &&
+        password === confirmPassword,
+      timestamp: new Date().toISOString(),
+    });
+
     const validation = validateDriverSignup({
       name,
       email,
@@ -66,6 +79,16 @@ export const signUpDriverWithEmail = async (
       confirmPassword,
     });
     if (validation.error) {
+      console.error('❌ [DRIVER EMAIL SIGNUP] Validation failed:', {
+        name,
+        email,
+        gender,
+        errorDetails: validation.error.details?.map((d) => ({
+          message: d.message,
+          path: d.path,
+          type: d.type,
+        })),
+      });
       resp.error = true;
       resp.error_message = validation.error.details.map((d) => d.message);
       return resp;
