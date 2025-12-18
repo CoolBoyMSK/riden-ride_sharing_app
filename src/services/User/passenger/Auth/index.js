@@ -641,7 +641,16 @@ export const otpVerification = async (
           console.error('Failed to send notification');
         }
 
-        await sendWelcomePassengerEmail(user.email, user.name);
+        // Welcome email should be best-effort only.
+        // Even if SMTP / credentials fail, user must stay verified and API should succeed.
+        try {
+          await sendWelcomePassengerEmail(user.email, user.name);
+        } catch (welcomeError) {
+          console.error(
+            '⚠️ Failed to send welcome email after successful passenger verification:',
+            welcomeError.message || welcomeError,
+          );
+        }
 
         // Final cleanup
         await redisConfig.del(
@@ -1316,9 +1325,23 @@ export const sendPassengerPhoneOtp = async (
       }
       console.log('✅ [SEND PHONE OTP] Phone OTP requested successfully');
 
-      console.log('📧 [SEND PHONE OTP] Sending notification email to:', user.email);
-      await sendPhoneOtpEmail(user.email, user.name, phoneNumber.slice(-4));
-      console.log('✅ [SEND PHONE OTP] Notification email sent successfully');
+      // Notification email is best-effort only; OTP via SMS is the primary flow.
+      // Even if email fails (e.g., SMTP credentials issue), API should still succeed.
+      try {
+        console.log(
+          '📧 [SEND PHONE OTP] Sending notification email to:',
+          user.email,
+        );
+        await sendPhoneOtpEmail(user.email, user.name, phoneNumber.slice(-4));
+        console.log(
+          '✅ [SEND PHONE OTP] Notification email sent successfully',
+        );
+      } catch (emailError) {
+        console.error(
+          '⚠️ [SEND PHONE OTP] Failed to send notification email:',
+          emailError.message || emailError,
+        );
+      }
 
       resp.data = {
         verifyPhoneNumberOtp: true,
