@@ -2394,7 +2394,9 @@ export const findDestinationRideDrivers = async (
         driverId: driver._id,
         status: 'online',
         isAvailable: true,
-        currentRideId: { $in: [null, undefined, ''] },
+        // currentRideId should be null/undefined when driver is free.
+        // Including empty string ('') here causes ObjectId cast errors if some documents hold invalid values.
+        currentRideId: { $in: [null, undefined] },
       }).lean();
 
       if (!driverLocation) continue;

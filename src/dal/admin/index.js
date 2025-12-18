@@ -709,12 +709,13 @@ export const findNearestDriversForScheduledRide = async ({
         distanceField: 'distance', // Distance in meters
         maxDistance: SEARCH_RADIUS, // 25km in meters
         spherical: true,
-        key: 'location',
-        query: {
-          status: 'online',
-          isAvailable: true,
-          currentRideId: { $in: [null, undefined, ''] },
-        },
+          key: 'location',
+          query: {
+            status: 'online',
+            isAvailable: true,
+            // currentRideId null/undefined means driver is free; avoid invalid '' to prevent ObjectId cast errors
+            currentRideId: { $in: [null, undefined] },
+          },
       },
     },
     // Stage 2: Lookup driver details
