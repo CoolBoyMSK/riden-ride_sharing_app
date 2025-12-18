@@ -709,7 +709,17 @@ export const otpVerification = async (
           console.error('Failed to send notification');
         }
 
-        await sendWelcomeDriverEmail(user.email, user.name);
+        try {
+          await sendWelcomeDriverEmail(user.email, user.name);
+        } catch (emailError) {
+          console.error('⚠️ [DRIVER OTP VERIFY] Failed to send welcome email:', {
+            userId: user._id,
+            email: user.email,
+            name: user.name,
+            errorMessage: emailError.message,
+          });
+          // Don't fail signup if welcome email fails
+        }
 
         // Final cleanup
         await redisConfig.del(
