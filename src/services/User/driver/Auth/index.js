@@ -129,7 +129,11 @@ export const signUpDriverWithEmail = async (
       email: user.email,
     };
 
-    console.log('📝 [DRIVER SIGNUP] Requesting OTP for user:', user._id);
+    console.log('📝 [DRIVER SIGNUP] Requesting OTP for user:', {
+      userId: user._id,
+      email: user.email,
+      name: user.name,
+    });
     const result = await requestEmailOtp(
       email,
       name,
@@ -137,9 +141,14 @@ export const signUpDriverWithEmail = async (
       'signup',
       'driver',
     );
-    
     console.log('📝 [DRIVER SIGNUP] OTP request result:', result);
     if (!result.ok) {
+      console.error('❌ [DRIVER SIGNUP] Failed to send email OTP for driver signup:', {
+        email,
+        name,
+        userId: user._id,
+        otpResult: result,
+      });
       resp.error = true;
       resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
       return resp;
@@ -574,15 +583,23 @@ export const otpVerification = async (
     let user;
     if (signupOtp) {
       if (email && otp) {
-        console.log('✅ [DRIVER OTP VERIFY] Verifying email OTP for signup:', email);
+        console.log('✅ [DRIVER OTP VERIFY] Verifying email OTP for signup:', {
+          email,
+          maskedOtp: otp ? `${otp.slice(0, 2)}***${otp.slice(-2)}` : 'N/A',
+        });
         const result = await verifyEmailOtp(email, otp);
-        console.log('✅ [DRIVER OTP VERIFY] OTP verification result:', {
+        console.log('✅ [DRIVER OTP VERIFY] Email OTP verification result (signup):', {
           ok: result.ok,
           reason: result.reason,
           hasPending: !!result.pending,
         });
         
         if (!result.ok) {
+          console.error('❌ [DRIVER OTP VERIFY] Email OTP verification FAILED (signup):', {
+            email,
+            reason: result.reason,
+            hasPending: !!result.pending,
+          });
           resp.error = true;
           resp.error_message =
             result.reason === 'expired_or_not_requested'
@@ -772,7 +789,17 @@ export const otpVerification = async (
       }
 
       const result = await verifyEmailOtp(email, otp);
+      console.log('✅ [DRIVER OTP VERIFY] Email OTP verification result (emailOtp):', {
+        email,
+        ok: result.ok,
+        reason: result.reason,
+        hasPending: !!result.pending,
+      });
       if (!result.ok) {
+        console.error('❌ [DRIVER OTP VERIFY] Email OTP verification FAILED (emailOtp):', {
+          email,
+          reason: result.reason,
+        });
         resp.error = true;
         resp.error_message =
           result.reason === 'expired_or_not_requested'
@@ -1239,7 +1266,17 @@ export const otpVerification = async (
       }
 
       const result = await verifyEmailOtp(email, otp);
+      console.log('✅ [DRIVER OTP VERIFY] Email OTP verification result (verifyUserEmailOtp):', {
+        email,
+        ok: result.ok,
+        reason: result.reason,
+        hasPending: !!result.pending,
+      });
       if (!result.ok) {
+        console.error('❌ [DRIVER OTP VERIFY] Email OTP verification FAILED (verifyUserEmailOtp):', {
+          email,
+          reason: result.reason,
+        });
         resp.error = true;
         switch (result.reason) {
           case 'expired_or_not_requested':
@@ -1322,7 +1359,17 @@ export const otpVerification = async (
       }
 
       const result = await verifyPhoneOtp(phoneNumber, otp);
+      console.log('✅ [DRIVER OTP VERIFY] Phone OTP verification result (forgotPasswordPhoneOtp):', {
+        phoneNumber,
+        ok: result.ok,
+        reason: result.reason,
+        hasPending: !!result.pending,
+      });
       if (!result.ok) {
+        console.error('❌ [DRIVER OTP VERIFY] Phone OTP verification FAILED (forgotPasswordPhoneOtp):', {
+          phoneNumber,
+          reason: result.reason,
+        });
         resp.error = true;
         switch (result.reason) {
           case 'expired_or_not_requested':
