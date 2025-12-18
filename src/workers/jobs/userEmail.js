@@ -11,7 +11,15 @@ export const name = 'sendEmailOtp'; // job name to match when added
 export const handler = async (data) => {
   const { email, otp, username, type, role } = data;
 
-  console.log(`Processing email job for ${email}`);
+  console.log(`\n📧 ========================================`);
+  console.log(`📧 PROCESSING EMAIL OTP JOB`);
+  console.log(`📧 ========================================`);
+  console.log(`📧 Email: ${email}`);
+  console.log(`📧 OTP: ${otp}`);
+  console.log(`📧 Username: ${username || 'N/A'}`);
+  console.log(`📧 Type: ${type || 'N/A'}`);
+  console.log(`📧 Role: ${role || 'N/A'}`);
+  console.log(`📧 ========================================\n`);
 
   if (role === 'driver') {
     if (type === 'update') {
@@ -22,6 +30,7 @@ export const handler = async (data) => {
       await sendDriverEmailVerificationEmail(email, otp);
     }
   } else if (role === 'passenger') {
+    console.log(`👤 PASSENGER EMAIL OTP - Type: ${type || 'signup/verification'}`);
     if (type === 'update') {
       await sendEmailUpdateVerificationOtp(email, otp, username);
     } else if (type === 'password_reset') {
@@ -31,5 +40,5 @@ export const handler = async (data) => {
     }
   }
 
-  console.log(`Email OTP sent to ${email}`);
+  console.log(`✅ Email OTP sent successfully to ${email}\n`);
 };

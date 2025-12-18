@@ -78,8 +78,20 @@ export const requestEmailOtp = async (
     await redisConfig.del(...keys);
 
     const otp = generateOtp();
-    console.log('otp:', otp);
     const hashed = hashOtp(otp);
+
+    // Detailed console log for passenger email OTP
+    console.log(`\n📧 ========================================`);
+    console.log(`📧 PASSENGER EMAIL OTP REQUEST`);
+    console.log(`📧 ========================================`);
+    console.log(`📧 Email: ${email}`);
+    console.log(`📧 OTP Code: ${otp}`);
+    console.log(`📧 Username: ${username || 'N/A'}`);
+    console.log(`📧 Type: ${type || 'N/A'}`);
+    console.log(`📧 Role: ${role || 'N/A'}`);
+    console.log(`📧 OTP TTL: ${env.OTP_TTL_SECONDS} seconds`);
+    console.log(`📧 Cooldown: ${env.OTP_COOLDOWN_SECONDS} seconds`);
+    console.log(`📧 ========================================\n`);
 
     await setWithTTL(emailOtpKey(email), env.OTP_TTL_SECONDS, hashed);
     await setWithTTL(emailCooldownKey(email), env.OTP_COOLDOWN_SECONDS, '1');
@@ -104,6 +116,7 @@ export const requestEmailOtp = async (
     }
 
     await emailQueue.add('sendEmailOtp', { email, otp, username, type, role });
+    console.log(`✅ Email OTP job queued successfully for ${email}\n`);
 
     // Local testing: hamesha OTP return karo (email ke sath)
     return {
@@ -120,21 +133,32 @@ export const verifyEmailOtp = async (email, otpRaw, expectedPurpose = null) => {
   const verifiedKeyName = emailVerifiedKey(email);
   const attemptsKeyName = emailAttemptsKey(email);
 
+  console.log(`\n📧 ========================================`);
+  console.log(`📧 VERIFYING EMAIL OTP`);
+  console.log(`📧 ========================================`);
+  console.log(`📧 Email: ${email}`);
+  console.log(`📧 OTP Provided: ${otpRaw}`);
+  console.log(`📧 Expected Purpose: ${expectedPurpose || 'N/A'}`);
+  console.log(`📧 ========================================\n`);
+
   // 1. Check if this email has already been verified
   const alreadyVerified = await redisConfig.get(verifiedKeyName);
   if (alreadyVerified) {
+    console.log(`⚠️ Email ${email} already verified\n`);
     return { ok: false, reason: 'already_verified' };
   }
 
   // 2. Fetch OTP hash
   const storedHash = await redisConfig.get(emailOtpKey(email));
   if (!storedHash) {
+    console.log(`❌ No OTP found for ${email} (expired or not requested)\n`);
     return { ok: false, reason: 'expired_or_not_requested' };
   }
 
   // 3. Anti-bruteforce check
   const attempts = Number(await redisConfig.get(attemptsKeyName)) || 0;
   if (attempts >= 3) {
+    console.log(`❌ Too many attempts for ${email} (${attempts}/3)\n`);
     return { ok: false, reason: 'too_many_attempts' };
   }
 
@@ -145,6 +169,7 @@ export const verifyEmailOtp = async (email, otpRaw, expectedPurpose = null) => {
   if (!match) {
     await redisConfig.incr(attemptsKeyName);
     await redisConfig.expire(attemptsKeyName, 600);
+    console.log(`❌ Invalid OTP for ${email} (Attempt ${attempts + 1}/3)\n`);
     return { ok: false, reason: 'invalid_otp' };
   }
 
@@ -185,6 +210,7 @@ export const verifyEmailOtp = async (email, otpRaw, expectedPurpose = null) => {
   // 8. Mark verified
   await redisConfig.setex(verifiedKeyName, env.OTP_TTL_SECONDS, 'true');
 
+  console.log(`✅ Email OTP verified successfully for ${email}\n`);
   return { ok: true, pending: pendingData };
 };
 
@@ -272,14 +298,30 @@ export const verifyPhoneOtp = async (phoneNumber, otpRaw) => {
   const verifiedKeyName = phoneVerifiedKey(phoneNumber);
   const attemptsKeyName = phoneAttemptsKey(phoneNumber);
 
+  console.log(`\n📱 ========================================`);
+  console.log(`📱 VERIFYING PHONE OTP`);
+  console.log(`📱 ========================================`);
+  console.log(`📱 Phone Number: ${phoneNumber}`);
+  console.log(`📱 OTP Provided: ${otpRaw}`);
+  console.log(`📱 ========================================\n`);
+
   const alreadyVerified = await redisConfig.get(verifiedKeyName);
-  if (alreadyVerified) return { ok: false, reason: 'already_verified' };
+  if (alreadyVerified) {
+    console.log(`⚠️ Phone ${phoneNumber} already verified\n`);
+    return { ok: false, reason: 'already_verified' };
+  }
 
   const storedHash = await redisConfig.get(phoneOtpKey(phoneNumber));
-  if (!storedHash) return { ok: false, reason: 'expired_or_not_requested' };
+  if (!storedHash) {
+    console.log(`❌ No OTP found for ${phoneNumber} (expired or not requested)\n`);
+    return { ok: false, reason: 'expired_or_not_requested' };
+  }
 
   const attempts = Number(await redisConfig.get(attemptsKeyName)) || 0;
-  if (attempts >= 3) return { ok: false, reason: 'too_many_attempts' };
+  if (attempts >= 3) {
+    console.log(`❌ Too many attempts for ${phoneNumber} (${attempts}/3)\n`);
+    return { ok: false, reason: 'too_many_attempts' };
+  }
 
   const inputHash = hashOtp(otpRaw);
   const match = compareHash(storedHash, inputHash);
@@ -287,6 +329,7 @@ export const verifyPhoneOtp = async (phoneNumber, otpRaw) => {
   if (!match) {
     await redisConfig.incr(attemptsKeyName);
     await redisConfig.expire(attemptsKeyName, 600);
+    console.log(`❌ Invalid OTP for ${phoneNumber} (Attempt ${attempts + 1}/3)\n`);
     return { ok: false, reason: 'invalid_otp' };
   }
 
@@ -300,6 +343,7 @@ export const verifyPhoneOtp = async (phoneNumber, otpRaw) => {
 
   await redisConfig.setex(verifiedKeyName, 300, 'true');
 
+  console.log(`✅ Phone OTP verified successfully for ${phoneNumber}\n`);
   return { ok: true, pending: pending ? JSON.parse(pending) : null };
 };
 
