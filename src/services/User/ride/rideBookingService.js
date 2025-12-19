@@ -453,8 +453,33 @@ export const bookRide = async (userId, rideData) => {
       };
     }
 
-    // Hold/authorize payment for card, Google Pay, and Apple Pay payments
-    if (PAYMENT_METHODS.includes(paymentMethod) && paymentMethodId) {
+    // Handle payment based on payment method type
+    if (paymentMethod === 'WALLET') {
+      // For wallet payments, check balance but don't deduct yet (deduction happens on ride completion)
+      const wallet = await getPassengerWallet(passenger._id);
+      if (!wallet) {
+        return {
+          success: false,
+          message: 'Wallet not found. Please contact support.',
+        };
+      }
+
+      const estimatedAmount = fareResult.estimatedFare;
+      const availableBalance = wallet.availableBalance || 0;
+
+      // Check if wallet has sufficient balance (allow negative balance for now, will be handled on completion)
+      // We just verify wallet exists, actual payment happens on ride completion
+      console.log(`💳 [WALLET] Wallet balance check: ${availableBalance} available, ${estimatedAmount} required`);
+      
+      // Set paymentHoldResult to success for wallet (no Stripe hold needed)
+      paymentHoldResult = {
+        success: true,
+        paymentMethod: 'WALLET',
+        walletBalance: availableBalance,
+        estimatedAmount: estimatedAmount,
+      };
+    } else if (PAYMENT_METHODS.includes(paymentMethod) && paymentMethodId) {
+      // Hold/authorize payment for card, Google Pay, and Apple Pay payments
       const estimatedAmount = fareResult.estimatedFare;
       console.log('Start');
       paymentHoldResult = await holdRidePayment(
@@ -476,6 +501,12 @@ export const bookRide = async (userId, rideData) => {
       }
 
       // Commission will be captured after ride creation (we need rideId)
+    } else if (paymentMethod === 'CASH') {
+      // Cash payment - no authorization needed
+      paymentHoldResult = {
+        success: true,
+        paymentMethod: 'CASH',
+      };
     } else {
       return {
         success: false,
@@ -546,7 +577,15 @@ export const bookRide = async (userId, rideData) => {
     });
 
     // Capture 20% commission at booking time (after ride is created)
-    if (paymentHoldResult?.success && ride?._id) {
+    // Only for Stripe payments (CARD, GOOGLE_PAY, APPLE_PAY)
+    // Wallet and Cash payments handle commission at ride completion
+    if (
+      paymentHoldResult?.success &&
+      ride?._id &&
+      paymentMethod !== 'WALLET' &&
+      paymentMethod !== 'CASH' &&
+      paymentHoldResult?.paymentIntentId
+    ) {
       const commissionResult = await captureCommissionAtBooking(
         paymentHoldResult.paymentIntentId,
         fareResult.estimatedFare,
@@ -574,6 +613,10 @@ export const bookRide = async (userId, rideData) => {
       }
 
       console.log('Commission captured at booking:', commissionResult);
+    } else if (paymentMethod === 'WALLET' || paymentMethod === 'CASH') {
+      console.log(
+        `💳 [${paymentMethod}] Commission will be handled at ride completion`,
+      );
     }
 
     if (!ride) {
@@ -771,8 +814,13 @@ export const bookRide = async (userId, rideData) => {
     console.error('Ride booking error:', error);
 
     // Cleanup on error
-    // Release payment hold if it was created
-    if (paymentHoldResult?.success && paymentHoldResult?.paymentIntentId) {
+    // Release payment hold if it was created (only for Stripe payments)
+    if (
+      paymentHoldResult?.success &&
+      paymentHoldResult?.paymentIntentId &&
+      paymentMethod !== 'WALLET' &&
+      paymentMethod !== 'CASH'
+    ) {
       await cancelPaymentHold(paymentHoldResult.paymentIntentId).catch(
         (cancelError) => {
           console.error('Failed to cancel payment hold:', cancelError);
