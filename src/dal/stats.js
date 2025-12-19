@@ -469,6 +469,7 @@ export const findDailyStatsForWeek = async (driverId, year, week) => {
   );
 
   // Get daily breakdown of rides for the week
+  // Use requestedAt instead of createdAt to match the actual ride date
   const dailyStats = await RideModel.aggregate([
     {
       $match: {
@@ -503,7 +504,8 @@ export const findDailyStatsForWeek = async (driverId, year, week) => {
       $group: {
         _id: '$_id', // Group by ride ID first to avoid duplicates
         rideId: { $first: '$_id' },
-        createdAt: { $first: '$createdAt' },
+        requestedAt: { $first: '$requestedAt' },
+        rideCompletedAt: { $first: '$rideCompletedAt' },
         actualDistance: { $first: '$actualDistance' },
         actualFare: { $first: '$actualFare' },
         tipBreakdown: { $first: '$tipBreakdown' },
@@ -513,16 +515,24 @@ export const findDailyStatsForWeek = async (driverId, year, week) => {
     {
       $project: {
         rideId: 1,
+        // Use requestedAt for date, fallback to rideCompletedAt if requestedAt is null
+        rideDate: {
+          $ifNull: ['$requestedAt', '$rideCompletedAt'],
+        },
         date: {
           $dateToString: {
             format: '%Y-%m-%d',
-            date: '$createdAt',
+            date: {
+              $ifNull: ['$requestedAt', '$rideCompletedAt'],
+            },
             timezone: 'UTC', // Ensure consistent timezone
           },
         },
         dayOfWeek: {
           $dayOfWeek: {
-            date: '$createdAt',
+            date: {
+              $ifNull: ['$requestedAt', '$rideCompletedAt'],
+            },
             timezone: 'UTC',
           },
         },
@@ -531,7 +541,21 @@ export const findDailyStatsForWeek = async (driverId, year, week) => {
         tip: { $ifNull: ['$tipBreakdown.amount', 0] },
         commission: { $ifNull: ['$transaction.commission', 0] },
         discount: { $ifNull: ['$transaction.discount', 0] },
-        driverEarning: { $ifNull: ['$transaction.driverEarning', 0] },
+        // Calculate driverEarning: if transaction exists use it, otherwise calculate from fare (80% after 20% commission)
+        driverEarning: {
+          $ifNull: [
+            '$transaction.driverEarning',
+            {
+              $add: [
+                {
+                  // Driver gets 80% of actualFare (after 20% commission)
+                  $multiply: [{ $ifNull: ['$actualFare', 0] }, 0.8],
+                },
+                { $ifNull: ['$tipBreakdown.amount', 0] }, // Include tips
+              ],
+            },
+          ],
+        },
         transactionStatus: { $ifNull: ['$transaction.status', 'COMPLETED'] },
       },
     },

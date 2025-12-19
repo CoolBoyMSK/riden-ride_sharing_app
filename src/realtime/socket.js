@@ -2849,14 +2849,14 @@ export const initSocket = (server) => {
         };
 
         const distanceToPickup = haversineDistance(driverCoords, pickupLocationCoords); // Distance in km
-        const MAX_DISTANCE_TO_START = 0.1; // 100 meters = 0.1 km
+        const MAX_DISTANCE_TO_START = 0.2; // 200 meters = 0.2 km
 
         if (distanceToPickup > MAX_DISTANCE_TO_START) {
           return socket.emit('error', {
             success: false,
             objectType,
             code: 'FORBIDDEN',
-            message: `You must be within 100m of pickup location to start the ride. Current distance: ${(distanceToPickup * 1000).toFixed(0)}m`,
+            message: `You must be within 200m of pickup location to start the ride. Current distance: ${(distanceToPickup * 1000).toFixed(0)}m`,
           });
         }
 
@@ -3090,18 +3090,30 @@ export const initSocket = (server) => {
               console.log('   Distance (meters):', distanceInMeters.toFixed(2));
               console.log('   Threshold (meters):', DROPOFF_DISTANCE_THRESHOLD_KM * 1000);
               
-              // If driver is within 500m, force normal completion (no early reason needed)
+              // If driver is within 500m, ONLY allow normal completion (early complete NOT allowed)
               if (distanceToDropoff <= DROPOFF_DISTANCE_THRESHOLD_KM) {
                 console.log('\n✅ DECISION: Driver is WITHIN 500m of dropoff');
-                console.log('   → Normal completion (no early reason needed)');
+                console.log('   → Normal completion ONLY (early complete NOT allowed)');
+                
+                // If driver tries to complete early when within 500m, reject it
+                if (earlyCompleteReason && earlyCompleteReason.trim().length >= 3) {
+                  console.log('   ❌ ERROR: Cannot complete early when within 500m of dropoff');
+                  return socket.emit('error', {
+                    success: false,
+                    objectType,
+                    code: 'FORBIDDEN',
+                    message: `You are within 500m of dropoff location. Please complete the ride normally without early completion reason.`,
+                  });
+                }
+                
                 console.log('   → Setting earlyCompleteReason to null');
                 earlyCompleteReason = null;
               } else {
                 console.log('\n⚠️  DECISION: Driver is MORE THAN 500m away from dropoff');
-                console.log('   → Early completion reason is REQUIRED');
+                console.log('   → Early completion ONLY (normal complete NOT allowed)');
                 console.log('   → Current reason:', earlyCompleteReason || 'NOT PROVIDED');
                 
-                // Driver is more than 500m away, early completion reason is required
+                // Driver is more than 500m away, ONLY early completion is allowed (normal completion blocked)
                 if (!earlyCompleteReason || earlyCompleteReason.trim().length < 3) {
                   console.log('   ❌ ERROR: Early completion reason is missing or too short');
                   console.log('   → Rejecting completion request');
@@ -3109,7 +3121,7 @@ export const initSocket = (server) => {
                     success: false,
                     objectType,
                     code: 'FORBIDDEN',
-                    message: `You are ${distanceInMeters.toFixed(0)}m away from dropoff location. Early completion reason is required (minimum 3 characters).`,
+                    message: `You are ${distanceInMeters.toFixed(0)}m away from dropoff location. You can only complete the ride early with a reason (minimum 3 characters). Normal completion is not allowed when more than 500m away.`,
                   });
                 } else {
                   console.log('   ✅ Early completion reason provided and valid');
