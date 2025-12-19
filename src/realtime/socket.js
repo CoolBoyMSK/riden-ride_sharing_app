@@ -3093,7 +3093,7 @@ export const initSocket = (server) => {
               // If driver is within 500m, ONLY allow normal completion (early complete NOT allowed)
               if (distanceToDropoff <= DROPOFF_DISTANCE_THRESHOLD_KM) {
                 console.log('\n✅ DECISION: Driver is WITHIN 500m of dropoff');
-                console.log('   → Normal completion enabled (early complete NOT allowed)');
+                console.log('   → Normal completion ONLY (early complete NOT allowed)');
                 
                 // If driver tries to complete early when within 500m, reject it
                 if (earlyCompleteReason && earlyCompleteReason.trim().length >= 3) {
@@ -3106,7 +3106,7 @@ export const initSocket = (server) => {
                   });
                 }
                 
-                console.log('   → Setting earlyCompleteReason to null for normal completion');
+                console.log('   → Setting earlyCompleteReason to null');
                 earlyCompleteReason = null;
               } else {
                 console.log('\n⚠️  DECISION: Driver is MORE THAN 500m away from dropoff');
