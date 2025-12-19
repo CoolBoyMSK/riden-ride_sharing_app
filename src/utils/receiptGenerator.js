@@ -451,13 +451,14 @@ const generatePassengerReceiptContent = (doc, ride, transaction, driver, passeng
     }
 
     // Add Commission (informational - not charged to passenger, but shown for transparency)
-    if (commissionAmount > 0) {
-      items.push({
-        label: 'Platform Commission',
-        amount: commissionAmount,
-        type: 'info',
-      });
-    }
+    // Commented out - Commission should not be shown to passengers
+    // if (commissionAmount > 0) {
+    //   items.push({
+    //     label: 'Platform Commission',
+    //     amount: commissionAmount,
+    //     type: 'info',
+    //   });
+    // }
 
     // Add Tip (separate charge)
     const tipAmount = parseFloat(tipBreakdown.amount || 0);
