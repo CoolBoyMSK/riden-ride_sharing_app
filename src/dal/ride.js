@@ -1175,11 +1175,17 @@ export const findDriverParkingQueue = async (parkingLotId) => {
   }
 };
 
-export const addDriverToQueue = async (parkingLotId, driverId) => {
+export const addDriverToQueue = async (parkingLotId, driverId, retryCount = 0) => {
+  const MAX_RETRIES = 3;
+  const RETRY_DELAYS = [100, 200, 400]; // Exponential backoff in milliseconds
+  
   const session = await mongoose.startSession();
-  session.startTransaction();
-
+  
   try {
+    session.startTransaction({
+      maxTimeMS: 5000, // 5 second timeout for transaction
+    });
+
     // First check if parking queue exists and has capacity
     const parkingQueue = await ParkingQueue.findOne({
       parkingLotId,
@@ -1187,6 +1193,7 @@ export const addDriverToQueue = async (parkingLotId, driverId) => {
     }).session(session);
 
     if (!parkingQueue) {
+      await session.abortTransaction();
       throw new Error(
         `Parking lot with ID ${parkingLotId} not found or inactive.`,
       );
@@ -1194,6 +1201,7 @@ export const addDriverToQueue = async (parkingLotId, driverId) => {
 
     // Check capacity
     if (parkingQueue.driverQueue.length >= parkingQueue.maxQueueSize) {
+      await session.abortTransaction();
       throw new Error(
         `Parking queue is at maximum capacity (${parkingQueue.maxQueueSize}).`,
       );
@@ -1210,6 +1218,9 @@ export const addDriverToQueue = async (parkingLotId, driverId) => {
         message: `Driver already in parking lot queue ${parkingLotId}.`,
         driverQueue: parkingQueue.driverQueue,
         queueSize: parkingQueue.driverQueue.length,
+        position: parkingQueue.driverQueue.findIndex((driver) =>
+          driver.driverId.equals(driverId),
+        ) + 1,
       };
     }
 
@@ -1224,12 +1235,41 @@ export const addDriverToQueue = async (parkingLotId, driverId) => {
         $addToSet: {
           driverQueue: {
             driverId: driverId,
+            joinedAt: new Date(),
+            status: 'waiting',
           },
         },
       },
-      { new: true, session },
+      { 
+        new: true, 
+        session,
+        // Add write concern for better conflict handling
+        writeConcern: { w: 'majority' },
+      },
     );
+    
     if (!updated) {
+      await session.abortTransaction();
+      // Check if driver was added by another concurrent operation
+      const currentQueue = await ParkingQueue.findOne({
+        parkingLotId,
+        isActive: true,
+      });
+      
+      if (currentQueue && currentQueue.driverQueue.find((driver) =>
+        driver.driverId.equals(driverId),
+      )) {
+        // Driver was added by another operation, return success
+        return {
+          message: `Driver already in parking lot queue ${parkingLotId}.`,
+          driverQueue: currentQueue.driverQueue,
+          queueSize: currentQueue.driverQueue.length,
+          position: currentQueue.driverQueue.findIndex((driver) =>
+            driver.driverId.equals(driverId),
+          ) + 1,
+        };
+      }
+      
       throw new Error(
         `Failed to add driver to queue - possible race condition.`,
       );
@@ -1240,10 +1280,33 @@ export const addDriverToQueue = async (parkingLotId, driverId) => {
       message: `Driver successfully added to parking lot queue ${parkingLotId}.`,
       driverQueue: updated.driverQueue,
       queueSize: updated.driverQueue.length,
-      position: updated.driverQueue.indexOf(driverId) + 1, // Driver's position in queue
+      position: updated.driverQueue.findIndex((driver) =>
+        driver.driverId.equals(driverId),
+      ) + 1,
     };
   } catch (err) {
     await session.abortTransaction();
+    
+    // Check if it's a write conflict error that can be retried
+    const isWriteConflict = 
+      err.message?.includes('Write conflict') ||
+      err.message?.includes('write conflict') ||
+      err.code === 11000 || // Duplicate key error
+      err.codeName === 'WriteConflict';
+    
+    // Retry logic for write conflicts
+    if (isWriteConflict && retryCount < MAX_RETRIES) {
+      await session.endSession();
+      const delay = RETRY_DELAYS[retryCount] || 400;
+      
+      // Wait before retrying
+      await new Promise(resolve => setTimeout(resolve, delay));
+      
+      // Retry with incremented count
+      return addDriverToQueue(parkingLotId, driverId, retryCount + 1);
+    }
+    
+    // If max retries reached or non-retryable error, throw
     throw new Error(`Failed to add driver to queue: ${err.message}`);
   } finally {
     session.endSession();
