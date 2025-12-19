@@ -3030,11 +3030,44 @@ export const initSocket = (server) => {
           const DROPOFF_DISTANCE_THRESHOLD_KM = 0.5; // 500 meters
           let distanceToDropoff = null;
           
+          console.log('\n🚗 ================================================================================');
+          console.log('🚗 RIDE COMPLETION - DISTANCE CHECK');
+          console.log('🚗 ================================================================================');
+          console.log('👤 Driver ID:', driver._id?.toString());
+          console.log('🚕 Ride ID:', rideId);
+          console.log('📝 Early Complete Reason (before check):', earlyCompleteReason || 'null');
+          
           try {
+            console.log('\n📍 Step 1: Fetching driver location...');
             const driverLocation = await findDriverLocation(driver._id);
+            
+            if (!driverLocation) {
+              console.log('⚠️  Driver location not found in Redis/DB');
+            } else {
+              console.log('✅ Driver location found:', {
+                hasLocation: !!driverLocation.location,
+                hasCoordinates: !!driverLocation.location?.coordinates,
+                coordinates: driverLocation.location?.coordinates,
+              });
+            }
+            
+            if (!ride?.dropoffLocation) {
+              console.log('⚠️  Dropoff location not found in ride');
+            } else {
+              console.log('✅ Dropoff location found:', {
+                hasCoordinates: !!ride.dropoffLocation.coordinates,
+                coordinates: ride.dropoffLocation.coordinates,
+                address: ride.dropoffLocation.address,
+              });
+            }
+            
             if (driverLocation?.location?.coordinates && ride?.dropoffLocation?.coordinates) {
               const driverCoords = driverLocation.location.coordinates; // [lng, lat]
               const dropoffCoords = ride.dropoffLocation.coordinates; // [lng, lat]
+              
+              console.log('\n📍 Step 2: Converting coordinates...');
+              console.log('   Driver Coords [lng, lat]:', driverCoords);
+              console.log('   Dropoff Coords [lng, lat]:', dropoffCoords);
               
               // Convert to {latitude, longitude} format for haversineDistance
               const driverLocationObj = {
@@ -3046,37 +3079,69 @@ export const initSocket = (server) => {
                 longitude: dropoffCoords[0],
               };
               
+              console.log('   Driver Location Object:', driverLocationObj);
+              console.log('   Dropoff Location Object:', dropoffLocationObj);
+              
+              console.log('\n📏 Step 3: Calculating distance...');
               distanceToDropoff = haversineDistance(driverLocationObj, dropoffLocationObj);
+              const distanceInMeters = distanceToDropoff * 1000;
+              
+              console.log('   Distance (km):', distanceToDropoff.toFixed(4));
+              console.log('   Distance (meters):', distanceInMeters.toFixed(2));
+              console.log('   Threshold (meters):', DROPOFF_DISTANCE_THRESHOLD_KM * 1000);
               
               // If driver is within 500m, force normal completion (no early reason needed)
               if (distanceToDropoff <= DROPOFF_DISTANCE_THRESHOLD_KM) {
+                console.log('\n✅ DECISION: Driver is WITHIN 500m of dropoff');
+                console.log('   → Normal completion (no early reason needed)');
+                console.log('   → Setting earlyCompleteReason to null');
                 earlyCompleteReason = null;
               } else {
+                console.log('\n⚠️  DECISION: Driver is MORE THAN 500m away from dropoff');
+                console.log('   → Early completion reason is REQUIRED');
+                console.log('   → Current reason:', earlyCompleteReason || 'NOT PROVIDED');
+                
                 // Driver is more than 500m away, early completion reason is required
                 if (!earlyCompleteReason || earlyCompleteReason.trim().length < 3) {
+                  console.log('   ❌ ERROR: Early completion reason is missing or too short');
+                  console.log('   → Rejecting completion request');
                   return socket.emit('error', {
                     success: false,
                     objectType,
                     code: 'FORBIDDEN',
-                    message: `You are ${(distanceToDropoff * 1000).toFixed(0)}m away from dropoff location. Early completion reason is required (minimum 3 characters).`,
+                    message: `You are ${distanceInMeters.toFixed(0)}m away from dropoff location. Early completion reason is required (minimum 3 characters).`,
                   });
+                } else {
+                  console.log('   ✅ Early completion reason provided and valid');
                 }
               }
+            } else {
+              console.log('\n⚠️  Cannot calculate distance - Missing location data');
+              console.log('   Driver location available:', !!driverLocation?.location?.coordinates);
+              console.log('   Dropoff location available:', !!ride?.dropoffLocation?.coordinates);
+              console.log('   → Proceeding with completion (fallback mode)');
             }
           } catch (error) {
-            console.error('[Distance check error] ride:driver_complete_ride', {
+            console.error('\n❌ ERROR in distance check:', {
               driverId: driver._id?.toString(),
               rideId: rideId,
               error: error.message,
+              stack: error.stack,
             });
             // If distance check fails, still allow completion but log the error
             // This ensures the system doesn't break if location data is unavailable
           }
+          
+          console.log('\n📝 Final earlyCompleteReason:', earlyCompleteReason || 'null');
+          console.log('🚗 ================================================================================\n');
 
           // Validate early completion reason if provided (after distance check)
           if (earlyCompleteReason) {
+            console.log('\n🔍 Validating early completion reason...');
             earlyCompleteReason = earlyCompleteReason.trim();
+            console.log('   Reason length:', earlyCompleteReason.length);
             if (earlyCompleteReason === '' || earlyCompleteReason.length < 3) {
+              console.log('   ❌ Validation failed: Reason too short');
               return socket.emit('error', {
                 success: false,
                 objectType,
@@ -3085,7 +3150,15 @@ export const initSocket = (server) => {
                   'Early completion reason must not be empty and contain atleast 3 characters',
               });
             }
+            console.log('   ✅ Validation passed');
+          } else {
+            console.log('\n✅ No early completion reason - Normal completion');
           }
+          
+          console.log('\n🚀 Proceeding with ride completion...');
+          console.log('   Ride Status:', ride.status);
+          console.log('   Actual Distance:', actualDistance);
+          console.log('   Early Complete Reason:', earlyCompleteReason || 'null');
 
           const actualDuration = parseFloat(
             (
