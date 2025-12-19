@@ -377,12 +377,17 @@ const generatePassengerReceiptContent = (doc, ride, transaction, driver, passeng
     const fareBreakdown = ride.fareBreakdown || {};
     const tipBreakdown = ride.tipBreakdown || {};
 
-    // Calculate fare subtotal (EXCLUDING tip - tip is charged separately)
-    const fareSubtotal = (fareBreakdown.rideSetupFee || 0) +
+    // NEW FORMULA: Calculate base subtotal (sum of all components before surge)
+    const baseSubtotal = (fareBreakdown.rideSetupFee || 0) +
                          (fareBreakdown.baseFare || 0) +
                          (fareBreakdown.timeFare || 0) +
                          (fareBreakdown.distanceFare || 0) +
+                         (fareBreakdown.nightCharge || 0) +
                          (fareBreakdown.waitingCharge || 0);
+
+    // Apply surge multiplier to get subtotal after surge
+    const surgeMultiplier = fareBreakdown.surgeMultiplier || 1;
+    const subtotalAfterSurge = baseSubtotal * surgeMultiplier;
 
     // Commission is passed as parameter (calculated in main function)
 
@@ -408,18 +413,28 @@ const generatePassengerReceiptContent = (doc, ride, transaction, driver, passeng
         type: 'income',
       },
       {
+        label: 'Night Charge',
+        amount: fareBreakdown.nightCharge || 0,
+        type: 'income',
+      },
+      {
         label: 'Waiting Charges',
         amount: fareBreakdown.waitingCharge || 0,
         type: 'income',
       },
       {
+        label: 'Sub Total (Before Surge)',
+        amount: baseSubtotal,
+        type: 'subtotal',
+      },
+      {
         label: 'Surge Multiplier',
-        amount: fareBreakdown.surgeMultiplier || 1,
+        amount: surgeMultiplier,
         type: 'multiplier',
       },
       {
-        label: 'Sub Total (Fare)',
-        amount: fareSubtotal,
+        label: 'Sub Total (After Surge)',
+        amount: subtotalAfterSurge,
         type: 'subtotal',
       },
     ];

@@ -289,9 +289,63 @@ export const findWeeklyStats = async (driverId) => {
   const driverCreatedAt = driver?.createdAt || new Date();
 
   // Get all weeks from driver creation to current week
-  const allWeeks = getAllWeeksSinceDate(driverCreatedAt, new Date());
+  // Use the same week calculation method as findDailyStatsForWeek for consistency
+  const allWeeks = [];
+  const startDate = new Date(driverCreatedAt);
+  const endDate = new Date();
+  
+  // Calculate all weeks using the same method as getDateFromWeek
+  const processedWeeks = new Set();
+  
+  // Start from the week containing driver creation date
+  const startYear = startDate.getFullYear();
+  const startWeek = getISOWeek(startDate);
+  
+  // End at current week
+  const endYear = endDate.getFullYear();
+  const endWeek = getISOWeek(endDate);
+  
+  // Generate all weeks from start to end
+  let currentYear = startYear;
+  let currentWeek = startWeek;
+  
+  while (
+    currentYear < endYear ||
+    (currentYear === endYear && currentWeek <= endWeek)
+  ) {
+    const weekKey = `${currentYear}-${currentWeek}`;
+    
+    if (!processedWeeks.has(weekKey)) {
+      // Use getDateFromWeek to calculate week boundaries (same as findDailyStatsForWeek)
+      const weekStart = getDateFromWeek(currentYear, currentWeek);
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 6);
+      weekEnd.setHours(23, 59, 59, 999);
+      
+      // Only include weeks that overlap with our date range
+      if (weekEnd >= startDate && weekStart <= endDate) {
+        allWeeks.push({
+          weekNumber: currentWeek,
+          year: currentYear,
+          weekId: `${currentYear}-${currentWeek}`,
+          weekStart: new Date(weekStart),
+          weekEnd: new Date(weekEnd),
+          display: `${formatDate(weekStart)} to ${formatDate(weekEnd)}`,
+        });
+        processedWeeks.add(weekKey);
+      }
+    }
+    
+    // Move to next week
+    currentWeek++;
+    if (currentWeek > 52) {
+      currentWeek = 1;
+      currentYear++;
+    }
+  }
 
   // Get weekly stats for all weeks in a single query
+  // Use requestedAt (fallback to rideCompletedAt, then createdAt) to match findDailyStatsForWeek
   const weeklyStats = await Ride.aggregate([
     {
       $match: {
@@ -303,25 +357,39 @@ export const findWeeklyStats = async (driverId) => {
     {
       $lookup: {
         from: 'ridetransactions',
-        let: { rideId: '$_id' },
-        pipeline: [
-          {
-            $match: {
-              $expr: { $eq: ['$rideId', '$$rideId'] },
-              status: { $in: ['COMPLETED', 'REFUNDED'] },
-            },
-          },
-        ],
+        localField: '_id',
+        foreignField: 'rideId',
         as: 'transactions',
       },
     },
     {
-      $unwind: '$transactions',
+      $unwind: {
+        path: '$transactions',
+        preserveNullAndEmptyArrays: true, // Handle rides without transactions
+      },
+    },
+    {
+      $match: {
+        // Filter transactions same as daily stats - COMPLETED or REFUNDED, or no transaction
+        $or: [
+          { 'transactions.status': { $in: ['COMPLETED', 'REFUNDED'] } },
+          { transactions: { $exists: false } }, // Include rides without transactions
+        ],
+      },
     },
     {
       $addFields: {
-        weekNumber: { $isoWeek: '$createdAt' },
-        year: { $isoWeekYear: '$createdAt' },
+        // Use requestedAt for date calculation, fallback to rideCompletedAt, then createdAt
+        // This matches findDailyStatsForWeek logic
+        rideDate: {
+          $ifNull: ['$requestedAt', { $ifNull: ['$rideCompletedAt', '$createdAt'] }],
+        },
+      },
+    },
+    {
+      $addFields: {
+        weekNumber: { $isoWeek: '$rideDate' },
+        year: { $isoWeekYear: '$rideDate' },
       },
     },
     {
@@ -329,28 +397,101 @@ export const findWeeklyStats = async (driverId) => {
         _id: {
           year: '$year',
           week: '$weekNumber',
+          rideId: '$_id', // Group by ride ID first to avoid duplicates from multiple transactions
         },
-        totalRides: {
+        rideId: { $first: '$_id' },
+        requestedAt: { $first: '$requestedAt' },
+        rideCompletedAt: { $first: '$rideCompletedAt' },
+        actualDistance: { $first: '$actualDistance' },
+        actualFare: { $first: '$actualFare' },
+        tipBreakdown: { $first: '$tipBreakdown' },
+        transaction: { $first: '$transactions' }, // Take first transaction (same as daily stats)
+        rideStartedAt: { $first: '$rideStartedAt' },
+      },
+    },
+    {
+      $project: {
+        _id: '$_id',
+        year: '$_id.year',
+        week: '$_id.week',
+        rideId: '$rideId',
+        actualFare: '$actualFare',
+        tipBreakdown: '$tipBreakdown',
+        transaction: '$transaction',
+        rideCompletedAt: '$rideCompletedAt',
+        rideStartedAt: '$rideStartedAt',
+        // Add transactionStatus same as daily stats
+        transactionStatus: {
+          $ifNull: ['$transaction.status', 'COMPLETED'],
+        },
+      },
+    },
+    {
+      $match: {
+        // Only include COMPLETED transactions (same as daily stats)
+        transactionStatus: 'COMPLETED',
+      },
+    },
+    {
+      $addFields: {
+        // Use transaction as completedTransaction for earnings calculation (same as daily stats)
+        completedTransaction: '$transaction',
+      },
+    },
+    {
+      $group: {
+        _id: {
+          year: '$_id.year',
+          week: '$_id.week',
+        },
+        totalRides: { $sum: 1 },
+        totalFare: {
           $sum: {
-            $cond: [{ $eq: ['$transactions.status', 'COMPLETED'] }, 1, 0],
+            $round: [{ $ifNull: ['$actualFare', 0] }, 2], // Total fare with 2 decimal places
           },
         },
         totalCommission: {
           $sum: {
-            $cond: [
-              { $eq: ['$transactions.status', 'COMPLETED'] },
-              '$transactions.commission',
-              0,
-            ],
+            $ifNull: ['$completedTransaction.commission', 0],
           },
         },
         totalDriverEarnings: {
           $sum: {
-            $cond: [
-              { $eq: ['$transactions.status', 'COMPLETED'] },
-              '$transactions.driverEarning',
-              0,
-            ],
+            $let: {
+              vars: {
+                tipAmount: {
+                  $ifNull: [
+                    {
+                      $cond: [
+                        { $ne: ['$tipBreakdown', null] },
+                        { $ifNull: ['$tipBreakdown.amount', 0] },
+                        0,
+                      ],
+                    },
+                    0,
+                  ],
+                },
+              },
+              in: {
+                $cond: [
+                  { $ne: ['$completedTransaction', null] },
+                  {
+                    // If transaction exists: driverEarning + tip from tipBreakdown (tips are stored separately)
+                    $add: [
+                      { $ifNull: ['$completedTransaction.driverEarning', 0] },
+                      '$$tipAmount',
+                    ],
+                  },
+                  {
+                    // If no transaction, calculate: 80% of actualFare + tip
+                    $add: [
+                      { $multiply: [{ $ifNull: ['$actualFare', 0] }, 0.8] },
+                      '$$tipAmount',
+                    ],
+                  },
+                ],
+              },
+            },
           },
         },
         // Total online driving hours for the week (sum of rideCompletedAt - rideStartedAt)
@@ -414,6 +555,7 @@ export const findWeeklyStats = async (driverId) => {
     const key = `${week.year}-${week.weekNumber}`;
     const stats = statsMap.get(key) || {
       totalRides: 0,
+      totalFare: 0,
       totalCommission: 0,
       totalDriverEarnings: 0,
       totalDrivingHours: 0,
@@ -444,6 +586,7 @@ export const findWeeklyStats = async (driverId) => {
       },
       earnings: {
         payoutDate: payout?.payoutDate || null,
+        totalFare: stats.totalFare || 0,
         totalDeductions: stats.totalCommission,
         totalEarnings: stats.totalDriverEarnings,
         total: stats.totalRides,
@@ -469,13 +612,28 @@ export const findDailyStatsForWeek = async (driverId, year, week) => {
   );
 
   // Get daily breakdown of rides for the week
-  // Use requestedAt instead of createdAt to match the actual ride date
+  // Use requestedAt for both filtering and grouping to match the actual ride date
   const dailyStats = await RideModel.aggregate([
     {
       $match: {
         driverId: new mongoose.Types.ObjectId(driverId),
         status: 'RIDE_COMPLETED',
+        // First match by createdAt to get all potential rides in the time range
         createdAt: { $gte: weekStart, $lte: weekEnd },
+      },
+    },
+    {
+      $addFields: {
+        // Calculate rideDate (same logic as grouping)
+        rideDate: {
+          $ifNull: ['$requestedAt', { $ifNull: ['$rideCompletedAt', '$createdAt'] }],
+        },
+      },
+    },
+    {
+      $match: {
+        // Filter by rideDate to match the grouping logic
+        rideDate: { $gte: weekStart, $lte: weekEnd },
       },
     },
     {
@@ -487,9 +645,23 @@ export const findDailyStatsForWeek = async (driverId, year, week) => {
       },
     },
     {
+      $lookup: {
+        from: 'admincommissions',
+        localField: '_id',
+        foreignField: 'rideId',
+        as: 'adminCommission',
+      },
+    },
+    {
       $unwind: {
         path: '$transactions',
         preserveNullAndEmptyArrays: true, // Handle rides without transactions
+      },
+    },
+    {
+      $unwind: {
+        path: '$adminCommission',
+        preserveNullAndEmptyArrays: true, // Handle rides without admin commission
       },
     },
     {
@@ -508,6 +680,10 @@ export const findDailyStatsForWeek = async (driverId, year, week) => {
         rideCompletedAt: { $first: '$rideCompletedAt' },
         actualDistance: { $first: '$actualDistance' },
         actualFare: { $first: '$actualFare' },
+        carType: { $first: '$carType' },
+        adminCommissionTotalAmount: { $first: '$adminCommission.totalAmount' },
+        adminCommissionAmount: { $first: '$adminCommission.commissionAmount' },
+        adminCommissionCarType: { $first: '$adminCommission.carType' },
         tipBreakdown: { $first: '$tipBreakdown' },
         transaction: { $first: '$transactions' },
       },
@@ -537,24 +713,70 @@ export const findDailyStatsForWeek = async (driverId, year, week) => {
           },
         },
         distance: { $ifNull: ['$actualDistance', 0] },
+        carType: { $ifNull: ['$adminCommissionCarType', '$carType'] },
+        // Use actualFare for consistency with weekly stats
         fare: { $ifNull: ['$actualFare', 0] },
-        tip: { $ifNull: ['$tipBreakdown.amount', 0] },
-        commission: { $ifNull: ['$transaction.commission', 0] },
-        discount: { $ifNull: ['$transaction.discount', 0] },
-        // Calculate driverEarning: if transaction exists use it, otherwise calculate from fare (80% after 20% commission)
-        driverEarning: {
+        tip: {
           $ifNull: [
-            '$transaction.driverEarning',
             {
-              $add: [
-                {
-                  // Driver gets 80% of actualFare (after 20% commission)
-                  $multiply: [{ $ifNull: ['$actualFare', 0] }, 0.8],
-                },
-                { $ifNull: ['$tipBreakdown.amount', 0] }, // Include tips
+              $cond: [
+                { $ne: ['$tipBreakdown', null] },
+                { $ifNull: ['$tipBreakdown.amount', 0] },
+                0,
               ],
             },
+            0,
           ],
+        },
+        // Use AdminCommission.commissionAmount if available, otherwise fallback to transaction.commission
+        commission: {
+          $ifNull: [
+            '$adminCommissionAmount',
+            { $ifNull: ['$transaction.commission', 0] },
+          ],
+        },
+        discount: { $ifNull: ['$transaction.discount', 0] },
+        // Calculate driverEarning: if transaction exists use driverEarning + tip, otherwise calculate from fare (80% after 20% commission) + tip
+        // Use tipBreakdown.amount as source of truth for tips (it's on the Ride model)
+        driverEarning: {
+          $let: {
+            vars: {
+              tipAmount: {
+                $ifNull: [
+                  {
+                    $cond: [
+                      { $ne: ['$tipBreakdown', null] },
+                      { $ifNull: ['$tipBreakdown.amount', 0] },
+                      0,
+                    ],
+                  },
+                  0,
+                ],
+              },
+            },
+            in: {
+              $cond: [
+                { $ne: ['$transaction', null] },
+                {
+                  // If transaction exists: driverEarning + tip from tipBreakdown (tips are stored separately)
+                  $add: [
+                    { $ifNull: ['$transaction.driverEarning', 0] },
+                    '$$tipAmount',
+                  ],
+                },
+                {
+                  // If no transaction, calculate: 80% of actualFare + tip
+                  $add: [
+                    {
+                      // Driver gets 80% of actualFare (after 20% commission)
+                      $multiply: [{ $ifNull: ['$actualFare', 0] }, 0.8],
+                    },
+                    '$$tipAmount',
+                  ],
+                },
+              ],
+            },
+          },
         },
         transactionStatus: { $ifNull: ['$transaction.status', 'COMPLETED'] },
       },
@@ -572,17 +794,26 @@ export const findDailyStatsForWeek = async (driverId, year, week) => {
         rides: {
           $push: {
             rideId: '$rideId',
-            distance: '$distance',
-            fare: '$fare',
-            tip: '$tip',
-            commission: '$commission',
-            discount: '$discount',
-            driverEarning: '$driverEarning',
+            distance: { $round: ['$distance', 2] },
+            fare: { $round: ['$fare', 2] }, // This uses actualFare from line 718
+            tip: { $round: ['$tip', 2] },
+            commission: { $round: ['$commission', 2] },
+            discount: { $round: ['$discount', 2] },
+            driverEarning: { $round: ['$driverEarning', 2] },
+            carType: '$carType',
           },
         },
         totalRides: { $sum: 1 },
         totalEarnings: { $sum: '$driverEarning' },
         totalDistance: { $sum: '$distance' },
+        totalCommission: { $sum: '$commission' },
+        // Commission breakdown by car type
+        commissionByCarType: {
+          $push: {
+            carType: '$carType',
+            commission: { $round: ['$commission', 2] },
+          },
+        },
       },
     },
     {
@@ -606,8 +837,10 @@ export const findDailyStatsForWeek = async (driverId, year, week) => {
         },
         rides: 1,
         totalRides: 1,
-        totalEarnings: 1,
-        totalDistance: 1,
+        totalEarnings: { $round: ['$totalEarnings', 2] },
+        totalDistance: { $round: ['$totalDistance', 2] },
+        totalCommission: { $round: ['$totalCommission', 2] },
+        commissionByCarType: 1,
       },
     },
     {
@@ -616,6 +849,37 @@ export const findDailyStatsForWeek = async (driverId, year, week) => {
   ]);
 
   console.log(`📊 Found ${dailyStats.length} days with data`);
+
+  // Process commission breakdown by car type for each day
+  const processedDailyStats = dailyStats.map((day) => {
+    // Aggregate commission by car type
+    const commissionByCarTypeMap = new Map();
+    
+    if (day.commissionByCarType && Array.isArray(day.commissionByCarType)) {
+      day.commissionByCarType.forEach((item) => {
+        if (item && item.carType) {
+          const currentCommission = commissionByCarTypeMap.get(item.carType) || 0;
+          commissionByCarTypeMap.set(
+            item.carType,
+            currentCommission + (item.commission || 0),
+          );
+        }
+      });
+    }
+
+    // Convert map to array format
+    const commissionByCarType = Array.from(commissionByCarTypeMap.entries()).map(
+      ([carType, commission]) => ({
+        carType,
+        commission: Math.round(commission * 100) / 100, // Round to 2 decimal places
+      }),
+    );
+
+    return {
+      ...day,
+      commissionByCarType,
+    };
+  });
 
   // Fill in missing days with consistent structure
   const allDays = [];
@@ -638,7 +902,7 @@ export const findDailyStatsForWeek = async (driverId, year, week) => {
     ];
     const dayName = dayNames[date.getUTCDay()];
 
-    const existingDay = dailyStats.find((day) => day.date === dateStr);
+    const existingDay = processedDailyStats.find((day) => day.date === dateStr);
 
     allDays.push(
       existingDay || {
@@ -649,6 +913,8 @@ export const findDailyStatsForWeek = async (driverId, year, week) => {
         totalRides: 0,
         totalEarnings: 0,
         totalDistance: 0,
+        totalCommission: 0,
+        commissionByCarType: [],
       },
     );
   }

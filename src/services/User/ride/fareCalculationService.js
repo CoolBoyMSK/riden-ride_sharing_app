@@ -46,9 +46,6 @@ export const calculateEstimatedFare = async (
     // Calculate base components and round to 2 decimals
     const rideSetupFee = roundToTwoDecimals(carTypeFare.rideSetupFee);
     const baseFare = roundToTwoDecimals(carTypeFare.baseFare);
-    const surgeAmount = roundToTwoDecimals(
-      baseFare * surgeMultiplier - baseFare,
-    );
     const distanceFare = roundToTwoDecimals(distance * carTypeFare.perKmFare);
     const timeFare = roundToTwoDecimals(
       duration ? duration * carTypeFare.perMinuteFare : 0,
@@ -59,14 +56,27 @@ export const calculateEstimatedFare = async (
         : 0,
     );
 
-    // Calculate subtotal and round to 2 decimals
-    const subtotal = roundToTwoDecimals(
+    // NEW FORMULA: Sum all components first, then apply surge multiplier
+    const baseSubtotal = roundToTwoDecimals(
       rideSetupFee +
-        baseFare * surgeMultiplier +
+        baseFare +
         distanceFare +
         timeFare +
         nightCharge,
     );
+
+    // Apply surge multiplier to the sum of all components
+    const subtotalAfterSurge = roundToTwoDecimals(
+      baseSubtotal * surgeMultiplier,
+    );
+
+    // Calculate surge amount (difference after applying surge)
+    const surgeAmount = roundToTwoDecimals(
+      subtotalAfterSurge - baseSubtotal,
+    );
+
+    // Subtotal is now after surge (discount will be applied later if needed)
+    const subtotal = subtotalAfterSurge;
 
     // Return the exact same structure as before with all amounts rounded
     return {
@@ -124,9 +134,6 @@ export const calculateActualFare = async (rideData) => {
     // Calculate components and round to 2 decimals
     const rideSetupFee = roundToTwoDecimals(fareConfig.rideSetupFee);
     const baseFare = roundToTwoDecimals(fareConfig.baseFare);
-    const surgeAmount = roundToTwoDecimals(
-      baseFare * surgeMultiplier - baseFare,
-    );
     const distanceFare = roundToTwoDecimals(
       actualDistance * fareConfig.perKmFare,
     );
@@ -149,22 +156,31 @@ export const calculateActualFare = async (rideData) => {
         : 0,
     );
 
-    const discount = roundToTwoDecimals(
-      actualDuration <= fareConfig.discount?.minutes &&
-        actualDistance <= fareConfig.discount?.distance
-        ? fareConfig.discount?.charge
-        : 0,
-    );
-
-    const subtotal = roundToTwoDecimals(
+    // NEW FORMULA: Sum all components first, then apply surge multiplier
+    const baseSubtotal = roundToTwoDecimals(
       rideSetupFee +
-        baseFare * surgeMultiplier +
+        baseFare +
         distanceFare +
         timeFare +
         nightCharge +
-        waitingCharge -
-        discount,
+        waitingCharge,
     );
+
+    // Apply surge multiplier to the sum of all components
+    const subtotalAfterSurge = roundToTwoDecimals(
+      baseSubtotal * surgeMultiplier,
+    );
+
+    // Calculate surge amount (difference after applying surge)
+    const surgeAmount = roundToTwoDecimals(
+      subtotalAfterSurge - baseSubtotal,
+    );
+
+    // Discount removed from fare calculation (no longer required)
+    const discount = 0;
+
+    // Subtotal is after surge (discount removed)
+    const subtotal = subtotalAfterSurge;
 
     console.log('Subtotal before promo discount: ', subtotal);
     console.log(typeof subtotal);

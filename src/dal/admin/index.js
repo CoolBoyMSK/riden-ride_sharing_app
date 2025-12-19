@@ -3324,8 +3324,34 @@ export const findAdminCommissions = async ({
 
   const total = await AdminCommission.countDocuments(filter);
 
+  // Get current commission percentages for all carTypes
+  const currentCommissions = await Commission.find({}).lean();
+  const commissionMap = new Map(
+    currentCommissions.map((c) => [c.carType, c.percentage]),
+  );
+
+  // Update commissions with current commission percentage and recalculate commissionAmount
+  const updatedCommissions = commissions.map((commission) => {
+    const currentPercentage = commissionMap.get(commission.carType);
+    
+    // Use current commission percentage if available, otherwise use stored one
+    const commissionPercentage = currentPercentage ?? commission.commission;
+    
+    // Recalculate commissionAmount based on current percentage
+    // Formula: (totalAmount * commissionPercentage / 100) - driverDistanceCommission
+    const recalculatedCommissionAmount = Math.floor(
+      (commission.totalAmount / 100) * commissionPercentage,
+    ) - (commission.driverDistanceCommission || 0);
+
+    return {
+      ...commission,
+      commission: commissionPercentage, // Use current percentage
+      commissionAmount: recalculatedCommissionAmount, // Recalculated based on current percentage
+    };
+  });
+
   return {
-    data: commissions,
+    data: updatedCommissions,
     pagination: {
       total,
       page: safePage,

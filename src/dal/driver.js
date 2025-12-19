@@ -2028,6 +2028,23 @@ export const findFareConfigurationForLocation = async (
 //   };
 // };
 
+// Helper function to parse ratio string (handles both "X:Y" and "X.Y" formats)
+const parseRatio = (ratioString) => {
+  if (!ratioString) return 0;
+  
+  // Check if it's in "X:Y" format
+  if (ratioString.includes(':')) {
+    const parts = ratioString.split(':');
+    const numerator = parseFloat(parts[0]);
+    const denominator = parseFloat(parts[1]);
+    if (denominator === 0) return 0;
+    return numerator / denominator;
+  }
+  
+  // Otherwise, treat as decimal number
+  return parseFloat(ratioString);
+};
+
 export const calculateSurgeScenario = (
   rideCount,
   driverCount,
@@ -2039,21 +2056,28 @@ export const calculateSurgeScenario = (
   const sortedLevels = surgeConfig
     .filter((level) => level.level && level.ratio && level.multiplier)
     .sort((a, b) => {
-      const ratioA = parseFloat(a.ratio.split(':')[0]);
-      const ratioB = parseFloat(b.ratio.split(':')[0]);
+      const ratioA = parseRatio(a.ratio);
+      const ratioB = parseRatio(b.ratio);
       return ratioA - ratioB;
     });
 
   let highestQualifyingLevel = null;
 
-  for (const level of sortedLevels) {
-    const requiredRatio = parseFloat(level.ratio.split(':')[0]);
-    if (rideToDriverRatio >= requiredRatio) {
-      if (
-        !highestQualifyingLevel ||
-        level.level > highestQualifyingLevel.level
-      ) {
-        highestQualifyingLevel = level;
+  // Surge should only apply when there are more rides than available drivers (actual competition)
+  // With equal or fewer rides than drivers, there's no demand pressure, so no surge
+  const hasDemandPressure = rideCount > driverCount && driverCount > 0;
+
+  if (hasDemandPressure) {
+    for (const level of sortedLevels) {
+      const requiredRatio = parseRatio(level.ratio);
+      // The ratio represents "X rides per Y drivers", so we need rideToDriverRatio >= requiredRatio
+      if (rideToDriverRatio >= requiredRatio) {
+        if (
+          !highestQualifyingLevel ||
+          level.level > highestQualifyingLevel.level
+        ) {
+          highestQualifyingLevel = level;
+        }
       }
     }
   }
@@ -2113,7 +2137,7 @@ const getNextLevelRequirements = (
   const nextLevel = surgeLevels.find((level) => level.level > currentLevel);
   if (!nextLevel) return null;
 
-  const requiredRatio = parseFloat(nextLevel.ratio.split(':')[0]);
+  const requiredRatio = parseRatio(nextLevel.ratio);
   const requiredRides = Math.ceil(currentDrivers * requiredRatio);
   const additionalRidesNeeded = Math.max(0, requiredRides - currentRides);
 
