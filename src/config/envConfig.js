@@ -30,9 +30,13 @@ const env = {
   ),
   JWT_ACCESS_EXPIRES_IN: process.env.JWT_ACCESS_EXPIRES_IN || '15m',
   JWT_REFRESH_EXPIRES_IN: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
-  EMAIL_USER: required(process.env.EMAIL_USER, 'EMAIL_USER'),
-  EMAIL_PASS: required(process.env.EMAIL_PASS, 'EMAIL_PASS'),
-  EMAIL_FROM: required(process.env.EMAIL_FROM, 'EMAIL_FROM'),
+  // Email config - optional (only required when emailTransporter is used)
+  SES_SMTP_USER: process.env.SES_SMTP_USER,
+  SES_SMTP_PASS: process.env.SES_SMTP_PASS,
+  EMAIL_FROM: process.env.EMAIL_FROM,
+  SMTP_HOST: process.env.SMTP_HOST || 'email-smtp.us-east-2.amazonaws.com',
+  SMTP_PORT: parseInt(process.env.SMTP_PORT || '587', 10),
+  SMTP_SECURE: process.env.SMTP_SECURE === 'true',
   FIREBASE_PROJECT_ID: required(
     process.env.FIREBASE_PROJECT_ID,
     'FIREBASE_PROJECT_ID',
