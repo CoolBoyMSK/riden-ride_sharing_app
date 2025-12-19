@@ -3131,7 +3131,18 @@ export const initSocket = (server) => {
               console.log('\n⚠️  Cannot calculate distance - Missing location data');
               console.log('   Driver location available:', !!driverLocation?.location?.coordinates);
               console.log('   Dropoff location available:', !!ride?.dropoffLocation?.coordinates);
-              console.log('   → Proceeding with completion (fallback mode)');
+              console.log('   ❌ ERROR: Cannot complete ride without location data');
+              
+              // Require early completion reason if location data is missing (safety measure)
+              if (!earlyCompleteReason || earlyCompleteReason.trim().length < 3) {
+                return socket.emit('error', {
+                  success: false,
+                  objectType,
+                  code: 'FORBIDDEN',
+                  message: 'Cannot calculate distance to dropoff location. Please provide an early completion reason (minimum 3 characters) to complete the ride.',
+                });
+              }
+              console.log('   → Early completion reason provided, allowing completion');
             }
           } catch (error) {
             console.error('\n❌ ERROR in distance check:', {
@@ -3140,8 +3151,17 @@ export const initSocket = (server) => {
               error: error.message,
               stack: error.stack,
             });
-            // If distance check fails, still allow completion but log the error
-            // This ensures the system doesn't break if location data is unavailable
+            
+            // If distance check fails, require early completion reason as safety measure
+            if (!earlyCompleteReason || earlyCompleteReason.trim().length < 3) {
+              return socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'FORBIDDEN',
+                message: 'Failed to verify distance to dropoff location. Please provide an early completion reason (minimum 3 characters) to complete the ride.',
+              });
+            }
+            console.log('   → Early completion reason provided, allowing completion despite error');
           }
           
           console.log('\n📝 Final earlyCompleteReason:', earlyCompleteReason || 'null');
