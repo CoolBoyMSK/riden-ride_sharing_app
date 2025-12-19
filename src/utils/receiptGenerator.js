@@ -58,9 +58,28 @@ const getFirstName = (fullName) => {
 };
 
 // Fixed PDF generation function
-const generatePDFBuffer = (ride, transaction, driver, passenger, receiptType = 'passenger') => {
-  return new Promise((resolve, reject) => {
+const generatePDFBuffer = async (ride, transaction, driver, passenger, receiptType = 'passenger') => {
+  return new Promise(async (resolve, reject) => {
     try {
+      // Calculate commission before generating content
+      let commissionAmount = 0;
+      if (transaction?.commission) {
+        commissionAmount = parseFloat(transaction.commission) || 0;
+      } else {
+        // Calculate commission if not in transaction
+        try {
+          const commissionDoc = await Commission.findOne({
+            carType: ride.carType,
+          }).lean();
+          if (commissionDoc) {
+            const actualFare = ride.actualFare || ride.estimatedFare || ride.fareBreakdown?.finalAmount || 0;
+            commissionAmount = Math.round(((actualFare / 100) * commissionDoc.percentage) * 100) / 100;
+          }
+        } catch (err) {
+          console.error('[Receipt] Error calculating commission:', err.message);
+        }
+      }
+
       // Create PDF document with proper configuration
       const receiptTitle = receiptType === 'driver' ? 'Driver Receipt' : 'Passenger Receipt';
       const doc = new PDFDocument({
@@ -121,7 +140,7 @@ const generatePDFBuffer = (ride, transaction, driver, passenger, receiptType = '
       if (receiptType === 'driver') {
         generateDriverReceiptContent(doc, ride, transaction, driver, passenger);
       } else {
-        generatePassengerReceiptContent(doc, ride, transaction, driver, passenger);
+        generatePassengerReceiptContent(doc, ride, transaction, driver, passenger, commissionAmount);
       }
 
       // Finalize PDF
@@ -134,7 +153,7 @@ const generatePDFBuffer = (ride, transaction, driver, passenger, receiptType = '
 };
 
 // Passenger receipt content generation
-const generatePassengerReceiptContent = (doc, ride, transaction, driver, passenger) => {
+const generatePassengerReceiptContent = (doc, ride, transaction, driver, passenger, commissionAmount = 0) => {
   try {
     // Set default font at the beginning
     doc.font('Helvetica');
@@ -358,13 +377,14 @@ const generatePassengerReceiptContent = (doc, ride, transaction, driver, passeng
     const fareBreakdown = ride.fareBreakdown || {};
     const tipBreakdown = ride.tipBreakdown || {};
 
-    // Calculate subtotal (before discount and after surge)
-    const subtotal = (fareBreakdown.rideSetupFee || 0) +
-                     (fareBreakdown.baseFare || 0) +
-                     (fareBreakdown.timeFare || 0) +
-                     (fareBreakdown.distanceFare || 0) +
-                     (fareBreakdown.waitingCharge || 0) +
-                     (tipBreakdown.amount || 0);
+    // Calculate fare subtotal (EXCLUDING tip - tip is charged separately)
+    const fareSubtotal = (fareBreakdown.rideSetupFee || 0) +
+                         (fareBreakdown.baseFare || 0) +
+                         (fareBreakdown.timeFare || 0) +
+                         (fareBreakdown.distanceFare || 0) +
+                         (fareBreakdown.waitingCharge || 0);
+
+    // Commission is passed as parameter (calculated in main function)
 
     const items = [
       {
@@ -398,37 +418,45 @@ const generatePassengerReceiptContent = (doc, ride, transaction, driver, passeng
         type: 'multiplier',
       },
       {
-        label: 'Tip',
-        amount: tipBreakdown.amount || 0,
-        type: 'income',
-      },
-      {
-        label: 'Sub Total',
-        amount: subtotal,
+        label: 'Sub Total (Fare)',
+        amount: fareSubtotal,
         type: 'subtotal',
       },
     ];
 
-    // Add Discount (PROMOCODE) only if promo code was actually applied
-    const hasPromoCode = ride.promoCode?.code && ride.promoCode?.isApplied === true;
-    if (hasPromoCode) {
-      const promoDiscount = (tipBreakdown.promoDiscount || 0) + (fareBreakdown.promoDiscount || 0);
-      if (promoDiscount > 0) {
-        // Get promo code name from ride object
-        const promoCodeName = ride.promoCode.code;
-        const discountLabel = `Discount Promo Code ${promoCodeName}`;
-        
-        items.push({
-          label: discountLabel,
-          amount: promoDiscount,
-          type: 'deduction',
-        });
-      }
+    // Add Discount (PROMOCODE) if exists
+    const promoDiscount = (tipBreakdown.promoDiscount || 0) + (fareBreakdown.promoDiscount || 0);
+    if (promoDiscount > 0) {
+      const promoCodeName = ride.promoCode?.code || 'Promo Code';
+      items.push({
+        label: `Discount ${promoCodeName}`,
+        amount: promoDiscount,
+        type: 'deduction',
+      });
     }
 
-    // Add Total Amount Paid
+    // Add Commission (informational - not charged to passenger, but shown for transparency)
+    if (commissionAmount > 0) {
+      items.push({
+        label: 'Platform Commission',
+        amount: commissionAmount,
+        type: 'info',
+      });
+    }
+
+    // Add Tip (separate charge)
+    const tipAmount = parseFloat(tipBreakdown.amount || 0);
+    if (tipAmount > 0) {
+      items.push({
+        label: 'Tip',
+        amount: tipAmount,
+        type: 'income',
+      });
+    }
+
+    // Add Total Amount Paid (fare only, tip charged separately)
     items.push({
-      label: 'Total Amount Paid',
+      label: 'Total Amount Paid (Fare)',
       amount: fareBreakdown.finalAmount || 0,
       type: 'total',
     });
@@ -449,6 +477,9 @@ const generatePassengerReceiptContent = (doc, ride, transaction, driver, passeng
         amountText = `x${amount.toFixed(2)}`;
       } else if (item.type === 'subtotal' || item.type === 'total') {
         amountText = formatCurrency(amount);
+      } else if (item.type === 'info') {
+        // Commission/info items - show in gray color for informational purposes
+        amountText = formatCurrency(amount);
       } else {
         amountText =
           item.type === 'deduction'
@@ -457,6 +488,7 @@ const generatePassengerReceiptContent = (doc, ride, transaction, driver, passeng
       }
       
       const color = item.type === 'deduction' ? '#ef4444' : 
+                   item.type === 'info' ? '#6b7280' : // Gray for informational items
                    (item.type === 'subtotal' || item.type === 'total') ? '#000000' : '#000000';
       const fontWeight = (item.type === 'subtotal' || item.type === 'total') ? 'Helvetica-Bold' : 'Helvetica';
 
@@ -955,7 +987,8 @@ export const generateRideReceipt = async (bookingId, receiptType = 'passenger') 
       const discount = ride.fareBreakdown?.promoDiscount || 0;
       const tip = ride.tipBreakdown?.amount || 0;
       const commissionPercentage = commissionDoc.percentage;
-      const commissionAmount = Math.floor((actualFare / 100) * commissionPercentage);
+      // Round to 2 decimal places instead of Math.floor to preserve cents
+      const commissionAmount = Math.round(((actualFare / 100) * commissionPercentage) * 100) / 100;
       const driverEarning = actualFare - commissionAmount;
 
       // Get payout week

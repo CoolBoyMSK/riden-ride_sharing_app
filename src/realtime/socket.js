@@ -2987,19 +2987,6 @@ export const initSocket = (server) => {
             });
           }
 
-          if (earlyCompleteReason) {
-            earlyCompleteReason = earlyCompleteReason.trim();
-            if (earlyCompleteReason === '' || earlyCompleteReason.length <= 3) {
-              return socket.emit('error', {
-                success: false,
-                objectType,
-                code: 'FORBIDDEN',
-                message:
-                  'Early completion reason must not be empty and contain atleast 3 characters',
-              });
-            }
-          }
-
           const ride = await findRideById(rideId);
           const driverId = ride?.driverId?._id;
           if (!ride) {
@@ -3035,6 +3022,69 @@ export const initSocket = (server) => {
               code: 'FORBIDDEN',
               message: `Invalid Distance, Distance must be greater than 0 and positive`,
             });
+          }
+
+          // Check distance to dropoff location
+          // If driver is within 500m of dropoff → Normal completion (no reason needed)
+          // If driver is more than 500m away → Early completion (reason required)
+          const DROPOFF_DISTANCE_THRESHOLD_KM = 0.5; // 500 meters
+          let distanceToDropoff = null;
+          
+          try {
+            const driverLocation = await findDriverLocation(driver._id);
+            if (driverLocation?.location?.coordinates && ride?.dropoffLocation?.coordinates) {
+              const driverCoords = driverLocation.location.coordinates; // [lng, lat]
+              const dropoffCoords = ride.dropoffLocation.coordinates; // [lng, lat]
+              
+              // Convert to {latitude, longitude} format for haversineDistance
+              const driverLocationObj = {
+                latitude: driverCoords[1],
+                longitude: driverCoords[0],
+              };
+              const dropoffLocationObj = {
+                latitude: dropoffCoords[1],
+                longitude: dropoffCoords[0],
+              };
+              
+              distanceToDropoff = haversineDistance(driverLocationObj, dropoffLocationObj);
+              
+              // If driver is within 500m, force normal completion (no early reason needed)
+              if (distanceToDropoff <= DROPOFF_DISTANCE_THRESHOLD_KM) {
+                earlyCompleteReason = null;
+              } else {
+                // Driver is more than 500m away, early completion reason is required
+                if (!earlyCompleteReason || earlyCompleteReason.trim().length < 3) {
+                  return socket.emit('error', {
+                    success: false,
+                    objectType,
+                    code: 'FORBIDDEN',
+                    message: `You are ${(distanceToDropoff * 1000).toFixed(0)}m away from dropoff location. Early completion reason is required (minimum 3 characters).`,
+                  });
+                }
+              }
+            }
+          } catch (error) {
+            console.error('[Distance check error] ride:driver_complete_ride', {
+              driverId: driver._id?.toString(),
+              rideId: rideId,
+              error: error.message,
+            });
+            // If distance check fails, still allow completion but log the error
+            // This ensures the system doesn't break if location data is unavailable
+          }
+
+          // Validate early completion reason if provided (after distance check)
+          if (earlyCompleteReason) {
+            earlyCompleteReason = earlyCompleteReason.trim();
+            if (earlyCompleteReason === '' || earlyCompleteReason.length < 3) {
+              return socket.emit('error', {
+                success: false,
+                objectType,
+                code: 'FORBIDDEN',
+                message:
+                  'Early completion reason must not be empty and contain atleast 3 characters',
+              });
+            }
           }
 
           const actualDuration = parseFloat(
@@ -5030,7 +5080,8 @@ export const initSocket = (server) => {
             });
           }
 
-          const amount = Math.floor((fare * percent) / 100);
+          // Round to 2 decimal places instead of Math.floor to preserve cents
+          const amount = Math.round(((fare * percent) / 100) * 100) / 100;
           if (amount <= 0) {
             return socket.emit('error', {
               success: false,
