@@ -3090,41 +3090,31 @@ export const initSocket = (server) => {
               console.log('   Distance (meters):', distanceInMeters.toFixed(2));
               console.log('   Threshold (meters):', DROPOFF_DISTANCE_THRESHOLD_KM * 1000);
               
-              // If driver is within 500m, ONLY allow normal completion (early complete NOT allowed)
-              if (distanceToDropoff <= DROPOFF_DISTANCE_THRESHOLD_KM) {
-                console.log('\n✅ DECISION: Driver is WITHIN 500m of dropoff');
-                console.log('   → Normal completion ONLY (early complete NOT allowed)');
-                
-                // If driver tries to complete early when within 500m, reject it
-                if (earlyCompleteReason && earlyCompleteReason.trim().length >= 3) {
-                  console.log('   ❌ ERROR: Cannot complete early when within 500m of dropoff');
-                  return socket.emit('error', {
-                    success: false,
-                    objectType,
-                    code: 'FORBIDDEN',
-                    message: `You are within 500m of dropoff location. Please complete the ride normally without early completion reason.`,
-                  });
-                }
-                
-                console.log('   → Setting earlyCompleteReason to null');
-                earlyCompleteReason = null;
+              // Check if driver provided reason first (reason allows completion at any distance)
+              if (earlyCompleteReason && earlyCompleteReason.trim().length >= 3) {
+                console.log('\n✅ DECISION: Driver provided early completion reason');
+                console.log('   → Early completion ALLOWED (reason provided, distance does not matter)');
+                console.log('   → Distance:', distanceInMeters.toFixed(2), 'meters');
+                console.log('   → Reason:', earlyCompleteReason);
+                // Allow early complete with reason regardless of distance
               } else {
-                console.log('\n⚠️  DECISION: Driver is MORE THAN 500m away from dropoff');
-                console.log('   → Early completion ONLY (normal complete NOT allowed)');
-                console.log('   → Current reason:', earlyCompleteReason || 'NOT PROVIDED');
-                
-                // Driver is more than 500m away, ONLY early completion is allowed (normal completion blocked)
-                if (!earlyCompleteReason || earlyCompleteReason.trim().length < 3) {
-                  console.log('   ❌ ERROR: Early completion reason is missing or too short');
-                  console.log('   → Rejecting completion request');
+                // No reason provided - check distance
+                if (distanceToDropoff <= DROPOFF_DISTANCE_THRESHOLD_KM) {
+                  console.log('\n✅ DECISION: Driver is WITHIN 500m of dropoff (no reason provided)');
+                  console.log('   → Normal completion (no reason needed within 500m)');
+                  console.log('   → Setting earlyCompleteReason to null');
+                  earlyCompleteReason = null;
+                } else {
+                  console.log('\n⚠️  DECISION: Driver is MORE THAN 500m away from dropoff (no reason provided)');
+                  console.log('   → Early completion REQUIRED (normal complete NOT allowed)');
+                  console.log('   → Distance:', distanceInMeters.toFixed(2), 'meters');
+                  console.log('   ❌ ERROR: Early completion reason is required when more than 500m away');
                   return socket.emit('error', {
                     success: false,
                     objectType,
                     code: 'FORBIDDEN',
                     message: `You are ${distanceInMeters.toFixed(0)}m away from dropoff location. You can only complete the ride early with a reason (minimum 3 characters). Normal completion is not allowed when more than 500m away.`,
                   });
-                } else {
-                  console.log('   ✅ Early completion reason provided and valid');
                 }
               }
             } else {
