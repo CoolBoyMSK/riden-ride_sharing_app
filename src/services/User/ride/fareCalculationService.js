@@ -46,7 +46,6 @@ export const calculateEstimatedFare = async (
     // Calculate base components and round to 2 decimals
     const rideSetupFee = roundToTwoDecimals(carTypeFare.rideSetupFee);
     const baseFare = roundToTwoDecimals(carTypeFare.baseFare);
-    const distanceFare = roundToTwoDecimals(distance * carTypeFare.perKmFare);
     const timeFare = roundToTwoDecimals(
       duration ? duration * carTypeFare.perMinuteFare : 0,
     );
@@ -55,12 +54,22 @@ export const calculateEstimatedFare = async (
         ? carTypeFare.nightCharge
         : 0,
     );
+    
+    // If night charges apply, distance fare should be zero in calculation
+    // Otherwise use the distance fare
+    const calculatedDistanceFare = nightCharge > 0 
+      ? 0 
+      : roundToTwoDecimals(distance * carTypeFare.perKmFare);
+    
+    // Store original distance fare for display purposes
+    const distanceFare = roundToTwoDecimals(distance * carTypeFare.perKmFare);
 
     // NEW FORMULA: Sum all components first, then apply surge multiplier
+    // Note: If night charge exists, calculatedDistanceFare is 0
     const baseSubtotal = roundToTwoDecimals(
       rideSetupFee +
         baseFare +
-        distanceFare +
+        calculatedDistanceFare +
         timeFare +
         nightCharge,
     );
@@ -134,9 +143,6 @@ export const calculateActualFare = async (rideData) => {
     // Calculate components and round to 2 decimals
     const rideSetupFee = roundToTwoDecimals(fareConfig.rideSetupFee);
     const baseFare = roundToTwoDecimals(fareConfig.baseFare);
-    const distanceFare = roundToTwoDecimals(
-      actualDistance * fareConfig.perKmFare,
-    );
     const timeFare = roundToTwoDecimals(
       actualDuration * fareConfig.perMinuteFare,
     );
@@ -148,6 +154,17 @@ export const calculateActualFare = async (rideData) => {
         : 0,
     );
 
+    // If night charges apply, distance fare should be zero in calculation
+    // Otherwise use the distance fare
+    const calculatedDistanceFare = nightCharge > 0 
+      ? 0 
+      : roundToTwoDecimals(actualDistance * fareConfig.perKmFare);
+    
+    // Store original distance fare for display purposes
+    const distanceFare = roundToTwoDecimals(
+      actualDistance * fareConfig.perKmFare,
+    );
+
     // Waiting charge
     const waitingCharge = roundToTwoDecimals(
       waitingTime > fareConfig.waiting.seconds
@@ -157,10 +174,11 @@ export const calculateActualFare = async (rideData) => {
     );
 
     // NEW FORMULA: Sum all components first, then apply surge multiplier
+    // Note: If night charge exists, calculatedDistanceFare is 0
     const baseSubtotal = roundToTwoDecimals(
       rideSetupFee +
         baseFare +
-        distanceFare +
+        calculatedDistanceFare +
         timeFare +
         nightCharge +
         waitingCharge,

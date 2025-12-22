@@ -26,13 +26,15 @@ const formatDate = (date) => {
 const formatTime = (date) => {
   if (!date) return 'N/A';
   try {
-    return new Date(date).toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true,
-    });
+    // Use moment.js for consistent time formatting
+    // Moment handles UTC dates properly and converts to local time
+    const momentDate = moment(date);
+    if (!momentDate.isValid()) return 'N/A';
+    
+    // Format as 12-hour time with AM/PM (e.g., "02:30 PM")
+    return momentDate.format('hh:mm A');
   } catch {
-    return 'Invalid Time';
+    return 'N/A';
   }
 };
 
@@ -46,7 +48,7 @@ const formatCurrency = (amount) => {
   return `$${Math.max(0, parseFloat(amount)).toFixed(2)}`;
 };
 
-const safeSliceId = (id, length = 8) => {
+const safeSliceId = (id, length = 6) => {
   if (!id || !id.toString) return 'N/A';
   return id.toString().slice(-length);
 };
@@ -261,7 +263,7 @@ const generatePassengerReceiptContent = (doc, ride, transaction, driver, passeng
       .text('•', 50, yPosition)
       .fillColor(secondaryColor)
       .fontSize(10)
-      .text(` Pickup: ${formatTime(ride.rideStartedAt || 'N/A')}`, 65, yPosition, { lineBreak: false });
+      .text(` Pickup: ${formatTime(ride.rideStartedAt || ride.driverArrivedAt || ride.scheduledTime || null)}`, 65, yPosition, { lineBreak: false });
     
     doc
       .fillColor(secondaryColor)
@@ -689,7 +691,7 @@ const generateDriverReceiptContent = (doc, ride, transaction, driver, passenger)
       .text('•', 50, yPosition)
       .fillColor(secondaryColor)
       .fontSize(10)
-      .text(` Pickup: ${formatTime(ride.rideStartedAt || 'N/A')}`, 65, yPosition, { lineBreak: false });
+      .text(` Pickup: ${formatTime(ride.rideStartedAt || ride.driverArrivedAt || ride.scheduledTime || null)}`, 65, yPosition, { lineBreak: false });
     
     doc
       .fillColor(secondaryColor)

@@ -1815,7 +1815,33 @@ export const deductRidenCommission = async (
   // Check if commission already exists to prevent duplicate key errors
   const existingCommission = await AdminCommission.findOne({ rideId });
   if (existingCommission) {
-    // Return the existing commission amount
+    // Update existing commission with actualFare if it was created with estimatedFare
+    // This happens when commission was captured at booking time
+    if (existingCommission.totalAmount !== actualFare) {
+      const commission = await Commission.findOne({ carType }).lean();
+      let driverDistanceCommission = 0;
+      if (ride.driverDistance > 5) {
+        driverDistanceCommission = 5 - Math.ceil(ride.driverDistance);
+      }
+      
+      // Recalculate commission based on actualFare
+      const updatedCommissionAmount = Math.floor((actualFare / 100) * commission.percentage) - driverDistanceCommission;
+      
+      // Update the commission record with actualFare
+      await AdminCommission.findOneAndUpdate(
+        { rideId },
+        {
+          totalAmount: actualFare, // Update with actual fare
+          commissionAmount: updatedCommissionAmount,
+          driverDistanceCommission,
+        },
+        { new: true }
+      );
+      
+      return updatedCommissionAmount + driverDistanceCommission;
+    }
+    
+    // Return the existing commission amount if already updated
     return existingCommission.commissionAmount + (existingCommission.driverDistanceCommission || 0);
   }
   
