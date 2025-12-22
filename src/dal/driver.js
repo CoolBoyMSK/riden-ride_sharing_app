@@ -503,14 +503,25 @@ export const findDriverWayBill = async (driverId) => {
           { $sort: { createdAt: -1 } }, // latest ride if multiple
           { $limit: 1 },
           {
+            // First lookup Passenger model
             $lookup: {
-              from: 'users',
+              from: 'passengers',
               localField: 'passengerId',
               foreignField: '_id',
-              as: 'passenger',
+              as: 'passengerDoc',
             },
           },
-          { $unwind: { path: '$passenger', preserveNullAndEmptyArrays: true } },
+          { $unwind: { path: '$passengerDoc', preserveNullAndEmptyArrays: true } },
+          {
+            // Then lookup User model from Passenger's userId
+            $lookup: {
+              from: 'users',
+              localField: 'passengerDoc.userId',
+              foreignField: '_id',
+              as: 'passengerUser',
+            },
+          },
+          { $unwind: { path: '$passengerUser', preserveNullAndEmptyArrays: true } },
           {
             $project: {
               rideId: 1,
@@ -518,12 +529,12 @@ export const findDriverWayBill = async (driverId) => {
               dropOffLocation: { $ifNull: ['$dropOffLocation', 'N/A'] },
               driverAssignedAt: { $ifNull: ['$driverAssignedAt', 'N/A'] },
               rideCompletedAt: { $ifNull: ['$rideCompletedAt', 'N/A'] },
+              rideStartedAt: { $ifNull: ['$rideStartedAt', 'N/A'] },
               status: 1,
               passenger: {
-                userId: { $ifNull: ['$passenger.userId', 'N/A'] },
-                name: { $ifNull: ['$passenger.name', 'N/A'] },
-                email: { $ifNull: ['$passenger.email', 'N/A'] },
-                profileImg: { $ifNull: ['$passenger.profileImg', 'N/A'] },
+                name: { $ifNull: ['$passengerUser.name', 'N/A'] },
+                email: { $ifNull: ['$passengerUser.email', 'N/A'] },
+                profileImg: { $ifNull: ['$passengerUser.profileImg', 'N/A'] },
               },
             },
           },
