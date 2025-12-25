@@ -180,6 +180,46 @@ export const validatePassengerPhoneSignup = (data) => {
   return schema.validate(data, { abortEarly: false });
 };
 
+// Passwordless phone signup validation (name + phone only)
+export const validatePassengerPhoneSignupPasswordless = (data) => {
+  const schema = Joi.object({
+    name: Joi.string().trim().min(3).max(50).required().messages({
+      'string.empty': 'Name is required',
+      'string.min': 'Name must be at least 3 characters long',
+      'any.required': 'Name is required',
+    }),
+
+    phoneNumber: Joi.string()
+      .pattern(/^\+?[0-9]{7,15}$/)
+      .required()
+      .messages({
+        'string.empty': 'Phone number is required',
+        'string.pattern.base':
+          'Phone number must be valid (7–15 digits, optional +)',
+        'any.required': 'Phone number is required',
+      }),
+  });
+
+  return schema.validate(data, { abortEarly: false });
+};
+
+// Passwordless phone login validation (phone only)
+export const validatePassengerPhoneLoginPasswordless = (data) => {
+  const schema = Joi.object({
+    phoneNumber: Joi.string()
+      .pattern(/^\+?[0-9]{7,15}$/)
+      .required()
+      .messages({
+        'string.empty': 'Phone number is required',
+        'string.pattern.base':
+          'Phone number must be valid (7–15 digits, optional +)',
+        'any.required': 'Phone number is required',
+      }),
+  });
+
+  return schema.validate(data, { abortEarly: false });
+};
+
 export const validateSignup = (body) => {
   const schema = Joi.object({
     name: Joi.string().trim().min(2).max(100).required(),

@@ -48,6 +48,8 @@ import {
 import {
   validatePassengerSignup,
   validatePassengerPhoneSignup,
+  validatePassengerPhoneSignupPasswordless,
+  validatePassengerPhoneLoginPasswordless,
 } from '../../../../validations/user/authValidations.js';
 import { verifyGoogleToken } from '../../../../utils/verifySocials.js';
 
@@ -255,6 +257,66 @@ export const signUpPassengerWithPhone = async (
   }
 };
 
+// Passwordless phone signup (name + phone only, no password)
+export const signUpPassengerWithPhonePasswordless = async (
+  { name, phoneNumber },
+  resp,
+) => {
+  try {
+    const validation = validatePassengerPhoneSignupPasswordless({
+      name,
+      phoneNumber,
+    });
+    if (validation.error) {
+      resp.error = true;
+      resp.error_message = validation.error.details.map((d) => d.message);
+      return resp;
+    }
+
+    // Check if user already exists
+    let user = await findUserByPhone(phoneNumber);
+    if (user && user.isPhoneVerified) {
+      resp.error = true;
+      resp.error_message = 'Phone number already in use';
+      return resp;
+    }
+
+    // Prepare user data without password
+    const userData = {
+      name,
+      phoneNumber,
+      roles: ['passenger'],
+      // No password field - user will authenticate via OTP only
+    };
+
+    // Request OTP for signup
+    const result = await requestPhoneOtp(
+      phoneNumber,
+      name,
+      userData,
+      'signup',
+      'passenger',
+    );
+    if (!result.ok) {
+      resp.error = true;
+      resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
+      return resp;
+    }
+
+    resp.data = {
+      signupOtp: true,
+      message: `Phone number verification OTP to register passenger has been sent to ${phoneNumber}`,
+      phoneNumber: phoneNumber,
+    };
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
+    return resp;
+  }
+};
+
 export const loginUser = async ({ email, phoneNumber, password }, resp) => {
   try {
     let user;
@@ -360,6 +422,69 @@ export const loginUser = async ({ email, phoneNumber, password }, resp) => {
   }
 };
 
+// Passwordless phone login (phone only, no password)
+export const loginPassengerWithPhonePasswordless = async (
+  { phoneNumber },
+  resp,
+) => {
+  try {
+    const validation = validatePassengerPhoneLoginPasswordless({
+      phoneNumber,
+    });
+    if (validation.error) {
+      resp.error = true;
+      resp.error_message = validation.error.details.map((d) => d.message);
+      return resp;
+    }
+
+    // Check if user exists
+    let user = await findUserByPhone(phoneNumber);
+    if (!user) {
+      resp.error = true;
+      resp.error_message = 'User not found. Please sign up first.';
+      return resp;
+    }
+
+    if (!user.roles.includes('passenger')) {
+      resp.error = true;
+      resp.error_message = 'Only passengers can login here';
+      return resp;
+    }
+
+    if (!user.isPhoneVerified) {
+      resp.error = true;
+      resp.error_message = 'Phone number is not verified';
+      return resp;
+    }
+
+    // Request OTP for login (no password check needed)
+    const result = await requestPhoneOtp(
+      phoneNumber,
+      user.name,
+      { phoneNumber, loginFlow: true },
+      'login',
+      'passenger',
+    );
+    if (!result.ok) {
+      resp.error = true;
+      resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60}s`;
+      return resp;
+    }
+
+    resp.data = {
+      phoneOtp: true,
+      message: `OTP has been sent to ${phoneNumber}`,
+      phoneNumber: phoneNumber,
+    };
+    return resp;
+  } catch (error) {
+    console.error(`API ERROR: ${error}`);
+    resp.error = true;
+    resp.error_message = error.message || 'Something went wrong';
+    return resp;
+  }
+};
+
 export const socialLoginUser = async (
   {
     email,
@@ -375,30 +500,53 @@ export const socialLoginUser = async (
   resp,
 ) => {
   try {
+    console.log('\n🌟 [PASSENGER SOCIAL LOGIN] Request received:', {
+      email,
+      userSocialProvider,
+      userDeviceType,
+      deviceId,
+      deviceModel,
+      deviceVendor,
+      os,
+      hasSocialToken: !!userSocialToken,
+    });
+
     if (userSocialProvider !== 'google' && userSocialProvider !== 'apple') {
+      console.log('❌ [SOCIAL LOGIN] Unsupported provider:', userSocialProvider);
       resp.error = true;
       resp.error_message = 'Unsupported social provider';
       return resp;
     }
 
     let user = await findUserByEmail(email?.trim());
+    console.log('🔍 [SOCIAL LOGIN] Existing user check:', user ? `Found (ID: ${user._id})` : 'Not found');
 
     if (!user) {
+      console.log('🆕 [SOCIAL LOGIN] New user flow, verifying Google token...');
       const isVerified = await verifyGoogleToken(userSocialToken, email);
+      console.log('🛡️ [SOCIAL LOGIN] Token verification result:', isVerified ? 'Verified' : 'Failed');
+
       if (!isVerified) {
+        console.log('❌ [SOCIAL LOGIN] Invalid social token');
         resp.error = true;
         resp.error_message = 'Invalid social token';
         return resp;
       } else if (!isVerified.email_verified) {
+        console.log('❌ [SOCIAL LOGIN] Email not verified by Google');
         resp.error = true;
         resp.error_message = 'Email not verified by google';
         return resp;
       } else if (isVerified.email.toLowerCase() !== email.toLowerCase()) {
+        console.log('❌ [SOCIAL LOGIN] Email mismatch:', {
+          provided: email.toLowerCase(),
+          verified: isVerified.email.toLowerCase(),
+        });
         resp.error = true;
         resp.error_message = 'Email not verified by google';
         return resp;
       }
 
+      console.log('💾 [SOCIAL LOGIN] Creating new user...');
       user = await createUser({
         name: isVerified.name,
         email: isVerified.email,
@@ -409,6 +557,7 @@ export const socialLoginUser = async (
       });
 
       const uniqueId = generateUniqueId(user.roles[0], user._id);
+      console.log('👤 [SOCIAL LOGIN] Creating passenger profile, uniqueId:', uniqueId);
 
       let passenger = await createPassengerProfile(user._id, uniqueId);
       passenger = await updatePassenger(
@@ -416,23 +565,28 @@ export const socialLoginUser = async (
         { isActive: true },
       );
       if (!passenger) {
+        console.log('❌ [SOCIAL LOGIN] Failed to activate passenger profile');
         resp.error = true;
         resp.error_message = 'Failed to activate passenger';
         return resp;
       }
 
+      console.log('💳 [SOCIAL LOGIN] Creating Stripe customer...');
       const stripeCustomerId = await createPassengerStripeCustomer(
         user,
         passenger,
       );
       if (!stripeCustomerId) {
+        console.log('❌ [SOCIAL LOGIN] Stripe customer creation failed');
         resp.error = true;
         resp.error_message = 'Failed to create stripe customer account';
         return resp;
       }
 
+      console.log('💰 [SOCIAL LOGIN] Creating wallet...');
       const wallet = await createPassengerWallet(passenger._id);
       if (!wallet) {
+        console.log('❌ [SOCIAL LOGIN] Wallet creation failed');
         resp.error = true;
         resp.error_message = 'Failed to create In-App wallet';
         return resp;
@@ -450,8 +604,10 @@ export const socialLoginUser = async (
         loginMethod: 'oauth',
         lastLoginAt: new Date(),
       };
+      console.log('📱 [SOCIAL LOGIN] Storing device info...');
       await createDeviceInfo(device);
 
+      console.log('🔔 [SOCIAL LOGIN] Sending admin notification...');
       const notify = await createAdminNotification({
         title: 'New Passenger Registered',
         message: `${user.name} registered as passenger successfully, Their  Email: ${user.email}`,
@@ -461,11 +617,13 @@ export const socialLoginUser = async (
         actionLink: `${env.FRONTEND_URL}/api/admin/passengers/fetch-passenger/${passenger._id}`,
       });
       if (!notify) {
+        console.log('❌ [SOCIAL LOGIN] Notification failed');
         resp.error = true;
         resp.error_message = 'Failed to send notification';
         return resp;
       }
 
+      console.log('✅ [SOCIAL LOGIN] Registration successful, requesting phone verification');
       resp.data = {
         verifyPhone: true,
         message: `Phone Number verification is required. Please verify your phone number to complete the login process.`,
@@ -473,22 +631,32 @@ export const socialLoginUser = async (
       };
       return resp;
     } else if (user && user.roles.includes('passenger')) {
+      console.log('🔓 [SOCIAL LOGIN] Existing passenger flow, verifying token...');
       const isVerified = await verifyGoogleToken(userSocialToken, user.email);
+      console.log('🛡️ [SOCIAL LOGIN] Token verification result:', isVerified ? 'Verified' : 'Failed');
+
       if (!isVerified) {
+        console.log('❌ [SOCIAL LOGIN] Invalid social token');
         resp.error = true;
         resp.error_message = 'Invalid social token';
         return resp;
       } else if (!isVerified.email_verified) {
+        console.log('❌ [SOCIAL LOGIN] Email not verified by Google');
         resp.error = true;
         resp.error_message = 'Email not verified by google';
         return resp;
       } else if (isVerified.email.toLowerCase() !== user.email.toLowerCase()) {
+        console.log('❌ [SOCIAL LOGIN] Email mismatch:', {
+          provided: user.email.toLowerCase(),
+          verified: isVerified.email.toLowerCase(),
+        });
         resp.error = true;
         resp.error_message = 'Email not verified by google';
         return resp;
       }
 
       if (!user.phoneNumber || !user.isPhoneVerified) {
+        console.log('⚠️ [SOCIAL LOGIN] Phone not verified for existing user');
         resp.data = {
           verifyPhone: true,
           message: `Phone Number verification is required. Please verify your phone number to complete the login process.`,
@@ -497,6 +665,7 @@ export const socialLoginUser = async (
         return resp;
       }
 
+      console.log('🔄 [SOCIAL LOGIN] Updating social token and device info...');
       if (user.userSocialToken !== userSocialToken) {
         user = await updateUserById(user._id, {
           userSocialToken,
@@ -509,15 +678,18 @@ export const socialLoginUser = async (
         });
       }
 
+      console.log('🚀 [SOCIAL LOGIN] Activating passenger...');
       let passenger = await updatePassenger(
         { userId: user._id },
         { isActive: true },
       );
       if (!passenger) {
+        console.log('❌ [SOCIAL LOGIN] Passenger profile not found');
         resp.error = true;
         resp.error_message = 'Passenger profile not found';
         return resp;
       } else if (!passenger.isActive) {
+        console.log('❌ [SOCIAL LOGIN] Failed to activate passenger');
         resp.error = true;
         resp.error_message = 'Failed to activate passenger';
         return resp;
@@ -538,6 +710,7 @@ export const socialLoginUser = async (
       await createDeviceInfo(device);
 
       const payload = { id: user._id, roles: user.roles };
+      console.log('✅ [SOCIAL LOGIN] Login successful, generating tokens');
       resp.data = {
         success: true,
         message: 'Social login successful',
@@ -547,12 +720,13 @@ export const socialLoginUser = async (
       };
       return resp;
     } else {
+      console.log('❌ [SOCIAL LOGIN] User found but not a passenger or other unexpected state');
       resp.error = true;
       resp.error_message = 'Unexpected Error occurred';
       return resp;
     }
   } catch (error) {
-    console.error(`API ERROR: ${error}`);
+    console.error(`❌ [SOCIAL LOGIN] API ERROR:`, error);
     resp.error = true;
     resp.error_message = error.message || 'Something went wrong';
     return resp;
@@ -564,6 +738,7 @@ export const otpVerification = async (
     signupOtp,
     phoneOtp,
     emailOtp,
+    loginOtp,
     verifyPhoneNumberOtp,
     verifyUserEmailOtp,
     forgotPasswordPhoneOtp,
@@ -582,8 +757,32 @@ export const otpVerification = async (
 ) => {
   try {
     let user;
+    if (loginOtp) {
+      if (phoneNumber) phoneOtp = true;
+      if (email) emailOtp = true;
+    }
+    console.log('signupOtp', {
+      signupOtp,
+      phoneOtp,
+      emailOtp,
+      loginOtp,
+      verifyPhoneNumberOtp,
+      verifyUserEmailOtp,
+      forgotPasswordPhoneOtp,
+      forgotPasswordEmailOtp,
+      phoneNumber,
+      email,
+      otp,
+      userDeviceType,
+      deviceId,
+      deviceModel,
+      deviceVendor,
+      os,
+    });
     if (signupOtp) {
       if (email && otp) {
+        console.log('email', email);
+        console.log('otp', otp);
         const result = await verifyEmailOtp(email, otp);
         if (!result.ok) {
           resp.error = true;
@@ -676,6 +875,9 @@ export const otpVerification = async (
           return resp;
         }
 
+        // Check if this is a passwordless signup (no password in pending data)
+        const isPasswordless = !result.pending?.password;
+
         user = await createUser({
           ...result.pending,
           isPhoneVerified: true,
@@ -730,12 +932,52 @@ export const otpVerification = async (
           phonePendingKey(phoneNumber),
         );
 
-        resp.data = {
-          verifyEmail: true,
-          message: `Email verification is required. Please verify your Email to complete the login process.`,
-          phoneNumber: user.phoneNumber,
-        };
-        return resp;
+        // For passwordless signup, complete the flow and return tokens
+        // For regular signup with password, ask for email verification
+        if (isPasswordless) {
+          const updatedPassenger = await updatePassenger(
+            { userId: user._id },
+            { isActive: true },
+          );
+          if (!updatedPassenger) {
+            resp.error = true;
+            resp.error_message = 'Failed to activate passenger';
+            return resp;
+          }
+
+          const deviceInfo = await extractDeviceInfo(headers);
+          const device = {
+            userId: user._id,
+            deviceId,
+            deviceType: userDeviceType,
+            deviceModel,
+            deviceVendor,
+            os,
+            ...deviceInfo,
+            loginMethod: 'phone',
+            lastLoginAt: new Date(),
+          };
+          const userDevice = await createDeviceInfo(device);
+          if (!userDevice) {
+            console.error('Failed to create user device');
+          }
+
+          const payload = { id: user._id, roles: user.roles };
+          resp.data = {
+            user: user,
+            accessToken: generateAccessToken(payload),
+            refreshToken: generateRefreshToken(payload),
+          };
+          return resp;
+        } else {
+          // Regular signup with password - ask for email verification
+          resp.data = {
+            verifyEmail: true,
+            message: `Email verification is required. Please verify your Email to complete the login process.`,
+            phoneNumber: user.phoneNumber,
+          };
+          return resp;
+        }
       } else {
         resp.error = true;
         resp.error_message = 'Unexpected Error Occured';
@@ -1644,7 +1886,7 @@ export const resendOtp = async (
     if (signupOtp && email) {
       console.log('📧 [RESEND OTP] signupOtp detected with email:', email);
       console.log('📧 [RESEND OTP] Checking Redis for pending signup data');
-      
+
       // For signup flow, directly check Redis (user doesn't exist in DB yet)
       const pendingRaw = await redisConfig.get(emailPendingKey(email));
       if (!pendingRaw) {
@@ -1671,9 +1913,8 @@ export const resendOtp = async (
       if (!result.ok) {
         console.log('❌ [RESEND OTP] Failed to request OTP:', result);
         resp.error = true;
-        resp.error_message = `Failed to send OTP. Please wait ${
-          result.waitSeconds || 60
-        }s`;
+        resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60
+          }s`;
         return resp;
       }
 
@@ -1687,7 +1928,7 @@ export const resendOtp = async (
     } else if (signupOtp && phoneNumber) {
       console.log('📱 [RESEND OTP] signupOtp detected with phoneNumber:', phoneNumber);
       console.log('📱 [RESEND OTP] Checking Redis for pending signup data');
-      
+
       // For signup flow, directly check Redis (user doesn't exist in DB yet)
       const pendingRaw = await redisConfig.get(phonePendingKey(phoneNumber));
       if (!pendingRaw) {
@@ -1714,9 +1955,8 @@ export const resendOtp = async (
       if (!result.ok) {
         console.log('❌ [RESEND OTP] Failed to request OTP:', result);
         resp.error = true;
-        resp.error_message = `Failed to send OTP. Please wait ${
-          result.waitSeconds || 60
-        }s`;
+        resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60
+          }s`;
         return resp;
       }
 
@@ -1755,9 +1995,8 @@ export const resendOtp = async (
         );
         if (!result.ok) {
           resp.error = true;
-          resp.error_message = `Failed to send OTP. Please wait ${
-            result.waitSeconds || 60
-          }s`;
+          resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60
+            }s`;
           return resp;
         }
 
@@ -1793,9 +2032,8 @@ export const resendOtp = async (
       );
       if (!result.ok) {
         resp.error = true;
-        resp.error_message = `Failed to send OTP. Please wait ${
-          result.waitSeconds || 60
-        }s`;
+        resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60
+          }s`;
         return resp;
       }
 
@@ -1848,7 +2086,7 @@ export const resendOtp = async (
       const pendingKey = phonePendingKey(phoneNumber);
       console.log('📱 [RESEND OTP] Redis key:', pendingKey);
       const pendingRaw = await redisConfig.get(pendingKey);
-      
+
       if (!pendingRaw) {
         console.log('❌ [RESEND OTP] No pending signup found in Redis');
         resp.error = true;
@@ -1873,9 +2111,8 @@ export const resendOtp = async (
       if (!result.ok) {
         console.log('❌ [RESEND OTP] Failed to request OTP:', result);
         resp.error = true;
-        resp.error_message = `Failed to send OTP. Please wait ${
-          result.waitSeconds || 60
-        }s`;
+        resp.error_message = `Failed to send OTP. Please wait ${result.waitSeconds || 60
+          }s`;
         return resp;
       }
 

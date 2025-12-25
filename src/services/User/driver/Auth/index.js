@@ -130,14 +130,14 @@ export const signUpDriverWithEmail = async (
         password: hashed,
         isEmailVerified: false,
       });
-      
+
       if (!user) {
         console.error('❌ [DRIVER SIGNUP] Failed to create user in database');
         resp.error = true;
         resp.error_message = 'Failed to create user account';
         return resp;
       }
-      
+
       console.log('✅ [DRIVER SIGNUP] User created in database:', {
         userId: user._id,
         email: user.email,
@@ -526,7 +526,7 @@ export const socialLoginUser = async (
       const payload = { id: user._id, roles: user.roles };
       const accessToken = generateAccessToken(payload);
       const refreshToken = generateRefreshToken(payload);
-      
+
       // Log active driver login with role and token
       console.log('🔐 [ACTIVE] DRIVER LOGIN (Social):', {
         userId: user._id,
@@ -538,7 +538,7 @@ export const socialLoginUser = async (
         refreshToken: refreshToken,
         timestamp: new Date().toISOString(),
       });
-      
+
       resp.data = {
         success: true,
         message: 'Social login successful',
@@ -565,6 +565,7 @@ export const otpVerification = async (
     signupOtp,
     phoneOtp,
     emailOtp,
+    loginOtp,
     verifyPhoneNumberOtp,
     verifyUserEmailOtp,
     forgotPasswordPhoneOtp,
@@ -582,6 +583,10 @@ export const otpVerification = async (
   resp,
 ) => {
   try {
+    if (loginOtp) {
+      if (phoneNumber) phoneOtp = true;
+      if (email) emailOtp = true;
+    }
     console.log('\n🔄 ========================================');
     console.log('🔄 [DRIVER OTP VERIFY] REQUEST RECEIVED');
     console.log('🔄 ========================================');
@@ -589,6 +594,7 @@ export const otpVerification = async (
       signupOtp,
       phoneOtp,
       emailOtp,
+      loginOtp,
       verifyPhoneNumberOtp,
       verifyUserEmailOtp,
       forgotPasswordPhoneOtp,
@@ -602,7 +608,7 @@ export const otpVerification = async (
       hasOtp: !!otp,
     });
     console.log('🔄 ========================================\n');
-    
+
     let user;
     if (signupOtp) {
       if (email && otp) {
@@ -616,7 +622,7 @@ export const otpVerification = async (
           reason: result.reason,
           hasPending: !!result.pending,
         });
-        
+
         if (!result.ok) {
           console.error('❌ [DRIVER OTP VERIFY] Email OTP verification FAILED (signup):', {
             email,
@@ -634,7 +640,7 @@ export const otpVerification = async (
         // Find existing user (created during signup)
         console.log('🔍 [DRIVER OTP VERIFY] Finding user in database...');
         user = await findUserByEmail(email);
-        
+
         if (!user) {
           console.error('❌ [DRIVER OTP VERIFY] User not found in database!');
           resp.error = true;
@@ -654,14 +660,14 @@ export const otpVerification = async (
         user = await updateUserById(user._id, {
           isEmailVerified: true,
         });
-        
+
         if (!user) {
           console.error('❌ [DRIVER OTP VERIFY] Failed to update user');
           resp.error = true;
           resp.error_message = 'Failed to verify email';
           return resp;
         }
-        
+
         console.log('✅ [DRIVER OTP VERIFY] User email verified successfully:', {
           userId: user._id,
           email: user.email,
@@ -898,7 +904,7 @@ export const otpVerification = async (
       const payload = { id: user._id, roles: user.roles };
       const accessToken = generateAccessToken(payload);
       const refreshToken = generateRefreshToken(payload);
-      
+
       // Log active driver login with role and token
       console.log('🔐 [ACTIVE] DRIVER LOGIN (Email OTP):', {
         userId: user._id,
@@ -910,7 +916,7 @@ export const otpVerification = async (
         refreshToken: refreshToken,
         timestamp: new Date().toISOString(),
       });
-      
+
       resp.data = {
         user: user,
         accessToken,
@@ -926,7 +932,7 @@ export const otpVerification = async (
       console.log('📱 Has Phone Number:', !!phoneNumber);
       console.log('📱 Has OTP:', !!otp);
       console.log('📱 ========================================\n');
-      
+
       if (!phoneNumber || !otp) {
         console.error('\n❌ ========================================');
         console.error('❌ [DRIVER PHONE OTP] MISSING REQUIRED FIELDS');
@@ -946,7 +952,7 @@ export const otpVerification = async (
         phoneNumber,
         otpLength: otp?.length,
       });
-      
+
       const result = await verifyPhoneOtp(phoneNumber, otp);
       console.log('📱 [DRIVER PHONE OTP] verifyPhoneOtp result:', {
         ok: result.ok,
@@ -955,7 +961,7 @@ export const otpVerification = async (
         pendingKeys: result.pending ? Object.keys(result.pending) : [],
         pendingEmail: result.pending?.email,
       });
-      
+
       if (!result.ok) {
         console.error('❌ [DRIVER PHONE OTP] OTP verification failed:', result.reason);
         resp.error = true;
@@ -981,14 +987,14 @@ export const otpVerification = async (
         // This is phone verification flow, not login - handle it as verifyPhoneNumberOtp
         const pendingEmail = result.pending.email?.trim()?.toLowerCase();
         console.log('🔍 [DRIVER PHONE VERIFY] Finding user by email:', pendingEmail);
-        
+
         if (!pendingEmail) {
           console.error('❌ [DRIVER PHONE VERIFY] No email in pending data');
           resp.error = true;
           resp.error_message = 'Email not found in verification data. Please try the phone verification process again.';
           return resp;
         }
-        
+
         user = await findUserByEmail(pendingEmail);
         console.log('🔍 [DRIVER PHONE VERIFY] User lookup by email result:', {
           found: !!user,
@@ -997,14 +1003,14 @@ export const otpVerification = async (
           roles: user?.roles,
           isDriver: user?.roles?.includes('driver'),
         });
-        
+
         if (!user) {
           console.error('❌ [DRIVER PHONE VERIFY] User not found with email:', pendingEmail);
           resp.error = true;
           resp.error_message = `Driver not found with email ${pendingEmail}. Please try signing up again or contact support.`;
           return resp;
         }
-        
+
         if (!user.roles.includes('driver')) {
           console.error('❌ [DRIVER PHONE VERIFY] User found but not a driver. Roles:', user.roles);
           resp.error = true;
@@ -1054,13 +1060,13 @@ export const otpVerification = async (
         const payload = { id: user._id, roles: user.roles };
         const accessToken = generateAccessToken(payload);
         const refreshToken = generateRefreshToken(payload);
-        
+
         console.log('✅ [DRIVER PHONE VERIFY] Phone verified successfully:', {
           userId: user._id,
           email: user.email,
           phoneNumber: user.phoneNumber,
         });
-        
+
         resp.data = {
           user: user,
           accessToken,
@@ -1126,7 +1132,7 @@ export const otpVerification = async (
       const payload = { id: user._id, roles: user.roles };
       const accessToken = generateAccessToken(payload);
       const refreshToken = generateRefreshToken(payload);
-      
+
       // Log active driver login with role and token
       console.log('🔐 [ACTIVE] DRIVER LOGIN (Phone OTP):', {
         userId: user._id,
@@ -1138,7 +1144,7 @@ export const otpVerification = async (
         refreshToken: refreshToken,
         timestamp: new Date().toISOString(),
       });
-      
+
       resp.data = {
         user: user,
         accessToken,
@@ -1160,7 +1166,7 @@ export const otpVerification = async (
         reason: result.reason,
         hasPending: !!result.pending,
       });
-      
+
       if (!result.ok) {
         resp.error = true;
         switch (result.reason) {
@@ -1189,7 +1195,7 @@ export const otpVerification = async (
 
       console.log('📱 [DRIVER PHONE VERIFY] Pending data:', JSON.stringify(result.pending, null, 2));
       console.log('📱 [DRIVER PHONE VERIFY] Pending email:', result.pending.email);
-      
+
       // Check if phone number already exists and is verified
       user = await findUserByPhone(phoneNumber);
       console.log('📱 [DRIVER PHONE VERIFY] User lookup by phone:', user ? `Found ${user._id}` : 'Not found');
@@ -1204,7 +1210,7 @@ export const otpVerification = async (
       const pendingEmail = result.pending.email?.trim()?.toLowerCase();
       console.log('🔍 [DRIVER PHONE VERIFY] Finding user by email:', pendingEmail);
       console.log('🔍 [DRIVER PHONE VERIFY] Pending data keys:', Object.keys(result.pending || {}));
-      
+
       if (!pendingEmail) {
         console.error('❌ [DRIVER PHONE VERIFY] No email in pending data');
         console.error('❌ [DRIVER PHONE VERIFY] Full pending data:', JSON.stringify(result.pending, null, 2));
@@ -1212,7 +1218,7 @@ export const otpVerification = async (
         resp.error_message = 'Email not found in verification data. Please try the phone verification process again.';
         return resp;
       }
-      
+
       user = await findUserByEmail(pendingEmail);
       console.log('🔍 [DRIVER PHONE VERIFY] User lookup by email result:', {
         found: !!user,
@@ -1224,7 +1230,7 @@ export const otpVerification = async (
         userEmail: user?.email?.toLowerCase(),
         emailMatch: user?.email?.toLowerCase() === pendingEmail,
       });
-      
+
       if (!user) {
         console.error('❌ [DRIVER PHONE VERIFY] User not found with email:', pendingEmail);
         console.error('❌ [DRIVER PHONE VERIFY] Available pending data:', JSON.stringify(result.pending, null, 2));
@@ -1232,7 +1238,7 @@ export const otpVerification = async (
         resp.error_message = `Driver not found with email ${pendingEmail}. Please try signing up again or contact support.`;
         return resp;
       }
-      
+
       if (!user.roles.includes('driver')) {
         console.error('❌ [DRIVER PHONE VERIFY] User found but not a driver. Roles:', user.roles);
         resp.error = true;
@@ -1936,7 +1942,7 @@ export const resendOtp = async (
     if (signupOtp && email) {
       console.log('📧 [DRIVER RESEND OTP] signupOtp detected with email:', email);
       console.log('🔍 [DRIVER RESEND OTP] Finding user in database...');
-      
+
       let user = await findUserByEmail(email);
       if (!user) {
         console.log('❌ [DRIVER RESEND OTP] User not found in database');
@@ -1964,7 +1970,7 @@ export const resendOtp = async (
         userId: user._id.toString(),
         email: user.email,
       };
-      
+
       const result = await requestEmailOtp(
         email,
         user.name,
@@ -1992,7 +1998,7 @@ export const resendOtp = async (
       let user = await findUserByPhone(phoneNumber);
       if (!user || !user.roles.includes('driver') || user.isPhoneVerified) {
         resp.error = true;
-        resp.error_message = user?.isPhoneVerified 
+        resp.error_message = user?.isPhoneVerified
           ? 'Phone number is already verified'
           : 'User not found. Please start the signup process again.';
         return resp;
@@ -2002,7 +2008,7 @@ export const resendOtp = async (
         userId: user._id.toString(),
         phoneNumber: user.phoneNumber,
       };
-      
+
       const result = await requestPhoneOtp(
         phoneNumber,
         user.name,
@@ -2062,7 +2068,7 @@ export const resendOtp = async (
           userId: user._id.toString(),
           email: user.email,
         };
-        
+
         const result = await requestEmailOtp(
           email,
           user.name,
@@ -2087,25 +2093,25 @@ export const resendOtp = async (
       console.log('📱 [DRIVER RESEND OTP] Processing phoneOtp resend for:', phoneNumber);
       let user = await findUserByPhone(phoneNumber);
       console.log('📱 [DRIVER RESEND OTP] User lookup by phone result:', user ? `Found user ${user._id}` : 'User not found');
-      
+
       if (!user) {
         // User not found by phone - check Redis for pending phone verification OTP
         console.log('📱 [DRIVER RESEND OTP] User not found by phone, checking Redis for pending phone verification');
         const pendingKey = phonePendingKey(phoneNumber);
         console.log('📱 [DRIVER RESEND OTP] Redis key:', pendingKey);
         const pendingRaw = await redisConfig.get(pendingKey);
-        
+
         if (pendingRaw) {
           console.log('✅ [DRIVER RESEND OTP] Pending phone verification found in Redis');
           const pending = JSON.parse(pendingRaw);
           console.log('📱 [DRIVER RESEND OTP] Pending data:', JSON.stringify(pending, null, 2));
-          
+
           // Find user by email from pending data
           if (pending.email) {
             user = await findUserByEmail(pending.email);
             if (user && user.roles.includes('driver')) {
               console.log('✅ [DRIVER RESEND OTP] Found user by email from pending data:', user._id);
-              
+
               // Resend phone verification OTP
               const result = await requestPhoneOtp(
                 phoneNumber,
@@ -2134,7 +2140,7 @@ export const resendOtp = async (
             }
           }
         }
-        
+
         console.log('❌ [DRIVER RESEND OTP] User not found and no pending phone verification in Redis');
         resp.error = true;
         resp.error_message = `User not found. Please start the phone verification process again.`;
@@ -2148,13 +2154,13 @@ export const resendOtp = async (
         // Phone not verified - this is phone verification flow, resend verification OTP
         console.log('📱 [DRIVER RESEND OTP] User phone not verified, resending verification OTP');
         console.log('📱 [DRIVER RESEND OTP] User email:', user.email);
-        
+
         if (!user.email) {
           resp.error = true;
           resp.error_message = 'Email is required for phone verification';
           return resp;
         }
-        
+
         const result = await requestPhoneOtp(
           phoneNumber,
           user.name,

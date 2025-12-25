@@ -3,7 +3,9 @@ import { registerRoute } from '../../../../utils/registerRoute.js';
 import {
   signUpPassengerWithEmailController,
   signUpPassengerWithPhoneController,
+  signUpPassengerWithPhonePasswordlessController,
   loginUserController,
+  loginPassengerWithPhonePasswordlessController,
   otpVerificationController,
   sendPassengerPhoneOtpController,
   sendPassengerEmailOtpController,
@@ -31,8 +33,20 @@ registerRoute({
 
 registerRoute({
   router,
+  route: '/phone-signup-passwordless',
+  post_method: signUpPassengerWithPhonePasswordlessController,
+});
+
+registerRoute({
+  router,
   route: '/login',
   post_method: loginUserController,
+});
+
+registerRoute({
+  router,
+  route: '/login-phone-passwordless',
+  post_method: loginPassengerWithPhonePasswordlessController,
 });
 
 registerRoute({

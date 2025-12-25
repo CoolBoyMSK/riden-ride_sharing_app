@@ -2,7 +2,9 @@ import { handleResponse } from '../../../../utils/handleRespone.js';
 import {
   signUpPassengerWithEmail,
   signUpPassengerWithPhone,
+  signUpPassengerWithPhonePasswordless,
   loginUser,
+  loginPassengerWithPhonePasswordless,
   socialLoginUser,
   otpVerification,
   sendPassengerPhoneOtp,
@@ -38,6 +40,18 @@ export const signUpPassengerWithPhoneController = (req, res) =>
     res,
   );
 
+export const signUpPassengerWithPhonePasswordlessController = (req, res) =>
+  handleResponse(
+    {
+      handler: signUpPassengerWithPhonePasswordless,
+      validationFn: null,
+      handlerParams: [req.body],
+      successMessage: 'OTP sent to your phone number. Please verify to complete registration',
+    },
+    req,
+    res,
+  );
+
 export const loginUserController = (req, res) =>
   handleResponse(
     {
@@ -45,6 +59,18 @@ export const loginUserController = (req, res) =>
       validationFn: null,
       handlerParams: [req.body],
       successMessage: 'Verify OTP to sign in',
+    },
+    req,
+    res,
+  );
+
+export const loginPassengerWithPhonePasswordlessController = (req, res) =>
+  handleResponse(
+    {
+      handler: loginPassengerWithPhonePasswordless,
+      validationFn: null,
+      handlerParams: [req.body],
+      successMessage: 'OTP sent to your phone number. Please verify to login',
     },
     req,
     res,
