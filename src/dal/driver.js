@@ -525,8 +525,28 @@ export const findDriverWayBill = async (driverId) => {
           {
             $project: {
               rideId: 1,
-              pickupLocation: { $ifNull: ['$pickupLocation', 'N/A'] },
-              dropOffLocation: { $ifNull: ['$dropOffLocation', 'N/A'] },
+              pickupLocation: {
+                $cond: {
+                  if: { $ne: ['$pickupLocation', null] },
+                  then: {
+                    coordinates: { $ifNull: ['$pickupLocation.coordinates', []] },
+                    address: { $ifNull: ['$pickupLocation.address', 'N/A'] },
+                    placeName: { $ifNull: ['$pickupLocation.placeName', ''] },
+                  },
+                  else: 'N/A',
+                },
+              },
+              dropOffLocation: {
+                $cond: {
+                  if: { $ne: ['$dropoffLocation', null] },
+                  then: {
+                    coordinates: { $ifNull: ['$dropoffLocation.coordinates', []] },
+                    address: { $ifNull: ['$dropoffLocation.address', 'N/A'] },
+                    placeName: { $ifNull: ['$dropoffLocation.placeName', ''] },
+                  },
+                  else: 'N/A',
+                },
+              },
               driverAssignedAt: { $ifNull: ['$driverAssignedAt', 'N/A'] },
               rideCompletedAt: { $ifNull: ['$rideCompletedAt', 'N/A'] },
               rideStartedAt: { $ifNull: ['$rideStartedAt', 'N/A'] },

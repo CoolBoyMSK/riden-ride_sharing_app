@@ -14,6 +14,7 @@ import moment from 'moment';
 import Ride from '../models/Ride.js';
 import Fare from '../models/fareManagement.js';
 import Zone from '../models/Zone.js';
+import { findNearestAirport } from './zone.js';
 import { emitToUser } from '../realtime/socket.js';
 
 // Ride Operations
@@ -1158,14 +1159,57 @@ export const findNearestParkingForPickup = async (userCoords) => {
 
 export const findDriverParkingQueue = async (parkingLotId) => {
   try {
-    const queue = await ParkingQueue.findOne({
+    let queue = await ParkingQueue.findOne({
       parkingLotId,
       isActive: true,
     });
 
+    // If queue doesn't exist, try to create it
     if (!queue) {
       console.warn(`⚠️ Parking queue not found for parking lot: ${parkingLotId}`);
-      return null;
+      console.log(`🔄 Attempting to auto-create parking queue...`);
+      
+      try {
+        // Get the parking lot zone to find its coordinates
+        const parkingLotZone = await Zone.findById(parkingLotId).lean();
+        
+        if (!parkingLotZone) {
+          console.error(`❌ Parking lot zone not found: ${parkingLotId}`);
+          return null;
+        }
+
+        // Find nearest airport
+        const airportId = await findNearestAirport(
+          parkingLotZone.boundaries?.coordinates
+        );
+
+        if (!airportId) {
+          console.error(`❌ No airport found within 500km radius for parking lot: ${parkingLotId}`);
+          return null;
+        }
+
+        // Create parking queue
+        queue = await ParkingQueue.create({
+          parkingLotId: parkingLotId,
+          airportId: airportId,
+          isActive: true,
+        });
+
+        console.log(`✅ Auto-created parking queue for parking lot: ${parkingLotId}`);
+        return queue;
+      } catch (createError) {
+        console.error(`❌ Failed to auto-create parking queue:`, createError.message);
+        // Check if queue was created by another concurrent operation
+        queue = await ParkingQueue.findOne({
+          parkingLotId,
+          isActive: true,
+        });
+        if (queue) {
+          console.log(`✅ Parking queue found after retry (created by another process)`);
+          return queue;
+        }
+        return null;
+      }
     }
     
     return queue;
@@ -1243,8 +1287,7 @@ export const addDriverToQueue = async (parkingLotId, driverId, retryCount = 0) =
       { 
         new: true, 
         session,
-        // Add write concern for better conflict handling
-        writeConcern: { w: 'majority' },
+        // writeConcern removed - not allowed within transactions
       },
     );
     
