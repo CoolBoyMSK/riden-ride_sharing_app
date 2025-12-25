@@ -1836,8 +1836,67 @@ export const initSocket = (server) => {
           console.log(`   Driver ID: ${updatedDriver._id}`);
           console.log(`   Ride ID: ${ride._id}`);
           console.log(`   Parking Queue ID: ${updateAvailability.parkingQueueId || 'N/A'}`);
-          console.log(`   Calling handleDriverRideResponse...`);
           
+          // Pre-check: Verify driver status in queue before calling handleDriverRideResponse
+          if (updateAvailability.parkingQueueId) {
+            console.log(`\n🔍 [ride:accept_ride] Pre-checking driver status in queue...`);
+            try {
+              const ParkingQueue = (await import('../models/ParkingQueue.js')).default;
+              const queue = await ParkingQueue.findById(updateAvailability.parkingQueueId).lean();
+              
+              if (queue) {
+                const driverInQueue = queue.driverQueue?.find(
+                  d => d.driverId?.toString() === updatedDriver._id.toString()
+                );
+                
+                if (driverInQueue) {
+                  console.log(`   Driver status in queue: ${driverInQueue.status}`);
+                  console.log(`   Current Offer ID: ${driverInQueue.currentOfferId || 'N/A'}`);
+                  
+                  // Check if ride is in active offers
+                  const activeOffer = queue.activeOffers?.find(
+                    offer => offer.rideId?.toString() === ride._id.toString()
+                  );
+                  
+                  if (activeOffer) {
+                    const isExpired = new Date(activeOffer.expiresAt) < new Date();
+                    console.log(`   Active offer found: ${!isExpired ? 'Valid ✅' : 'Expired ⚠️'}`);
+                    
+                    if (isExpired) {
+                      console.log(`   ⚠️ Offer expired at: ${activeOffer.expiresAt}`);
+                      // Don't block - let acceptRideOffer handle it
+                    }
+                  } else {
+                    console.log(`   ⚠️ Ride not found in active offers`);
+                  }
+                  
+                  // If driver status is "waiting" but ride is in active offers, update status
+                  if (driverInQueue.status === 'waiting' && activeOffer && !isExpired) {
+                    console.log(`   🔄 Updating driver status from "waiting" to "offered"...`);
+                    await ParkingQueue.findByIdAndUpdate(
+                      updateAvailability.parkingQueueId,
+                      {
+                        $set: {
+                          'driverQueue.$[elem].status': 'offered',
+                          'driverQueue.$[elem].currentOfferId': ride._id,
+                        },
+                      },
+                      {
+                        arrayFilters: [{ 'elem.driverId': updatedDriver._id }],
+                      }
+                    );
+                    console.log(`   ✅ Driver status updated to "offered"`);
+                  }
+                } else {
+                  console.log(`   ⚠️ Driver not found in queue`);
+                }
+              }
+            } catch (preCheckError) {
+              console.error(`   ⚠️ Pre-check error (continuing anyway):`, preCheckError.message);
+            }
+          }
+          
+          console.log(`   Calling handleDriverRideResponse...`);
           try {
             await handleDriverRideResponse(
               updatedDriver._id,

@@ -2888,12 +2888,24 @@ export const offerRideToNextDriver = async (
     );
     if (!activeOffer || activeOffer.expiresAt < new Date()) {
       console.log(`❌ Ride ${rideId} offer expired or not found`);
-      // Remove expired offer
+      
+      // Clean up: Remove expired offer and reset any drivers with this offer
       await ParkingQueue.findByIdAndUpdate(
         parkingQueueId,
-        { $pull: { activeOffers: { rideId: rideId } } },
-        { session: useSession },
+        {
+          $pull: { activeOffers: { rideId: rideId } },
+          $set: {
+            'driverQueue.$[elem].status': 'waiting',
+            'driverQueue.$[elem].currentOfferId': null,
+          },
+        },
+        {
+          arrayFilters: [{ 'elem.currentOfferId': rideId }],
+          session: useSession,
+        },
       );
+      
+      console.log(`🧹 Cleaned up expired offer and reset driver statuses`);
       if (!session) await useSession.commitTransaction();
       return null;
     }
@@ -3140,9 +3152,10 @@ const acceptRideOffer = async (driverId, rideId, parkingQueueId, session) => {
   
   // Remove driver from queue entirely (since they got a ride)
   console.log(`\n🔍 [acceptRideOffer] Searching for parking queue...`);
-  console.log(`   Query: { _id: ${parkingQueueId}, driverQueue.driverId: ${driverId}, driverQueue.status: 'offered', driverQueue.currentOfferId: ${rideId} }`);
+  console.log(`   Query: { _id: ${parkingQueueId}, driverQueue.driverId: ${driverId} }`);
   
-  const parkingQueue = await ParkingQueue.findOne({
+  // First, try to find with strict query (status: 'offered')
+  let parkingQueue = await ParkingQueue.findOne({
     _id: parkingQueueId,
     'driverQueue.driverId': driverId,
     'driverQueue.status': 'offered',
@@ -3160,13 +3173,60 @@ const acceptRideOffer = async (driverId, rideId, parkingQueueId, session) => {
     .populate('airportId', 'name')
     .session(session);
 
+  // If strict query fails, try flexible query (any status, check active offers)
+  if (!parkingQueue) {
+    console.log(`⚠️ [acceptRideOffer] Strict query failed, trying flexible query...`);
+    console.log(`   Checking if driver is in queue with any status...`);
+    
+    parkingQueue = await ParkingQueue.findOne({
+      _id: parkingQueueId,
+      'driverQueue.driverId': driverId,
+    })
+      .populate('parkingLotId', 'name boundaries')
+      .populate('airportId', 'name')
+      .session(session);
+    
+    if (parkingQueue) {
+      // Check if ride is in active offers
+      const activeOffer = parkingQueue.activeOffers?.find(
+        offer => offer.rideId?.toString() === rideId.toString()
+      );
+      
+      if (!activeOffer) {
+        console.log(`❌ [acceptRideOffer] Ride ${rideId} not found in active offers`);
+        console.log(`   Active offers: ${parkingQueue.activeOffers?.map(o => o.rideId) || []}`);
+        
+        // Check if offer expired
+        const expiredOffer = parkingQueue.activeOffers?.find(
+          offer => offer.rideId?.toString() === rideId.toString() && 
+                   new Date(offer.expiresAt) < new Date()
+        );
+        
+        if (expiredOffer) {
+          console.log(`⚠️ [acceptRideOffer] Offer expired at: ${expiredOffer.expiresAt}`);
+          throw new Error('Ride offer has expired. Please wait for a new offer.');
+        }
+        
+        throw new Error('Ride offer not found in active offers');
+      }
+      
+      // Check if offer is expired
+      if (new Date(activeOffer.expiresAt) < new Date()) {
+        console.log(`❌ [acceptRideOffer] Offer expired at: ${activeOffer.expiresAt}`);
+        throw new Error('Ride offer has expired. Please wait for a new offer.');
+      }
+      
+      console.log(`✅ [acceptRideOffer] Driver found in queue (flexible query)`);
+      console.log(`   Driver status: ${parkingQueue.driverQueue?.find(d => d.driverId?.toString() === driverId.toString())?.status || 'N/A'}`);
+      console.log(`   Active offer found and not expired`);
+    }
+  }
+
   if (!parkingQueue) {
     console.log(`❌ [acceptRideOffer] ERROR: Parking queue not found!`);
     console.log(`   This means:`);
     console.log(`   - Queue ID might be wrong: ${parkingQueueId}`);
-    console.log(`   - Driver might not be in queue with status 'offered'`);
-    console.log(`   - Driver's currentOfferId might not match ride ID`);
-    console.log(`   - Driver might have already responded to this offer`);
+    console.log(`   - Driver might not be in queue at all`);
     
     // Debug: Check what's actually in the queue
     const debugQueue = await ParkingQueue.findById(parkingQueueId).session(session);
@@ -3189,7 +3249,7 @@ const acceptRideOffer = async (driverId, rideId, parkingQueueId, session) => {
       console.log(`   ❌ Queue with ID ${parkingQueueId} does not exist`);
     }
     
-    throw new Error('Ride offer not found or already responded');
+    throw new Error('Driver not found in parking queue');
   }
   
   console.log(`✅ [acceptRideOffer] Parking queue found:`);
