@@ -717,6 +717,8 @@ export const isDriverInParkingLot = async (coords, radiusMeters = 0) => {
     throw new Error(`Invalid coordinates provided: ${JSON.stringify(coords)}`);
   }
 
+  console.log(`🔍 [isDriverInParkingLot] Checking coords: [${coords[0]}, ${coords[1]}]`);
+
   // First check if driver is within parking lot boundaries
   const zone = await Zone.findOne({
     boundaries: {
@@ -732,13 +734,33 @@ export const isDriverInParkingLot = async (coords, radiusMeters = 0) => {
   }).lean();
 
   if (zone) {
+    console.log(`✅ [isDriverInParkingLot] Found INSIDE boundary: ${zone.name} (${zone._id})`);
     return zone;
+  } else {
+    console.log(`❌ [isDriverInParkingLot] Not inside any 'airport-parking' boundary.`);
+
+    // DEBUG: Check if inside ANY zone to see if type is wrong
+    const anyZone = await Zone.findOne({
+      boundaries: {
+        $geoIntersects: {
+          $geometry: {
+            type: 'Point',
+            coordinates: coords,
+          },
+        },
+      },
+      isActive: true,
+    }).lean();
+    if (anyZone) {
+      console.log(`⚠️ [isDriverInParkingLot] Found inside zone '${anyZone.name}' but type is '${anyZone.type}' (expected 'airport-parking').`);
+    }
   }
 
   // If not inside boundaries and radius is specified, check if within radius
   if (radiusMeters > 0) {
     const radiusKm = radiusMeters / 1000; // Convert meters to km
-    
+    console.log(`🔍 [isDriverInParkingLot] Checking radius: ${radiusMeters}m...`);
+
     // Find nearest parking lot within radius
     const nearestParkingLot = await Zone.aggregate([
       {
@@ -766,6 +788,7 @@ export const isDriverInParkingLot = async (coords, radiusMeters = 0) => {
 
     if (nearestParkingLot && nearestParkingLot.length > 0) {
       const parkingLot = nearestParkingLot[0];
+      console.log(`✅ [isDriverInParkingLot] Found WITHIN RADIUS: ${parkingLot.name} (${parkingLot.distance.toFixed(2)}m)`);
       // Convert to same format as geoIntersects result
       return {
         _id: parkingLot._id,
@@ -776,6 +799,8 @@ export const isDriverInParkingLot = async (coords, radiusMeters = 0) => {
         distance: parkingLot.distance, // Distance in meters
         withinRadius: true, // Flag to indicate it's within radius, not inside boundaries
       };
+    } else {
+      console.log(`❌ [isDriverInParkingLot] No 'airport-parking' found within ${radiusMeters}m.`);
     }
   }
 
@@ -975,7 +1000,7 @@ export const findNearestParkingForPickup = async (userCoords) => {
 
   // First, find which airport the driver is in (if any)
   let currentAirport = null;
-  
+
   // Check Zone collection
   currentAirport = await Zone.findOne({
     boundaries: {
@@ -1021,7 +1046,7 @@ export const findNearestParkingForPickup = async (userCoords) => {
   if (currentAirport) {
     console.log(`📍 Driver is in airport: ${currentAirport.name || 'N/A'}`);
     console.log(`📍 Airport ID: ${currentAirport._id}`);
-    
+
     // Find parking queue for this airport
     const parkingQueue = await ParkingQueue.findOne({
       airportId: currentAirport._id,
@@ -1057,7 +1082,7 @@ export const findNearestParkingForPickup = async (userCoords) => {
     if (parkingQueue && parkingQueue.parkingLotId) {
       const parkingLotZone = parkingQueue.parkingLotId;
       console.log(`✅ Found associated parking lot: ${parkingLotZone.name || 'N/A'}`);
-      
+
       // Calculate center point
       const centerPoint = calculatePolygonCentroid(
         parkingLotZone.boundaries.coordinates,
@@ -1090,7 +1115,7 @@ export const findNearestParkingForPickup = async (userCoords) => {
 
   // If no associated parking lot found, find nearest parking lot
   console.log(`📍 No associated parking lot found, searching for nearest parking lot...`);
-  
+
   // Use aggregation to get the distance calculated by MongoDB
   const result = await Zone.aggregate([
     {
@@ -1168,11 +1193,11 @@ export const findDriverParkingQueue = async (parkingLotId) => {
     if (!queue) {
       console.warn(`⚠️ Parking queue not found for parking lot: ${parkingLotId}`);
       console.log(`🔄 Attempting to auto-create parking queue...`);
-      
+
       try {
         // Get the parking lot zone to find its coordinates
         const parkingLotZone = await Zone.findById(parkingLotId).lean();
-        
+
         if (!parkingLotZone) {
           console.error(`❌ Parking lot zone not found: ${parkingLotId}`);
           return null;
@@ -1211,7 +1236,7 @@ export const findDriverParkingQueue = async (parkingLotId) => {
         return null;
       }
     }
-    
+
     return queue;
   } catch (error) {
     console.error(`❌ Error finding parking queue for parking lot ${parkingLotId}:`, error);
@@ -1222,9 +1247,9 @@ export const findDriverParkingQueue = async (parkingLotId) => {
 export const addDriverToQueue = async (parkingLotId, driverId, retryCount = 0) => {
   const MAX_RETRIES = 3;
   const RETRY_DELAYS = [100, 200, 400]; // Exponential backoff in milliseconds
-  
+
   const session = await mongoose.startSession();
-  
+
   try {
     session.startTransaction({
       maxTimeMS: 5000, // 5 second timeout for transaction
@@ -1284,13 +1309,13 @@ export const addDriverToQueue = async (parkingLotId, driverId, retryCount = 0) =
           },
         },
       },
-      { 
-        new: true, 
+      {
+        new: true,
         session,
         // writeConcern removed - not allowed within transactions
       },
     );
-    
+
     if (!updated) {
       await session.abortTransaction();
       // Check if driver was added by another concurrent operation
@@ -1298,7 +1323,7 @@ export const addDriverToQueue = async (parkingLotId, driverId, retryCount = 0) =
         parkingLotId,
         isActive: true,
       });
-      
+
       if (currentQueue && currentQueue.driverQueue.find((driver) =>
         driver.driverId.equals(driverId),
       )) {
@@ -1312,7 +1337,7 @@ export const addDriverToQueue = async (parkingLotId, driverId, retryCount = 0) =
           ) + 1,
         };
       }
-      
+
       throw new Error(
         `Failed to add driver to queue - possible race condition.`,
       );
@@ -1329,26 +1354,26 @@ export const addDriverToQueue = async (parkingLotId, driverId, retryCount = 0) =
     };
   } catch (err) {
     await session.abortTransaction();
-    
+
     // Check if it's a write conflict error that can be retried
-    const isWriteConflict = 
+    const isWriteConflict =
       err.message?.includes('Write conflict') ||
       err.message?.includes('write conflict') ||
       err.code === 11000 || // Duplicate key error
       err.codeName === 'WriteConflict';
-    
+
     // Retry logic for write conflicts
     if (isWriteConflict && retryCount < MAX_RETRIES) {
       await session.endSession();
       const delay = RETRY_DELAYS[retryCount] || 400;
-      
+
       // Wait before retrying
       await new Promise(resolve => setTimeout(resolve, delay));
-      
+
       // Retry with incremented count
       return addDriverToQueue(parkingLotId, driverId, retryCount + 1);
     }
-    
+
     // If max retries reached or non-retryable error, throw
     throw new Error(`Failed to add driver to queue: ${err.message}`);
   } finally {
@@ -1496,12 +1521,12 @@ export const removeDriverFromQueue = async (
               timeInQueue: Date.now() - new Date(driver.joinedAt).getTime(),
               userInfo: driver.driverId.userId
                 ? {
-                    userId: driver.driverId.userId._id,
-                    name: driver.driverId.userId.name,
-                    email: driver.driverId.userId.email,
-                    phoneNumber: driver.driverId.userId.phoneNumber,
-                    profileImg: driver.driverId.userId.profileImg,
-                  }
+                  userId: driver.driverId.userId._id,
+                  name: driver.driverId.userId.name,
+                  email: driver.driverId.userId.email,
+                  phoneNumber: driver.driverId.userId.phoneNumber,
+                  profileImg: driver.driverId.userId.profileImg,
+                }
                 : null,
             },
             allDrivers: waitingDrivers.map((queueDriver, index) => {
@@ -1519,12 +1544,12 @@ export const removeDriverFromQueue = async (
                 isCurrentDriver: isCurrentDriver,
                 userInfo: queueDriver.driverId.userId
                   ? {
-                      userId: queueDriver.driverId.userId._id,
-                      name: queueDriver.driverId.userId.name,
-                      email: queueDriver.driverId.userId.email,
-                      phoneNumber: queueDriver.driverId.userId.phoneNumber,
-                      profileImg: queueDriver.driverId.userId.profileImg,
-                    }
+                    userId: queueDriver.driverId.userId._id,
+                    name: queueDriver.driverId.userId.name,
+                    email: queueDriver.driverId.userId.email,
+                    phoneNumber: queueDriver.driverId.userId.phoneNumber,
+                    profileImg: queueDriver.driverId.userId.profileImg,
+                  }
                   : null,
               };
             }),
@@ -1553,9 +1578,9 @@ export const removeDriverFromQueue = async (
                   Date.now() - new Date(aheadDriver.joinedAt).getTime(),
                 userInfo: aheadDriver.driverId.userId
                   ? {
-                      name: aheadDriver.driverId.userId.name,
-                      profileImg: aheadDriver.driverId.userId.profileImg,
-                    }
+                    name: aheadDriver.driverId.userId.name,
+                    profileImg: aheadDriver.driverId.userId.profileImg,
+                  }
                   : null,
               })),
             },
@@ -1688,7 +1713,7 @@ export const handleDriverResponse = async (
 
     const ride = await RideModel.findById(rideId);
     // For scheduled rides, also accept SCHEDULED status (ride becomes active when driver is assigned)
-    const isActiveStatus = ride?.status === 'REQUESTED' || 
+    const isActiveStatus = ride?.status === 'REQUESTED' ||
       (ride?.isScheduledRide && ride?.status === 'SCHEDULED');
     if (!ride || !isActiveStatus) return; // Already assigned or not in active status
 
@@ -1854,7 +1879,7 @@ export const deductRidenCommission = async (
   if (!ride) {
     return false;
   }
-  
+
   // Check if commission already exists to prevent duplicate key errors
   const existingCommission = await AdminCommission.findOne({ rideId });
   if (existingCommission) {
@@ -1866,10 +1891,10 @@ export const deductRidenCommission = async (
       if (ride.driverDistance > 5) {
         driverDistanceCommission = 5 - Math.ceil(ride.driverDistance);
       }
-      
+
       // Recalculate commission based on actualFare
       const updatedCommissionAmount = Math.floor((actualFare / 100) * commission.percentage) - driverDistanceCommission;
-      
+
       // Update the commission record with actualFare
       await AdminCommission.findOneAndUpdate(
         { rideId },
@@ -1880,14 +1905,14 @@ export const deductRidenCommission = async (
         },
         { new: true }
       );
-      
+
       return updatedCommissionAmount + driverDistanceCommission;
     }
-    
+
     // Return the existing commission amount if already updated
     return existingCommission.commissionAmount + (existingCommission.driverDistanceCommission || 0);
   }
-  
+
   let driverDistanceCommission = 0;
   if (ride.driverDistance > 5) {
     driverDistanceCommission = 5 - Math.ceil(ride.driverDistance);
@@ -2064,12 +2089,12 @@ export const findParkingQueue = async (driverId, queueId) => {
         isCurrentDriver: isCurrentDriver,
         userInfo: driver.driverId.userId
           ? {
-              userId: driver.driverId.userId._id,
-              name: driver.driverId.userId.name,
-              email: driver.driverId.userId.email,
-              phoneNumber: driver.driverId.userId.phoneNumber,
-              profileImg: driver.driverId.userId.profileImg,
-            }
+            userId: driver.driverId.userId._id,
+            name: driver.driverId.userId.name,
+            email: driver.driverId.userId.email,
+            phoneNumber: driver.driverId.userId.phoneNumber,
+            profileImg: driver.driverId.userId.profileImg,
+          }
           : null,
       };
     });
@@ -2098,12 +2123,12 @@ export const findParkingQueue = async (driverId, queueId) => {
             Date.now() - new Date(currentDriverInQueue.joinedAt).getTime(),
           userInfo: currentDriverInQueue.driverId.userId
             ? {
-                userId: currentDriverInQueue.driverId.userId._id,
-                name: currentDriverInQueue.driverId.userId.name,
-                email: currentDriverInQueue.driverId.userId.email,
-                phoneNumber: currentDriverInQueue.driverId.userId.phoneNumber,
-                profileImg: currentDriverInQueue.driverId.userId.profileImg,
-              }
+              userId: currentDriverInQueue.driverId.userId._id,
+              name: currentDriverInQueue.driverId.userId.name,
+              email: currentDriverInQueue.driverId.userId.email,
+              phoneNumber: currentDriverInQueue.driverId.userId.phoneNumber,
+              profileImg: currentDriverInQueue.driverId.userId.profileImg,
+            }
             : null,
         },
         allDrivers: allDriversInQueue,
@@ -2124,9 +2149,9 @@ export const findParkingQueue = async (driverId, queueId) => {
             timeInQueue: Date.now() - new Date(driver.joinedAt).getTime(),
             userInfo: driver.driverId.userId
               ? {
-                  name: driver.driverId.userId.name,
-                  profileImg: driver.driverId.userId.profileImg,
-                }
+                name: driver.driverId.userId.name,
+                profileImg: driver.driverId.userId.profileImg,
+              }
               : null,
           })),
         },
