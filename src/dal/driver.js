@@ -2833,33 +2833,54 @@ export const offerRideToNextDriver = async (
   rideId,
   session = null,
 ) => {
+  console.log('\n' + '='.repeat(80));
+  console.log('🎯 [offerRideToNextDriver] Starting');
+  console.log('='.repeat(80));
+  console.log(`⏰ Timestamp: ${new Date().toISOString()}`);
+  console.log(`🅿️  Parking Queue ID: ${parkingQueueId}`);
+  console.log(`🆔 Ride ID: ${rideId}`);
+  
   const useSession = session || (await mongoose.startSession());
   if (!session) useSession.startTransaction();
 
-  console.log('Offering Ride to parking');
-
   try {
     // Get the parking queue with populated driver queue
+    console.log(`\n🔍 [offerRideToNextDriver] Fetching parking queue...`);
     const parkingQueue = await ParkingQueue.findById(parkingQueueId)
       .populate('driverQueue.driverId')
       .session(useSession);
 
     if (!parkingQueue || !parkingQueue.isActive) {
+      console.log(`❌ [offerRideToNextDriver] ERROR: Parking queue not found or inactive`);
       throw new Error('Parking queue not found or inactive');
     }
+
+    console.log(`✅ [offerRideToNextDriver] Parking queue found:`);
+    console.log(`   Queue ID: ${parkingQueue._id}`);
+    console.log(`   Is Active: ${parkingQueue.isActive}`);
+    console.log(`   Total drivers in queue: ${parkingQueue.driverQueue?.length || 0}`);
 
     // Get the first waiting driver in queue
     const waitingDrivers = parkingQueue.driverQueue
       .filter((driver) => driver.status === 'waiting')
       .sort((a, b) => a.joinedAt - b.joinedAt);
 
+    console.log(`\n👥 [offerRideToNextDriver] Waiting drivers: ${waitingDrivers.length}`);
+    waitingDrivers.forEach((d, i) => {
+      console.log(`   ${i + 1}. Driver ID: ${d.driverId?._id || 'N/A'}, Joined: ${d.joinedAt}`);
+    });
+
     if (waitingDrivers.length === 0) {
-      console.log(`👥 No waiting drivers in parking queue ${parkingQueueId}`);
+      console.log(`❌ [offerRideToNextDriver] No waiting drivers in queue`);
       if (!session) await useSession.commitTransaction();
       return null;
     }
 
     const nextDriver = waitingDrivers[0];
+    console.log(`\n✅ [offerRideToNextDriver] Selected next driver:`);
+    console.log(`   Driver ID: ${nextDriver.driverId?._id}`);
+    console.log(`   User ID: ${nextDriver.driverId?.userId || 'N/A'}`);
+    console.log(`   Joined At: ${nextDriver.joinedAt}`);
 
     // Check if this ride is still active and not expired
     const activeOffer = parkingQueue.activeOffers.find(
@@ -2878,6 +2899,9 @@ export const offerRideToNextDriver = async (
     }
 
     // Update driver status to "offered" and set current offer
+    console.log(`\n🔄 [offerRideToNextDriver] Updating driver status to 'offered'...`);
+    console.log(`   Setting currentOfferId: ${rideId}`);
+    
     const updatedQueue = await ParkingQueue.findOneAndUpdate(
       {
         _id: parkingQueueId,
@@ -2894,10 +2918,14 @@ export const offerRideToNextDriver = async (
     );
 
     if (!updatedQueue) {
+      console.log(`❌ [offerRideToNextDriver] ERROR: Failed to update driver status`);
+      console.log(`   Possible race condition - driver status might have changed`);
       throw new Error(
         'Failed to update driver status - possible race condition',
       );
     }
+    
+    console.log(`✅ [offerRideToNextDriver] Driver status updated successfully`);
 
     // Get full ride details for emission
     const ride = await RideModel.findById(rideId)
@@ -2913,6 +2941,12 @@ export const offerRideToNextDriver = async (
     }
 
     // Emit ride offer to the driver via socket
+    console.log(`\n📡 [offerRideToNextDriver] Emitting ride offer to driver...`);
+    console.log(`   Event: ride:new_airport_ride_request`);
+    console.log(`   User ID: ${nextDriver.driverId?.userId}`);
+    console.log(`   Ride ID: ${rideId}`);
+    console.log(`   Timeout: 10000ms (10 seconds)`);
+    
     emitToUser(nextDriver.driverId?.userId, 'ride:new_airport_ride_request', {
       success: true,
       objectType: 'new-airport-ride-request',
@@ -2923,9 +2957,9 @@ export const offerRideToNextDriver = async (
       message: 'New airport ride available',
     });
 
-    console.log(
-      `🎯 Offered ride ${rideId} to driver ${nextDriver.driverId?._id} (top of queue)`,
-    );
+    console.log(`✅ [offerRideToNextDriver] Ride offer emitted successfully`);
+    console.log(`   Ride ${rideId} offered to driver ${nextDriver.driverId?._id} (top of queue)`);
+    console.log(`   Waiting for driver response (10 seconds timeout)...`);
 
     // Set timeout to move driver to end and offer to next driver if no response
     setTimeout(async () => {
@@ -3019,19 +3053,35 @@ export const handleDriverRideResponse = async (
   accepted,
   parkingQueueId,
 ) => {
+  console.log('\n' + '='.repeat(80));
+  console.log('🔄 [handleDriverRideResponse] Starting');
+  console.log('='.repeat(80));
+  console.log(`⏰ Timestamp: ${new Date().toISOString()}`);
+  console.log(`👤 Driver ID: ${driverId}`);
+  console.log(`🆔 Ride ID: ${rideId}`);
+  console.log(`✅ Accepted: ${accepted}`);
+  console.log(`🅿️  Parking Queue ID: ${parkingQueueId || 'N/A'}`);
+  
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
     if (accepted) {
+      console.log(`\n📋 [handleDriverRideResponse] Driver ACCEPTED ride`);
+      console.log(`   Calling acceptRideOffer...`);
       // Driver accepted the ride
       await acceptRideOffer(driverId, rideId, parkingQueueId, session);
+      console.log(`✅ [handleDriverRideResponse] acceptRideOffer completed`);
     } else {
+      console.log(`\n📋 [handleDriverRideResponse] Driver DECLINED ride`);
+      console.log(`   Calling declineRideOffer...`);
       // Driver declined the ride - MOVE TO END OF QUEUE
       await declineRideOffer(driverId, rideId, parkingQueueId, session);
+      console.log(`✅ [handleDriverRideResponse] declineRideOffer completed`);
     }
 
     await session.commitTransaction();
+    console.log(`✅ [handleDriverRideResponse] Transaction committed successfully`);
 
     return {
       success: true,
@@ -3039,10 +3089,14 @@ export const handleDriverRideResponse = async (
     };
   } catch (error) {
     await session.abortTransaction();
-    console.error('Error handling driver ride response:', error);
+    console.error(`\n❌ [handleDriverRideResponse] ERROR:`);
+    console.error(`   Message: ${error.message}`);
+    console.error(`   Stack: ${error.stack}`);
     throw error;
   } finally {
     session.endSession();
+    console.log(`🔚 [handleDriverRideResponse] Session ended`);
+    console.log('='.repeat(80) + '\n');
   }
 };
 
@@ -3079,7 +3133,15 @@ export const handleDriverRideResponse = async (
 // };
 
 const acceptRideOffer = async (driverId, rideId, parkingQueueId, session) => {
+  console.log(`\n📋 [acceptRideOffer] Starting`);
+  console.log(`   Driver ID: ${driverId}`);
+  console.log(`   Ride ID: ${rideId}`);
+  console.log(`   Parking Queue ID: ${parkingQueueId}`);
+  
   // Remove driver from queue entirely (since they got a ride)
+  console.log(`\n🔍 [acceptRideOffer] Searching for parking queue...`);
+  console.log(`   Query: { _id: ${parkingQueueId}, driverQueue.driverId: ${driverId}, driverQueue.status: 'offered', driverQueue.currentOfferId: ${rideId} }`);
+  
   const parkingQueue = await ParkingQueue.findOne({
     _id: parkingQueueId,
     'driverQueue.driverId': driverId,
@@ -3099,9 +3161,48 @@ const acceptRideOffer = async (driverId, rideId, parkingQueueId, session) => {
     .session(session);
 
   if (!parkingQueue) {
+    console.log(`❌ [acceptRideOffer] ERROR: Parking queue not found!`);
+    console.log(`   This means:`);
+    console.log(`   - Queue ID might be wrong: ${parkingQueueId}`);
+    console.log(`   - Driver might not be in queue with status 'offered'`);
+    console.log(`   - Driver's currentOfferId might not match ride ID`);
+    console.log(`   - Driver might have already responded to this offer`);
+    
+    // Debug: Check what's actually in the queue
+    const debugQueue = await ParkingQueue.findById(parkingQueueId).session(session);
+    if (debugQueue) {
+      console.log(`\n🔍 [acceptRideOffer] DEBUG: Queue exists, checking driver status:`);
+      console.log(`   Queue ID: ${debugQueue._id}`);
+      console.log(`   Total drivers in queue: ${debugQueue.driverQueue?.length || 0}`);
+      const driverInQueue = debugQueue.driverQueue?.find(
+        d => d.driverId?.toString() === driverId.toString()
+      );
+      if (driverInQueue) {
+        console.log(`   ✅ Driver found in queue:`);
+        console.log(`      Status: ${driverInQueue.status}`);
+        console.log(`      Current Offer ID: ${driverInQueue.currentOfferId || 'N/A'}`);
+        console.log(`      Expected Ride ID: ${rideId}`);
+      } else {
+        console.log(`   ❌ Driver NOT found in queue at all`);
+      }
+    } else {
+      console.log(`   ❌ Queue with ID ${parkingQueueId} does not exist`);
+    }
+    
     throw new Error('Ride offer not found or already responded');
   }
+  
+  console.log(`✅ [acceptRideOffer] Parking queue found:`);
+  console.log(`   Queue ID: ${parkingQueue._id}`);
+  console.log(`   Parking Lot: ${parkingQueue.parkingLotId?.name || 'N/A'}`);
+  console.log(`   Airport: ${parkingQueue.airportId?.name || 'N/A'}`);
+  console.log(`   Total drivers: ${parkingQueue.driverQueue?.length || 0}`);
+  console.log(`   Active offers: ${parkingQueue.activeOffers?.length || 0}`);
 
+  console.log(`\n🔄 [acceptRideOffer] Updating parking queue...`);
+  console.log(`   Removing driver ${driverId} from queue`);
+  console.log(`   Removing ride ${rideId} from active offers`);
+  
   const updatedQueue = await ParkingQueue.findByIdAndUpdate(
     parkingQueueId,
     {
@@ -3124,10 +3225,13 @@ const acceptRideOffer = async (driverId, rideId, parkingQueueId, session) => {
     .populate('airportId', 'name');
 
   if (!updatedQueue) {
+    console.log(`❌ [acceptRideOffer] ERROR: Failed to update parking queue`);
     throw new Error('Failed to update parking queue');
   }
 
-  console.log('Updated Queue: ', updatedQueue);
+  console.log(`✅ [acceptRideOffer] Queue updated successfully:`);
+  console.log(`   Remaining drivers: ${updatedQueue.driverQueue?.length || 0}`);
+  console.log(`   Remaining active offers: ${updatedQueue.activeOffers?.length || 0}`);
 
   // Emit updated queue data to all remaining drivers (same as removeDriverFromQueue)
   const waitingDrivers = updatedQueue.driverQueue

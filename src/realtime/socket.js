@@ -1531,7 +1531,17 @@ export const initSocket = (server) => {
 
     socket.on('ride:accept_ride', async ({ rideId }) => {
       const objectType = 'accept-ride';
+      
+      console.log('\n' + '='.repeat(80));
+      console.log('🚗 [ride:accept_ride] Event Received');
+      console.log('='.repeat(80));
+      console.log(`⏰ Timestamp: ${new Date().toISOString()}`);
+      console.log(`👤 User ID: ${userId || 'N/A'}`);
+      console.log(`🆔 Ride ID: ${rideId || 'N/A'}`);
+      console.log(`🔌 Socket ID: ${socket.id}`);
+      
       if (!userId) {
+        console.log('❌ [ride:accept_ride] ERROR: Authentication required');
         return socket.emit('error', {
           success: false,
           objectType,
@@ -1647,7 +1657,16 @@ export const initSocket = (server) => {
         }
 
         const ride = await findRideById(rideId);
+        console.log(`\n📋 [ride:accept_ride] Ride Details:`);
+        console.log(`   Ride ID: ${ride?._id || 'NOT FOUND'}`);
+        console.log(`   Status: ${ride?.status || 'N/A'}`);
+        console.log(`   Is Airport: ${ride?.isAirport || false}`);
+        console.log(`   Car Type: ${ride?.carType || 'N/A'}`);
+        console.log(`   Already has Driver: ${ride?.driverId ? 'Yes' : 'No'}`);
+        console.log(`   Pickup Location: ${ride?.pickupLocation?.address || 'N/A'}`);
+        
         if (!ride) {
+          console.log('❌ [ride:accept_ride] ERROR: Ride not found');
           return socket.emit('error', {
             success: false,
             objectType,
@@ -1655,6 +1674,7 @@ export const initSocket = (server) => {
             message: 'Ride not found',
           });
         } else if (ride.driverId) {
+          console.log(`❌ [ride:accept_ride] ERROR: Ride already assigned to driver: ${ride.driverId}`);
           return socket.emit('error', {
             success: false,
             objectType,
@@ -1662,6 +1682,7 @@ export const initSocket = (server) => {
             message: 'Ride already assigned to another driver',
           });
         } else if (ride.status !== 'REQUESTED') {
+          console.log(`❌ [ride:accept_ride] ERROR: Ride status is "${ride.status}", expected "REQUESTED"`);
           return socket.emit('error', {
             success: false,
             objectType,
@@ -1669,6 +1690,8 @@ export const initSocket = (server) => {
             message: 'This ride is not available',
           });
         }
+        
+        console.log(`✅ [ride:accept_ride] Ride validation passed`);
 
         const availability = await findDriverLocation(driver._id);
         if (!availability) {
@@ -1809,12 +1832,28 @@ export const initSocket = (server) => {
         }
 
         if (ride.isAirport) {
-          await handleDriverRideResponse(
-            updatedDriver._id,
-            ride._id,
-            true,
-            updateAvailability.parkingQueueId,
-          );
+          console.log(`\n✈️ [ride:accept_ride] Airport Ride Detected`);
+          console.log(`   Driver ID: ${updatedDriver._id}`);
+          console.log(`   Ride ID: ${ride._id}`);
+          console.log(`   Parking Queue ID: ${updateAvailability.parkingQueueId || 'N/A'}`);
+          console.log(`   Calling handleDriverRideResponse...`);
+          
+          try {
+            await handleDriverRideResponse(
+              updatedDriver._id,
+              ride._id,
+              true,
+              updateAvailability.parkingQueueId,
+            );
+            console.log(`✅ [ride:accept_ride] handleDriverRideResponse completed successfully`);
+          } catch (airportError) {
+            console.error(`❌ [ride:accept_ride] ERROR in handleDriverRideResponse:`, airportError);
+            console.error(`   Error Message: ${airportError.message}`);
+            console.error(`   Error Stack: ${airportError.stack}`);
+            // Don't throw - let the ride acceptance continue
+          }
+        } else {
+          console.log(`ℹ️ [ride:accept_ride] Regular ride (not airport)`);
         }
 
         const [newDriver, newPassenger] = await Promise.all([
