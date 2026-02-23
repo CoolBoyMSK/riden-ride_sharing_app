@@ -1,4 +1,4 @@
-# Riden - Ride Sharing Backend
+# Riden - Ride Sharing App
 
 A production-grade ride-sharing platform backend built with Node.js, featuring real-time communication, payment processing, and comprehensive ride management.
 
